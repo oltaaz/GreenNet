@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: greennet
+Version: 0.1.0
+Summary: GreenNet: RL-based energy- and carbon-aware routing with lightweight NetworkX simulation
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: gymnasium>=0.29
+Requires-Dist: stable-baselines3>=2.0
+Requires-Dist: networkx>=3.0
+Requires-Dist: numpy>=1.24
+Requires-Dist: pandas>=2.0
+Requires-Dist: plotly>=5.0
+Requires-Dist: streamlit>=1.30
