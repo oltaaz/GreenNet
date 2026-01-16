@@ -1,18 +1,28 @@
 """Core network simulator with simple capacity and utilization tracking."""
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import random
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+
+# Type-checking-only import so annotations like "nx.Graph" don't depend on a runtime variable.
+if TYPE_CHECKING:  # pragma: no cover
+    import networkx as nx
 
 try:
-    import networkx as nx
+    import networkx as nx_runtime
 except ImportError as exc:  # pragma: no cover - optional dependency
-    nx = None
+    nx_runtime = None
     _nx_import_error = exc
 else:
     _nx_import_error = None
 
-from greennet.routing import RouteSplit
+from greennet.routing import RouteSplit, ShortestPathPolicy
+from greennet.topology import TopologyConfig, build_random_topology
 
 EdgeKey = Tuple[int, int]
 
@@ -61,10 +71,11 @@ class Simulator:
         default_latency_ms: float = 10.0,
         congestion_alpha: float = 1.0,
         congestion_eps: float = 1e-6,
+        congestion_mult_cap: float = 1000.0,
         power_model_watts: Optional[Callable[["nx.Graph"], float]] = None,
         carbon_intensity_g_per_kwh: Optional[Callable[[float], float]] = None,
     ) -> None:
-        if nx is None:
+        if nx_runtime is None:
             raise ImportError("networkx is required for Simulator") from _nx_import_error
         self.graph = graph
         self.routing_policy = routing_policy
@@ -73,6 +84,7 @@ class Simulator:
         self.default_latency_ms = float(default_latency_ms)
         self.congestion_alpha = float(congestion_alpha)
         self.congestion_eps = float(congestion_eps)
+        self.congestion_mult_cap = float(congestion_mult_cap)
         self.power_model_watts = power_model_watts
         self.carbon_intensity_g_per_kwh = carbon_intensity_g_per_kwh
         self.t = 0.0
@@ -182,7 +194,8 @@ class Simulator:
             def edge_delay_multiplier(util: float) -> float:
                 # multiplier = 1 + alpha * util / (1 - util + eps)
                 u = min(max(util, 0.0), 0.999999)
-                return 1.0 + self.congestion_alpha * (u / (1.0 - u + self.congestion_eps))
+                mult = 1.0 + self.congestion_alpha * (u / (1.0 - u + self.congestion_eps))
+                return min(mult, self.congestion_mult_cap)
 
             for edge_keys, desired, base_latency_ms in path_allocations:
                 scale = min(edge_scale.get(edge_key, 0.0) for edge_key in edge_keys)
@@ -190,11 +203,18 @@ class Simulator:
                 if path_delivered <= 0.0:
                     continue
 
-                congestion_multiplier = 1.0
+                # Additive per-edge delay: sum(latency_ms(edge) * multiplier(util(edge))).
+                path_delay_ms = 0.0
                 for edge_key in edge_keys:
-                    congestion_multiplier *= edge_delay_multiplier(util_by_edge.get(edge_key, 0.0))
-
-                path_delay_ms = base_latency_ms * congestion_multiplier
+                    a, b = edge_key
+                    latency = self.default_latency_ms
+                    if routing_graph.has_edge(a, b):
+                        latency = _safe_float(
+                            routing_graph.edges[a, b].get("latency_ms", self.default_latency_ms),
+                            self.default_latency_ms,
+                        )
+                    util = util_by_edge.get(edge_key, 0.0)
+                    path_delay_ms += latency * edge_delay_multiplier(util)
                 delay_weighted_sum_ms += path_delay_ms * path_delivered
                 base_latency_weighted_sum_ms += base_latency_ms * path_delivered
 
@@ -232,9 +252,9 @@ class Simulator:
         or zero-capacity links.
         """
         if self.graph.is_directed():
-            H = nx.DiGraph()
+            H = nx_runtime.DiGraph()
         else:
-            H = nx.Graph()
+            H = nx_runtime.Graph()
         H.add_nodes_from(self.graph.nodes(data=True))
         for u, v, data in self.graph.edges(data=True):
             key = self._edge_key(u, v)
@@ -328,3 +348,65 @@ class Simulator:
         else:
             weights = [1.0 / len(paths) for _ in paths]
         return paths, weights
+
+
+def _smoke_run(steps: int, seed: int, output_path: Path | None) -> None:
+    if nx_runtime is None:
+        raise ImportError("networkx is required for simulator smoke run") from _nx_import_error
+
+    rng = random.Random(seed)
+    graph = build_random_topology(TopologyConfig(node_count=12, edge_prob=0.25, directed=False))
+    for u, v in graph.edges():
+        graph.edges[u, v]["weight"] = 1.0
+        graph.edges[u, v]["capacity"] = 10.0
+        graph.edges[u, v]["latency_ms"] = 5.0 + rng.random() * 5.0
+
+    simulator = Simulator(graph, routing_policy=ShortestPathPolicy())
+    metrics_log: List[Dict[str, float]] = []
+
+    for _ in range(steps):
+        flows: List[Flow] = []
+        for _ in range(rng.randint(2, 5)):
+            source = rng.randrange(0, graph.number_of_nodes())
+            destination = rng.randrange(0, graph.number_of_nodes())
+            while destination == source:
+                destination = rng.randrange(0, graph.number_of_nodes())
+            demand = 1.0 + rng.random() * 4.0
+            flows.append(Flow(source=source, destination=destination, demand=demand))
+
+        metrics = simulator.step(flows)
+        row = {
+            "delivered": metrics.delivered,
+            "dropped": metrics.dropped,
+            "avg_delay_ms": metrics.avg_delay_ms,
+            "avg_utilization": metrics.avg_utilization,
+        }
+        metrics_log.append(row)
+        print(
+            f"delivered={row['delivered']:.2f} "
+            f"dropped={row['dropped']:.2f} "
+            f"avg_delay_ms={row['avg_delay_ms']:.2f} "
+            f"avg_utilization={row['avg_utilization']:.3f}"
+        )
+
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as handle:
+            json.dump(metrics_log, handle, indent=2)
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="GreenNet simulator smoke run.")
+    parser.add_argument("--steps", type=int, default=100, help="Number of steps to run.")
+    parser.add_argument("--seed", type=int, default=7, help="Random seed for reproducibility.")
+    parser.add_argument("--output", type=Path, default=None, help="Optional JSON output path.")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = _parse_args()
+    output = args.output
+    if output is None:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        output = Path("runs") / f"smoke_metrics_{timestamp}.json"
+    _smoke_run(steps=args.steps, seed=args.seed, output_path=output)

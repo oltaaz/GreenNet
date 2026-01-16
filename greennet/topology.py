@@ -20,6 +20,7 @@ class TopologyConfig:
     node_count: int = 10
     edge_prob: float = 0.2
     directed: bool = False
+    seed: int | None = None
 
 
 def build_random_topology(config: TopologyConfig) -> "nx.Graph":
@@ -28,7 +29,12 @@ def build_random_topology(config: TopologyConfig) -> "nx.Graph":
         raise ImportError("networkx is required to build a topology") from _nx_import_error
 
     graph_cls = nx.DiGraph if config.directed else nx.Graph
-    graph = nx.erdos_renyi_graph(config.node_count, config.edge_prob, create_using=graph_cls)
+    graph = nx.erdos_renyi_graph(
+        config.node_count,
+        config.edge_prob,
+        create_using=graph_cls,
+        seed=config.seed,
+    )
     return graph
 
 
