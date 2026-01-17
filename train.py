@@ -10,6 +10,10 @@ from typing import Any, Dict
 
 import numpy as np
 import torch
+try:
+    import matplotlib.pyplot as plt
+except Exception:  # pragma: no cover
+    plt = None
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
@@ -26,6 +30,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "ppo": {
         "policy": "MultiInputPolicy",
         "verbose": 1,
+        "device": "auto",
         "n_steps": 2048,
         "batch_size": 256,
         "gae_lambda": 0.95,
@@ -85,6 +90,107 @@ def find_latest_model() -> Path:
     return candidates[-1]
 
 
+def parse_seed_list(seed_text: str) -> list[int]:
+    """Parse comma-separated integers like '0,1,2,3,4'."""
+    parts = [p.strip() for p in seed_text.split(",") if p.strip()]
+    return [int(p) for p in parts]
+
+
+def run_robustness_eval(
+    model: PPO,
+    base_env_config: EnvConfig,
+    episodes: int,
+    seed: int,
+    topology_seeds: list[int],
+    out_csv: Path,
+    out_png: Path,
+) -> None:
+    """Evaluate NOOP vs trained(det) across multiple topology seeds.
+
+    IMPORTANT: We keep the action space fixed (from the trained model's base topology) by setting
+    topology_randomize=True and evaluating each requested topology via topology_seeds=(s,).
+    """
+    rows: list[dict[str, Any]] = []
+
+    for s in topology_seeds:
+        env_cfg = replace(
+            base_env_config,
+            topology_randomize=True,
+            topology_seeds=(int(s),),
+        )
+
+        noop = eval_policy(
+            None,
+            env_cfg,
+            episodes=int(episodes),
+            seed=seed,
+            label=f"always_noop_seed{s}",
+            deterministic=True,
+        )
+        det = eval_policy(
+            model,
+            env_cfg,
+            episodes=int(episodes),
+            seed=seed,
+            label=f"trained_seed{s}",
+            deterministic=True,
+        )
+
+        for policy_name, stats in [("noop", noop), ("trained_det", det)]:
+            rows.append({
+                "topology_seed": int(s),
+                "policy": policy_name,
+                **stats,
+            })
+
+    # Write CSV
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    header = sorted(rows[0].keys()) if rows else []
+    with out_csv.open("w", encoding="utf-8") as f:
+        f.write(",".join(header) + "\n")
+        for row in rows:
+            f.write(",".join(str(row.get(k, "")) for k in header) + "\n")
+
+    print(f"[robustness] wrote CSV: {out_csv}")
+
+    # Plot: energy vs norm_drop per topology seed
+    if plt is None:
+        print("[robustness] matplotlib not available; skipping plot.")
+        return
+
+    # Build series
+    def _series(policy: str):
+        xs, ys, labels = [], [], []
+        for r in rows:
+            if r.get("policy") != policy:
+                continue
+            xs.append(float(r.get("norm_drop_mean", 0.0)))
+            ys.append(float(r.get("energy_mean", 0.0)))
+            labels.append(str(r.get("topology_seed")))
+        return xs, ys, labels
+
+    x_noop, y_noop, lab_noop = _series("noop")
+    x_det, y_det, lab_det = _series("trained_det")
+
+    plt.figure()
+    plt.scatter(x_noop, y_noop, label="NOOP (all-on)")
+    plt.scatter(x_det, y_det, label="Trained (det)")
+
+    for x, y, t in zip(x_noop, y_noop, lab_noop):
+        plt.annotate(t, (x, y))
+    for x, y, t in zip(x_det, y_det, lab_det):
+        plt.annotate(t, (x, y))
+
+    plt.xlabel("Normalized drop (mean)")
+    plt.ylabel("Energy (kWh per episode, mean)")
+    plt.title("Robustness across topology seeds")
+    plt.legend()
+    plt.tight_layout()
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(out_png)
+    print(f"[robustness] wrote plot: {out_png}")
+
+
 def eval_policy(
     model: PPO | None,
     env_config: EnvConfig,
@@ -102,6 +208,7 @@ def eval_policy(
     ep_delivered: list[float] = []
     ep_applied: list[int] = []
     ep_reverted: list[int] = []
+    ep_norm_drop: list[float] = []
 
     for ep in range(episodes):
         obs, info = env.reset(seed=seed + ep)
@@ -135,6 +242,9 @@ def eval_policy(
             applied += int(bool(info.get("toggle_applied")))
             reverted += int(bool(info.get("toggle_reverted")))
 
+        denom = max(total_delivered + total_dropped, 1e-9)
+        ep_norm_drop.append(float(total_dropped / denom))
+
         ep_rewards.append(total_r)
         ep_energy.append(total_energy)
         ep_dropped.append(total_dropped)
@@ -150,6 +260,7 @@ def eval_policy(
     e_m, e_s = _mean_std(ep_energy)
     d_m, d_s = _mean_std(ep_dropped)
     dl_m, dl_s = _mean_std(ep_delivered)
+    nd_m, nd_s = _mean_std(ep_norm_drop)
 
     mode = "det" if deterministic else "stoch"
     print(f"\n=== Evaluation: {label} ({mode}, {episodes} episodes) ===")
@@ -157,6 +268,7 @@ def eval_policy(
     print(f"energy_kwh:     mean={e_m:.6f} std={e_s:.6f}")
     print(f"dropped:        mean={d_m:.3f} std={d_s:.3f}")
     print(f"delivered:      mean={dl_m:.3f} std={dl_s:.3f}")
+    print(f"norm_drop:      mean={nd_m:.5f} std={nd_s:.5f}")
     print(
         f"toggles applied mean={float(np.mean(ep_applied)):.2f} "
         f"reverted mean={float(np.mean(ep_reverted)):.2f}"
@@ -164,8 +276,17 @@ def eval_policy(
 
     stats = {
         "reward_mean": r_m,
+        "reward_std": r_s,
         "energy_mean": e_m,
+        "energy_std": e_s,
         "dropped_mean": d_m,
+        "dropped_std": d_s,
+        "delivered_mean": dl_m,
+        "delivered_std": dl_s,
+        "norm_drop_mean": nd_m,
+        "norm_drop_std": nd_s,
+        "toggles_applied_mean": float(np.mean(ep_applied)),
+        "toggles_reverted_mean": float(np.mean(ep_reverted)),
     }
 
     env.close()
@@ -176,8 +297,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train PPO on GreenNet.")
     parser.add_argument("--config", type=Path, help="Path to JSON config to load.")
     parser.add_argument("--eval", action="store_true", help="Run evaluation instead of training.")
+    parser.add_argument("--eval-noop", action="store_true", help="Run evaluation of the always-noop policy and exit.")
     parser.add_argument("--model", type=Path, help="Path to saved PPO model zip (default: latest under runs/).")
     parser.add_argument("--episodes", type=int, default=10, help="Number of evaluation episodes.")
+    parser.add_argument(
+        "--robustness",
+        action="store_true",
+        help="Run multi-seed robustness eval (NOOP vs trained(det)) and write CSV+PNG under the model run dir.",
+    )
+    parser.add_argument(
+        "--topology-seeds",
+        type=str,
+        default="0,1,2,3,4",
+        help="Comma-separated topology seeds for --robustness (e.g., '0,1,2,3,4').",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -188,6 +321,63 @@ def main() -> None:
 
     seed = int(config.get("seed", 0))
     set_seeds(seed)
+
+    # ---- Device selection (Apple Silicon GPU via MPS) ----
+    # SB3 defaults to "auto" which primarily checks CUDA; it will NOT automatically pick MPS.
+    preferred_device = "mps" if torch.backends.mps.is_available() else "cpu"
+    config.setdefault("ppo", {})
+    # If the user didn't override device in the JSON config, pick MPS when available.
+    if config["ppo"].get("device", "auto") in ("auto", None, ""):
+        config["ppo"]["device"] = preferred_device
+
+    print(
+        f"[device] torch.mps_available={torch.backends.mps.is_available()} "
+        f"torch.cuda_available={torch.cuda.is_available()} "
+        f"sb3_device={config['ppo'].get('device')}"
+    )
+
+    if args.robustness:
+        model_path = args.model or find_latest_model()
+        print(f"[robustness] using model: {model_path}")
+
+        model_run_dir = Path(model_path).parent
+        env_config = load_env_config_from_run(model_run_dir, verbose=True)
+        # Load onto the same device policy would use.
+        load_device = config.get("ppo", {}).get("device", "cpu")
+        model = PPO.load(str(model_path), device=load_device)
+        print(f"[device] loaded PPO on: {model.policy.device}")
+
+        seeds = parse_seed_list(args.topology_seeds)
+        out_csv = model_run_dir / "robustness_eval.csv"
+        out_png = model_run_dir / "robustness_energy_vs_drop.png"
+
+        run_robustness_eval(
+            model=model,
+            base_env_config=env_config,
+            episodes=int(args.episodes),
+            seed=seed,
+            topology_seeds=seeds,
+            out_csv=out_csv,
+            out_png=out_png,
+        )
+        return
+
+    if args.eval_noop:
+        if args.model:
+            model_run_dir = Path(args.model).parent
+            env_config = load_env_config_from_run(model_run_dir, verbose=True)
+        else:
+            env_config = EnvConfig()
+            print("[eval_noop] using EnvConfig defaults (no model provided).")
+        eval_policy(
+            None,
+            env_config,
+            episodes=int(args.episodes),
+            seed=seed,
+            label="always_noop",
+            deterministic=True,
+        )
+        return
 
     if args.eval:
         model_path = args.model or find_latest_model()
@@ -205,7 +395,9 @@ def main() -> None:
         else:
             print("[eval] no train_config found; using defaults for PPO keys.")
 
-        model = PPO.load(str(model_path))
+        load_device = config.get("ppo", {}).get("device", "cpu")
+        model = PPO.load(str(model_path), device=load_device)
+        print(f"[device] loaded PPO on: {model.policy.device}")
 
         trained_det = eval_policy(
             model,
@@ -263,11 +455,11 @@ def main() -> None:
         topology_seed=0,
 
         # Reward shaping: balance QoS vs energy so the optimal deterministic policy isn't always NOOP.
-        drop_penalty_lambda=0.4,
+        drop_penalty_lambda=0.2,
         normalize_drop=True,
 
         # Increase energy incentive now that we have per-edge observability + cooldown.
-        energy_weight=10.0,
+        energy_weight=190.0,
 
         # With cooldown enabled, we can make a single toggle a bit cheaper without allowing thrashing.
         toggle_penalty=0.0002,
@@ -277,6 +469,8 @@ def main() -> None:
 
         util_block_threshold=0.10,
         global_toggle_cooldown_steps=5,
+        flows_per_step=6,
+        base_capacity=10.0,
     )
 
     save_env_config(run_dir, env_config)
@@ -285,6 +479,7 @@ def main() -> None:
 
     env = DummyVecEnv([make_env(seed, env_config)])
     model = PPO(env=env, **config["ppo"])
+    print(f"[device] training PPO on: {model.policy.device}")
 
     class ActionEffectivenessCallback(BaseCallback):
         def __init__(self, log_every: int = 5000):

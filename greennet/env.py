@@ -27,16 +27,16 @@ class EnvConfig:
     edge_prob: float = 0.5
     directed: bool = False
 
-    base_capacity: float = 5.0
+    base_capacity: float = 10.0
     base_latency_ms: float = 10.0
 
-    flows_per_step: int = 4
+    flows_per_step: int = 6
     demand_min: float = 1.0
     demand_max: float = 5.0
 
-    drop_penalty_lambda: float = 0.4
+    drop_penalty_lambda: float = 0.20
     # ENERGY WEIGHT: Increase to prioritize energy savings more; decrease to prioritize performance (drops).
-    energy_weight: float = 10.0
+    energy_weight: float = 190.0
 
     toggle_penalty: float = 0.0005
 
