@@ -1,0 +1,22 @@
+[env_cfg] drop_lambda=0.2 energy_w=190.0 toggle_pen=0.0005 normalize_drop=True cooldown=5 util_block_thr=0.1 global_cd=20
+[env_cfg] drop_lambda=0.2 energy_w=190.0 toggle_pen=0.0005 normalize_drop=True cooldown=5 util_block_thr=0.1 global_cd=20
+
+Policy: always_on
+  reward: -0.0147
+  delivered: 17.8795
+  dropped: 0.1009
+  avg_delay_ms: 371.9808
+  avg_utilization: 0.1331
+  active_ratio: 1.0000
+  energy_kwh: 0.0001
+  carbon_g: 0.0289
+
+Policy: sleep_if_idle
+  reward: -0.0148
+  delivered: 17.6417
+  dropped: 0.3387
+  avg_delay_ms: 937.4135
+  avg_utilization: 0.1828
+  active_ratio: 0.7950
+  energy_kwh: 0.0001
+  carbon_g: 0.0241
