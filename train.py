@@ -14,7 +14,7 @@ try:
     import matplotlib.pyplot as plt
 except Exception:  # pragma: no cover
     plt = None
-from stable_baselines3 import PPO
+
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
@@ -24,9 +24,22 @@ from greennet.env import EnvConfig, GreenNetEnv
 from greennet.utils.config import load_env_config_from_run, save_env_config, save_train_config, load_train_config_from_run
 
 
+from stable_baselines3 import PPO
+
+# Optional: action masking support (recommended).
+try:
+    from sb3_contrib import MaskablePPO  # type: ignore
+    from sb3_contrib.common.wrappers import ActionMasker  # type: ignore
+    MASKABLE_AVAILABLE = True
+except Exception:  # pragma: no cover
+    MaskablePPO = None  # type: ignore
+    ActionMasker = None  # type: ignore
+    MASKABLE_AVAILABLE = False
+
+
 DEFAULT_CONFIG: Dict[str, Any] = {
     "seed": 42,
-    "total_timesteps": 60_000,
+    "total_timesteps": 20_000,
     "ppo": {
         "policy": "MultiInputPolicy",
         "verbose": 1,
@@ -53,6 +66,8 @@ def make_env(seed: int, env_config: EnvConfig):
     def _init():
         # Use a fresh copy of the env config for each vectorized environment.
         env = GreenNetEnv(config=replace(env_config))
+        if MASKABLE_AVAILABLE and ActionMasker is not None:
+            env = ActionMasker(env, lambda e: e.get_action_mask())
         env.reset(seed=seed)
         return Monitor(env)
 
@@ -97,7 +112,7 @@ def parse_seed_list(seed_text: str) -> list[int]:
 
 
 def run_robustness_eval(
-    model: PPO,
+    model: Any,
     base_env_config: EnvConfig,
     episodes: int,
     seed: int,
@@ -191,16 +206,12 @@ def run_robustness_eval(
     print(f"[robustness] wrote plot: {out_png}")
 
 
-def eval_policy(
-    model: PPO | None,
-    env_config: EnvConfig,
-    episodes: int,
-    seed: int,
-    label: str,
-    deterministic: bool,
-) -> Dict[str, float]:
+def eval_policy(model: Any | None, env_config: EnvConfig, episodes: int, seed: int, label: str, deterministic: bool, debug_energy: bool = False,) -> Dict[str, float]:
     """Evaluate a policy and print aggregate stats."""
-    env = Monitor(GreenNetEnv(config=replace(env_config)))
+    base_env = GreenNetEnv(config=replace(env_config))
+    if MASKABLE_AVAILABLE and ActionMasker is not None:
+        base_env = ActionMasker(base_env, lambda e: e.get_action_mask())
+    env = Monitor(base_env)
 
     ep_rewards: list[float] = []
     ep_energy: list[float] = []
@@ -209,6 +220,10 @@ def eval_policy(
     ep_applied: list[int] = []
     ep_reverted: list[int] = []
     ep_norm_drop: list[float] = []
+    ep_reward_energy: list[float] = []
+    ep_reward_drop: list[float] = []
+    ep_reward_qos: list[float] = []
+    ep_reward_toggle: list[float] = []
 
     for ep in range(episodes):
         obs, info = env.reset(seed=seed + ep)
@@ -219,6 +234,11 @@ def eval_policy(
         total_delivered = 0.0
         applied = 0
         reverted = 0
+        steps = 0
+        sum_reward_energy = 0.0
+        sum_reward_drop = 0.0
+        sum_reward_qos = 0.0
+        sum_reward_toggle = 0.0
 
         while not (terminated or truncated):
             if model is None:
@@ -231,16 +251,48 @@ def eval_policy(
                     action = int(action[0])
 
             obs, r, terminated, truncated, info = env.step(action)
+            steps += 1
+            if debug_energy and steps in (1, 10, 100, 1000):
+                print(
+                    "dbg steps",
+                    steps,
+                    "delta_e",
+                    info.get("delta_energy_kwh"),
+                    "metrics_e",
+                    getattr(info.get("metrics"), "energy_kwh", None),
+                    "info_energy",
+                    info.get("energy_kwh"),
+                )
             total_r += float(r)
+            sum_reward_energy += float(info.get("reward_energy", 0.0))
+            sum_reward_drop += float(info.get("reward_drop", 0.0))
+            sum_reward_qos += float(info.get("reward_qos", 0.0))
+            sum_reward_toggle += float(info.get("reward_toggle", 0.0))
 
-            metrics = info.get("metrics")
-            if metrics is not None:
+            metrics = info.get("metrics", None)
+
+            if "delta_energy_kwh" in info:
+                total_energy += float(info["delta_energy_kwh"])
+            elif "energy_kwh" in info:
+                total_energy += float(info["energy_kwh"])
+            elif metrics is not None:
                 total_energy += float(getattr(metrics, "energy_kwh", 0.0))
+
+            if "delta_dropped" in info:
+                total_dropped += float(info["delta_dropped"])
+            elif metrics is not None:
                 total_dropped += float(getattr(metrics, "dropped", 0.0))
+
+            if "delta_delivered" in info:
+                total_delivered += float(info["delta_delivered"])
+            elif metrics is not None:
                 total_delivered += float(getattr(metrics, "delivered", 0.0))
 
             applied += int(bool(info.get("toggle_applied")))
             reverted += int(bool(info.get("toggle_reverted")))
+
+        if debug_energy:
+            print("dbg episode steps total:", steps, "total_energy:", total_energy)
 
         denom = max(total_delivered + total_dropped, 1e-9)
         ep_norm_drop.append(float(total_dropped / denom))
@@ -251,6 +303,10 @@ def eval_policy(
         ep_delivered.append(total_delivered)
         ep_applied.append(applied)
         ep_reverted.append(reverted)
+        ep_reward_energy.append(sum_reward_energy)
+        ep_reward_drop.append(sum_reward_drop)
+        ep_reward_qos.append(sum_reward_qos)
+        ep_reward_toggle.append(sum_reward_toggle)
 
     def _mean_std(xs: list[float]) -> tuple[float, float]:
         arr = np.asarray(xs, dtype=np.float64)
@@ -261,6 +317,10 @@ def eval_policy(
     d_m, d_s = _mean_std(ep_dropped)
     dl_m, dl_s = _mean_std(ep_delivered)
     nd_m, nd_s = _mean_std(ep_norm_drop)
+    re_m, re_s = _mean_std(ep_reward_energy)
+    rd_m, rd_s = _mean_std(ep_reward_drop)
+    rq_m, rq_s = _mean_std(ep_reward_qos)
+    rt_m, rt_s = _mean_std(ep_reward_toggle)
 
     mode = "det" if deterministic else "stoch"
     print(f"\n=== Evaluation: {label} ({mode}, {episodes} episodes) ===")
@@ -269,6 +329,10 @@ def eval_policy(
     print(f"dropped:        mean={d_m:.3f} std={d_s:.3f}")
     print(f"delivered:      mean={dl_m:.3f} std={dl_s:.3f}")
     print(f"norm_drop:      mean={nd_m:.5f} std={nd_s:.5f}")
+    print(f"reward_energy:  mean={re_m:.3f} std={re_s:.3f}")
+    print(f"reward_drop:    mean={rd_m:.3f} std={rd_s:.3f}")
+    print(f"reward_qos:     mean={rq_m:.3f} std={rq_s:.3f}")
+    print(f"reward_toggle:  mean={rt_m:.3f} std={rt_s:.3f}")
     print(
         f"toggles applied mean={float(np.mean(ep_applied)):.2f} "
         f"reverted mean={float(np.mean(ep_reverted)):.2f}"
@@ -301,9 +365,20 @@ def main() -> None:
     parser.add_argument("--model", type=Path, help="Path to saved PPO model zip (default: latest under runs/).")
     parser.add_argument("--episodes", type=int, default=10, help="Number of evaluation episodes.")
     parser.add_argument(
+        "--debug-eval-energy",
+        action="store_true",
+        help="Print evaluation energy accumulation diagnostics.",
+    )
+    parser.add_argument(
         "--robustness",
         action="store_true",
         help="Run multi-seed robustness eval (NOOP vs trained(det)) and write CSV+PNG under the model run dir.",
+    )
+    parser.add_argument(
+        "--timesteps",
+        type=int,
+        default=None,
+        help="Override total timesteps for training (ignored for --eval / --eval-noop).",
     )
     parser.add_argument(
         "--topology-seeds",
@@ -314,6 +389,11 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(args.config)
+
+    # Allow overriding training timesteps from CLI.
+    if args.timesteps is not None:
+        config["total_timesteps"] = int(args.timesteps)
+
     # Ensure defaults exist if a custom config omits them.
     config.setdefault("ppo", {})
     config["ppo"].setdefault("ent_coef", DEFAULT_CONFIG["ppo"]["ent_coef"])
@@ -344,8 +424,13 @@ def main() -> None:
         env_config = load_env_config_from_run(model_run_dir, verbose=True)
         # Load onto the same device policy would use.
         load_device = config.get("ppo", {}).get("device", "cpu")
-        model = PPO.load(str(model_path), device=load_device)
-        print(f"[device] loaded PPO on: {model.policy.device}")
+
+        if MASKABLE_AVAILABLE and MaskablePPO is not None:
+            model = MaskablePPO.load(str(model_path), device=load_device)
+        else:
+            model = PPO.load(str(model_path), device=load_device)
+
+        print(f"[device] loaded {type(model).__name__} on: {model.policy.device}")
 
         seeds = parse_seed_list(args.topology_seeds)
         out_csv = model_run_dir / "robustness_eval.csv"
@@ -376,6 +461,7 @@ def main() -> None:
             seed=seed,
             label="always_noop",
             deterministic=True,
+            debug_energy=args.debug_eval_energy,
         )
         return
 
@@ -396,8 +482,11 @@ def main() -> None:
             print("[eval] no train_config found; using defaults for PPO keys.")
 
         load_device = config.get("ppo", {}).get("device", "cpu")
-        model = PPO.load(str(model_path), device=load_device)
-        print(f"[device] loaded PPO on: {model.policy.device}")
+        if MASKABLE_AVAILABLE and MaskablePPO is not None:
+            model = MaskablePPO.load(str(model_path), device=load_device)
+        else:
+            model = PPO.load(str(model_path), device=load_device)
+        print(f"[device] loaded {type(model).__name__} on: {model.policy.device}")
 
         trained_det = eval_policy(
             model,
@@ -406,6 +495,7 @@ def main() -> None:
             seed=seed,
             label="trained",
             deterministic=True,
+            debug_energy=args.debug_eval_energy,
         )
         trained_stoch = eval_policy(
             model,
@@ -414,6 +504,7 @@ def main() -> None:
             seed=seed,
             label="trained",
             deterministic=False,
+            debug_energy=args.debug_eval_energy,
         )
         noop_det = eval_policy(
             None,
@@ -422,6 +513,7 @@ def main() -> None:
             seed=seed,
             label="always_noop",
             deterministic=True,
+            debug_energy=args.debug_eval_energy,
         )
 
         d_reward = trained_det["reward_mean"] - noop_det["reward_mean"]
@@ -451,26 +543,42 @@ def main() -> None:
     save_requirements_copy(run_dir)
 
     env_config = EnvConfig(
-        topology_randomize=False,
-        topology_seed=0,
+        traffic_model="stochastic",
+        # Make energy matter enough to beat NOOP.
+        energy_weight=2000.0,
 
-        # Reward shaping: balance QoS vs energy so the optimal deterministic policy isn't always NOOP.
-        drop_penalty_lambda=0.2,
+        # Drops still matter, but don't drown everything.
+        drop_penalty_lambda=5.0,
         normalize_drop=True,
 
-        # Increase energy incentive now that we have per-edge observability + cooldown.
-        energy_weight=190.0,
+        # QoS penalty: sane + gated.
+        qos_target_norm_drop=0.0720,
+        qos_violation_penalty_scale=30.0,
+        qos_min_volume=3000.0,
+        qos_guard_margin=0.003,
+        qos_guard_penalty_scale=1.0,
 
-        # With cooldown enabled, we can make a single toggle a bit cheaper without allowing thrashing.
+        # Let it explore without fear (tune if action thrashing).
         toggle_penalty=0.0002,
+        blocked_action_penalty=0.0002,
 
-        # Prevent per-edge flapping.
-        toggle_cooldown_steps=5,
+        # Keep action responsiveness but avoid flapping.
+        toggle_cooldown_steps=10,
+        global_toggle_cooldown_steps=30,
+        util_block_threshold=0.2,
 
-        util_block_threshold=0.10,
-        global_toggle_cooldown_steps=5,
+        traffic_hotspots=((0, 5, 3.0), (2, 7, 2.0)),
+        traffic_avg_bursts_per_step=2.0,
+        traffic_p_elephant=0.08,
+        traffic_elephant_size_range=(6, 20),
+        traffic_duration_range=(1, 3),
+        traffic_spike_prob=0.005,
+        traffic_spike_multiplier_range=(1.5, 3.0),
+        traffic_spike_duration_range=(2, 6),
+        topology_randomize=False,
+        topology_seed=0,
         flows_per_step=6,
-        base_capacity=10.0,
+        base_capacity=15.0,
     )
 
     save_env_config(run_dir, env_config)
@@ -478,8 +586,13 @@ def main() -> None:
     print(f"[train] saved train_config keys: {sorted(config.keys())}")
 
     env = DummyVecEnv([make_env(seed, env_config)])
-    model = PPO(env=env, **config["ppo"])
-    print(f"[device] training PPO on: {model.policy.device}")
+
+    if MASKABLE_AVAILABLE and MaskablePPO is not None:
+        model = MaskablePPO(env=env, **config["ppo"])
+    else:
+        model = PPO(env=env, **config["ppo"])
+
+    print(f"[device] training {type(model).__name__} on: {model.policy.device}")
 
     class ActionEffectivenessCallback(BaseCallback):
         def __init__(self, log_every: int = 5000):
@@ -490,6 +603,9 @@ def main() -> None:
             self.noop = 0
             self.invalid = 0
             self.blocked = 0
+            self.blocked_global = 0
+            self.blocked_high_util = 0
+            self.blocked_cooldown = 0
 
         def _on_training_start(self) -> None:
             self.applied = 0
@@ -497,6 +613,9 @@ def main() -> None:
             self.noop = 0
             self.invalid = 0
             self.blocked = 0
+            self.blocked_global = 0
+            self.blocked_high_util = 0
+            self.blocked_cooldown = 0
 
         def _on_step(self) -> bool:
             infos = self.locals.get("infos", [])
@@ -505,17 +624,20 @@ def main() -> None:
                 reverted = bool(info.get("toggle_reverted"))
                 nooped = bool(info.get("action_is_noop"))
                 invalid = bool(info.get("action_is_invalid"))
-                blocked = (
-                    bool(info.get("toggle_blocked_cooldown"))
-                    or bool(info.get("toggle_blocked_high_util"))
-                    or bool(info.get("toggle_blocked_global_cooldown"))
-                )
+                b_any = bool(info.get("toggle_blocked_any"))
+                b_global = bool(info.get("toggle_blocked_global_cooldown"))
+                b_util = bool(info.get("toggle_blocked_high_util"))
+                b_cd = bool(info.get("toggle_blocked_cooldown"))
 
                 self.applied += int(applied)
                 self.reverted += int(reverted)
                 self.noop += int(nooped)
                 self.invalid += int(invalid)
-                self.blocked += int(blocked)
+                self.blocked += int(b_any)
+                self.blocked_global += int(b_global)
+                self.blocked_high_util += int(b_util)
+                self.blocked_cooldown += int(b_cd)
+
 
             total = self.applied + self.reverted + self.noop + self.invalid + self.blocked
             if total > 0 and self.num_timesteps % self.log_every == 0:
@@ -524,21 +646,29 @@ def main() -> None:
                 noop_frac = self.noop / total
                 invalid_frac = self.invalid / total
                 blocked_frac = self.blocked / total
+                bg = (self.blocked_global / self.blocked) if self.blocked > 0 else 0.0
+                bu = (self.blocked_high_util / self.blocked) if self.blocked > 0 else 0.0
+                bc = (self.blocked_cooldown / self.blocked) if self.blocked > 0 else 0.0
                 print(
                     f"[action_stats] steps={self.num_timesteps} "
                     f"applied={applied_frac:.3f} reverted={reverted_frac:.3f} "
-                    f"noop={noop_frac:.3f} invalid={invalid_frac:.3f} blocked={blocked_frac:.3f}"
+                    f"noop={noop_frac:.3f} invalid={invalid_frac:.3f} blocked={blocked_frac:.3f} "
+                    f"(blocked: global={bg:.2f} util={bu:.2f} cooldown={bc:.2f})"
                 )
                 self.logger.record("action_stats/applied_frac", applied_frac)
                 self.logger.record("action_stats/reverted_frac", reverted_frac)
                 self.logger.record("action_stats/noop_frac", noop_frac)
                 self.logger.record("action_stats/invalid_frac", invalid_frac)
                 self.logger.record("action_stats/blocked_frac", blocked_frac)
+                self.logger.record("action_stats/blocked_global_share", bg)
+                self.logger.record("action_stats/blocked_util_share", bu)
+                self.logger.record("action_stats/blocked_cooldown_share", bc)
             return True
 
     callback = ActionEffectivenessCallback(log_every=5000)
     model.learn(total_timesteps=int(config["total_timesteps"]), callback=callback)
     model.save(str(run_dir / "ppo_greennet"))
+    print(f"[algo] {type(model).__name__}")
     print(f"Saved to {run_dir}")
 
 

@@ -13,6 +13,7 @@ from gymnasium import spaces
 from greennet.routing import ShortestPathPolicy
 from greennet.simulator import Flow, Simulator
 from greennet.topology import TopologyConfig, build_random_topology
+from greennet.traffic import (ConstantTrafficGenerator, StochasticTrafficConfig, StochasticTrafficGenerator, TrafficBurst, TrafficGenerator,)
 
 
 @dataclass
@@ -34,19 +35,56 @@ class EnvConfig:
     demand_min: float = 1.0
     demand_max: float = 5.0
 
-    drop_penalty_lambda: float = 0.20
+    # Traffic model selection:
+    # - "uniform": current per-step random src/dst + uniform demand
+    # - "stochastic": use greennet.traffic.StochasticTrafficGenerator
+    traffic_model: str = "uniform"
+
+    # Seed for traffic generator; if None, we derive it from env.reset(seed=...).
+    traffic_seed: int | None = None
+
+    # Optional hotspot pairs for stochastic traffic: (src, dst, weight)
+    traffic_hotspots: Tuple[Tuple[int, int, float], ...] = ()
+
+    # Stochastic traffic tuning
+    traffic_avg_bursts_per_step: float = 3.0
+    traffic_p_elephant: float = 0.15
+    traffic_mice_size_range: Tuple[int, int] = (1, 5)
+    traffic_elephant_size_range: Tuple[int, int] = (10, 50)
+    traffic_duration_range: Tuple[int, int] = (1, 6)
+    traffic_spike_prob: float = 0.01
+    traffic_spike_multiplier_range: Tuple[float, float] = (2.0, 6.0)
+    traffic_spike_duration_range: Tuple[int, int] = (3, 12)
+
+    drop_penalty_lambda: float = 5.0
     # ENERGY WEIGHT: Increase to prioritize energy savings more; decrease to prioritize performance (drops).
-    energy_weight: float = 190.0
+    energy_weight: float = 50.0
 
-    toggle_penalty: float = 0.0005
+    # QoS constraint: target maximum normalized drop ratio (dropped / (delivered + dropped)).
+    # If norm_drop exceeds this, we add an extra penalty (linear by default) so QoS stays stable while optimizing energy.
+    qos_target_norm_drop: float = 0.0720
 
+    # Gate QoS penalty until enough traffic volume has been observed.
+    qos_min_volume: float = 3000.0
+
+    # Strength of the extra penalty when norm_drop exceeds qos_target_norm_drop.
+    # For linear QoS penalty, this should be small (tens), otherwise it will dominate reward.
+    qos_violation_penalty_scale: float = 30.0
+
+    # When norm_drop_total is close to qos_target_norm_drop, block turning edges OFF.
+    qos_guard_margin: float = 0.002  # headroom; tune 0.001–0.005
+    qos_guard_penalty_scale: float = 1.0  # multiplier for blocked OFF attempts due to QoS
+
+    toggle_penalty: float = 0.01
+
+    blocked_action_penalty: float = 0.01
     revert_penalty_scale: float = 0.5
     top_k_edge_utils: int = 0  # not used yet; placeholder for richer observations
     normalize_drop: bool = True
     saturation_util_threshold: float = 0.9  # for counting near-saturated edges
-    toggle_cooldown_steps: int = 5  # minimum steps between toggles of the same edge
-    util_block_threshold: float = 0.10  # block turning OFF an edge if its utilization is above this threshold
-    global_toggle_cooldown_steps: int = 20
+    toggle_cooldown_steps: int = 10  # minimum steps between toggles of the same edge
+    util_block_threshold: float = 0.2  # block turning OFF an edge if its utilization is above this threshold
+    global_toggle_cooldown_steps: int = 30
 
 
 class GreenNetEnv(gym.Env):
@@ -77,6 +115,9 @@ class GreenNetEnv(gym.Env):
         self._step_count: int = 0
         self.simulator: Simulator | None = None
         self._debug_logged: bool = False
+        self._traffic_generator: TrafficGenerator | None = None
+        self._traffic_by_step: Dict[int, List[TrafficBurst]] = {}
+        self._active_bursts: List[Tuple[int, int, float, int]] = []  # (src, dst, demand, remaining_steps)
         # Build base topology once; action space is derived from toggleable (non-bridge) edges.
         topo_config = self._topology_config(self.config.topology_seed)
         self._base_graph = build_random_topology(topo_config)
@@ -111,18 +152,53 @@ class GreenNetEnv(gym.Env):
             }
         )
 
-    def reset(
-        self,
-        *,
-        seed: int | None = None,
-        options: Dict[str, Any] | None = None,
-    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def reset(self, *, seed: int | None = None, options: Dict[str, Any] | None = None,) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         super().reset(seed=seed)
         del options
 
         self._step_count = 0
         self._prev_dropped = 0.0
+        # Track cumulative metrics (some Simulator implementations return cumulative totals).
+        # We compute per-step deltas for reward so we don't double-count cumulative values.
+        self._prev_energy_kwh_total = 0.0
+        self._prev_delivered_total = 0.0
+        self._prev_dropped_total = 0.0
         self._global_toggle_cooldown_remaining = 0
+        self._last_norm_drop_total = 0.0
+
+        # ---- Traffic generator setup ----
+        self._traffic_by_step = {}
+        self._active_bursts = []
+
+        # Derive a deterministic traffic seed when not explicitly provided.
+        derived_seed: int | None = self.config.traffic_seed
+        if derived_seed is None and seed is not None:
+            derived_seed = int(seed) + 10_000  # keep it separate from topology/model seeding
+
+        if self.config.traffic_model.lower() == "stochastic":
+            tcfg = StochasticTrafficConfig(
+                node_count=int(self.config.node_count),
+                avg_bursts_per_step=float(self.config.traffic_avg_bursts_per_step),
+                hotspots=tuple(self.config.traffic_hotspots),
+                p_elephant=float(self.config.traffic_p_elephant),
+                mice_size_range=tuple(self.config.traffic_mice_size_range),
+                elephant_size_range=tuple(self.config.traffic_elephant_size_range),
+                duration_range=tuple(self.config.traffic_duration_range),
+                spike_prob=float(self.config.traffic_spike_prob),
+                spike_multiplier_range=tuple(self.config.traffic_spike_multiplier_range),
+                spike_duration_range=tuple(self.config.traffic_spike_duration_range),
+            )
+            self._traffic_generator = StochasticTrafficGenerator(tcfg, seed=derived_seed)
+
+            # Precompute bursts and bucket them by integer step.
+            for burst in self._traffic_generator.generate(int(self.config.max_steps)):
+                step_idx = int(burst.start_time)
+                if step_idx < 0 or step_idx >= int(self.config.max_steps):
+                    continue
+                self._traffic_by_step.setdefault(step_idx, []).append(burst)
+        else:
+            # Keep old behavior by default.
+            self._traffic_generator = ConstantTrafficGenerator(rate=1.0)
 
         if self.config.topology_randomize:
             graph = self._build_topology()
@@ -151,6 +227,7 @@ class GreenNetEnv(gym.Env):
                 f"energy_w={self.config.energy_weight} toggle_pen={self.config.toggle_penalty} "
                 f"normalize_drop={self.config.normalize_drop} cooldown={self.config.toggle_cooldown_steps} "
                 f"util_block_thr={self.config.util_block_threshold} global_cd={self.config.global_toggle_cooldown_steps}"
+                f" traffic_model={self.config.traffic_model}"
             )
 
         def _power_model_watts(g) -> float:
@@ -203,8 +280,61 @@ class GreenNetEnv(gym.Env):
 
         toggle_cost, toggle_applied, toggle_reverted, toggle_blocked, toggle_blocked_high_util, toggle_blocked_global = self._apply_action(action)
         
+        blocked_any = bool(toggle_blocked or toggle_blocked_high_util or toggle_blocked_global)
+        if blocked_any:
+            toggle_cost = float(toggle_cost) + float(self.config.blocked_action_penalty)
+
         flows = self._generate_flows()
         metrics = self.simulator.step(flows)
+
+        # ---- Convert simulator metrics into per-step deltas (robust to cumulative vs per-step APIs) ----
+        # Some Simulator implementations expose cumulative totals (episode-to-date). If we use those
+        # directly in the reward each step, we double-count and the episode reward blows up.
+        energy_total = float(metrics.energy_kwh)
+        delivered_total = float(metrics.delivered)
+        dropped_total = float(metrics.dropped)
+
+        prev_e = float(getattr(self, "_prev_energy_kwh_total", 0.0))
+        prev_del = float(getattr(self, "_prev_delivered_total", 0.0))
+        prev_drop = float(getattr(self, "_prev_dropped_total", 0.0))
+
+        # Default: treat metrics as cumulative totals.
+        delta_energy = energy_total - prev_e
+        delta_delivered = delivered_total - prev_del
+        delta_dropped = dropped_total - prev_drop
+
+        # Detect per-step vs cumulative reporting.
+        # Default assumption is cumulative totals, but some Simulator implementations report per-step
+        # values (especially for energy). In that case, treating them as cumulative makes deltas go to
+        # ~0 after step 1 (because prev == current).
+        eps = 1e-12
+
+        # ENERGY: if energy_total stays roughly constant across steps (delta ~ 0) while energy_total > 0,
+        # interpret it as a per-step value and accumulate our own episode-to-date total.
+        if prev_e > 0.0 and energy_total > 0.0 and delta_energy <= eps:
+            delta_energy = energy_total
+            energy_total = prev_e + delta_energy
+
+        # DELIVERED/DROPPED: if deltas are negative (beyond tiny numerical noise), treat totals as per-step.
+        if delta_delivered < -eps:
+            delta_delivered = delivered_total
+            delivered_total = prev_del + delta_delivered
+        if delta_dropped < -eps:
+            delta_dropped = dropped_total
+            dropped_total = prev_drop + delta_dropped
+
+        # Clamp tiny negatives caused by float noise.
+        delta_energy = float(max(0.0, delta_energy))
+        delta_delivered = float(max(0.0, delta_delivered))
+        delta_dropped = float(max(0.0, delta_dropped))
+
+        # Persist totals for next step.
+        self._prev_energy_kwh_total = float(energy_total)
+        self._prev_delivered_total = float(delivered_total)
+        self._prev_dropped_total = float(dropped_total)
+
+        # Per-step normalized drop ratio.
+        norm_drop_step = delta_dropped / max(delta_delivered + delta_dropped + 1e-9, 1e-9)
 
         time_ratio = min(1.0, self._step_count / self.config.max_steps)
         active_ratio = self._active_ratio()
@@ -227,19 +357,36 @@ class GreenNetEnv(gym.Env):
             edge_active=edge_active,
             edge_util=edge_util,
         )
-        self._prev_dropped = metrics.dropped
+        # Store previous-step drops for the next observation (use per-step delta).
+        self._prev_dropped = float(delta_dropped)
 
-        drop_component = metrics.dropped
+        # Normalized drop ratios:
+        # - `norm_drop_total` uses cumulative totals (good for a "whole-episode" QoS constraint)
+        # - `norm_drop_step` uses per-step deltas (good for shaping reward each step)
+        norm_drop_total = float(dropped_total) / max(float(delivered_total) + float(dropped_total) + 1e-9, 1e-9)
+        self._last_norm_drop_total = float(norm_drop_total)
+
+        drop_component = float(delta_dropped)
         if self.config.normalize_drop:
-            drop_component = metrics.dropped / max(metrics.delivered + metrics.dropped + 1e-9, 1e-9)
+            drop_component = float(norm_drop_step)
 
-        # ENERGY WEIGHT: Increase this multiplier to make the agent care more about saving energy.
-        # Decrease it if energy dominates and the agent becomes too aggressive about switching links off.
-        reward_energy = -self.config.energy_weight * metrics.energy_kwh
+        # Use per-step energy delta for reward (prevents double-counting cumulative totals).
+        reward_energy = -float(self.config.energy_weight) * float(delta_energy)
 
         reward_drop = -self.config.drop_penalty_lambda * drop_component
+
+        # Extra QoS penalty if drop ratio exceeds the target (after enough volume is observed).
+        volume = float(delivered_total + dropped_total)
+        qos_excess = 0.0
+        if volume >= float(self.config.qos_min_volume):
+            qos_excess = max(0.0, float(norm_drop_total) - float(self.config.qos_target_norm_drop))
+        # Cap overshoot to prevent rare spikes from nuking reward (stabilizes training).
+        qos_excess = min(qos_excess, 0.05)
+        # Linear QoS penalty (less spiky than quadratic; prevents QoS term from dominating reward).
+        reward_qos = -float(self.config.qos_violation_penalty_scale) * float(qos_excess)
+
         reward_toggle = -toggle_cost
-        reward = reward_energy + reward_drop + reward_toggle
+        reward = reward_energy + reward_drop + reward_qos + reward_toggle
         terminated = False
         truncated = self._step_count >= self.config.max_steps
         info: Dict[str, Any] = {
@@ -250,8 +397,15 @@ class GreenNetEnv(gym.Env):
             "toggle_blocked_cooldown": toggle_blocked,
             "toggle_blocked_high_util": toggle_blocked_high_util,
             "toggle_blocked_global_cooldown": toggle_blocked_global,
+            "toggle_blocked_any": blocked_any,
             "reward_energy": reward_energy,
             "reward_drop": reward_drop,
+            "delta_energy_kwh": float(delta_energy),
+            "delta_delivered": float(delta_delivered),
+            "delta_dropped": float(delta_dropped),
+            "norm_drop_step": float(norm_drop_step),
+            "norm_drop": float(norm_drop_total),
+            "reward_qos": reward_qos,
             "reward_toggle": reward_toggle,
             "total_reward": reward,
             "action_int": action_int,
@@ -266,10 +420,110 @@ class GreenNetEnv(gym.Env):
     def close(self) -> None:
         return None
 
+
+
+    def get_action_mask(self) -> np.ndarray:
+        """Return a boolean mask over actions (Discrete(E+1)).
+        
+        mask[a] == True means action 'a' is currently allowed.
+
+        We mask out actions that would be blocked by the same gates used in '_apply_action':
+            - edge mising (when topology_randomize=True)
+            - global cooldown (only blocks turning OFF)
+            - high utilization (only blocks turning OFF)
+            - per-edge cooldown (blocks both directions)
+
+        Note: we do NOT try to predict connectivity reverts here (too expensive to evaluate for every action each step). Reverts remain possible.
+        """
+        n = int(self.action_space.n)
+        mask = np.ones((n,), dtype=bool)
+        if n <= 0:
+            return mask
+        
+        # Always allow NOOP
+        mask[0] = True
+
+        if self.simulator is None or not self.edge_list:
+            mask[1:] = False
+            return mask
+        
+        global_cd = int(getattr(self, "_global_toggle_cooldown_remaining", 0))
+
+        for a in range(1, n):
+            idx = a - 1
+            if idx < 0 or idx >= len(self.edge_list):
+                mask[a] = False
+                continue
+        
+            edge = self.edge_list[idx]
+            if not self.simulator.graph.has_edge(*edge):
+                mask[a] = False
+                continue
+
+            key = self._edge_key(edge[0], edge[1])
+            current_state = bool(self.simulator.active.get(key, True))
+
+            # Global cooldown blocks only when trying to turn an edge OFF
+            if current_state and global_cd > 0:
+                mask[a] = False
+                continue
+
+            # High-util gate blocks only when trying to turn an edge OFF
+            if current_state:
+                # QoS guard: block turning an edge OFF when QoS is near/over target.
+                last_nd = float(getattr(self, "_last_norm_drop_total", 0.0))
+                target = float(self.config.qos_target_norm_drop)
+                margin = float(getattr(self.config, "qos_guard_margin", 0.0))
+                if last_nd >= (target - margin):
+                    mask[a] = False
+                    continue
+                util = float(self.simulator.utilization.get(key, 0.0))
+                if util > float(self.config.util_block_threshold):
+                    mask[a] = False
+                    continue
+            
+            # Per-edge cooldown blocks both directions
+            last_toggled = self.simulator.graph.edges[edge].get(
+                "last_toggled", -self.config.toggle_cooldown_steps
+            )
+            if (self._step_count - last_toggled) < int(self.config.toggle_cooldown_steps):
+                mask[a] = False
+                continue
+            mask[a] = True
+        return mask
+
+
+
     def _generate_flows(self) -> Tuple[Flow, ...]:
         if self.simulator is None:
             return tuple()
 
+        # Stochastic traffic mode: convert scheduled bursts into flows.
+        if self.config.traffic_model.lower() == "stochastic":
+            step_idx = max(0, self._step_count - 1)  # step() increments before generating flows
+
+            # Add newly starting bursts for this step.
+            for b in self._traffic_by_step.get(step_idx, []):
+                demand = float(max(0, int(b.size)))
+                remaining = max(1, int(b.duration))
+                self._active_bursts.append((int(b.source), int(b.destination), demand, remaining))
+
+            flows: List[Flow] = []
+            still_active: List[Tuple[int, int, float, int]] = []
+
+            # Emit one flow per active burst per step.
+            for src, dst, demand, remaining in self._active_bursts:
+                if src == dst or demand <= 0.0:
+                    continue
+                flows.append(Flow(int(src), int(dst), float(demand)))
+                remaining -= 1
+                if remaining > 0:
+                    still_active.append((src, dst, demand, remaining))
+
+            self._active_bursts = still_active
+            return tuple(flows)
+
+        # Default/uniform traffic mode (existing behavior).
         flows: List[Flow] = []
         node_count = self.simulator.graph.number_of_nodes()
 
@@ -400,6 +654,19 @@ class GreenNetEnv(gym.Env):
             return 0.0, False, False, False, False, False
 
         current_state = bool(self.simulator.active.get(key, True))
+
+        # QoS guard: when norm_drop_total is near/above target, block turning edges OFF.
+        if current_state:
+            last_nd = float(getattr(self, "_last_norm_drop_total", 0.0))
+            target = float(self.config.qos_target_norm_drop)
+            margin = float(getattr(self.config, "qos_guard_margin", 0.0))
+            if last_nd >= (target - margin):
+                penalty = (
+                    self.config.toggle_penalty
+                    * self.config.revert_penalty_scale
+                    * float(getattr(self.config, "qos_guard_penalty_scale", 1.0))
+                )
+                return penalty, False, False, False, False, False
 
         # Global cooldown: block rapid toggles ONLY when turning an edge OFF.
         # Turning an edge ON is always allowed so the agent can recover quickly.
