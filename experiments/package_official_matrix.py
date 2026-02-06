@@ -163,32 +163,69 @@ def _auto_headline_from_leaderboard(leaderboard: pd.DataFrame) -> str:
     lines: List[str] = []
     reward_delta_col = "delta_reward_vs_heuristic" if "delta_reward_vs_heuristic" in leaderboard.columns else None
     dropped_delta_col = "delta_dropped_vs_heuristic" if "delta_dropped_vs_heuristic" in leaderboard.columns else None
+    energy_delta_col = "delta_energy_vs_heuristic" if "delta_energy_vs_heuristic" in leaderboard.columns else None
 
+    def _reward_phrase(val: float) -> str:
+        # Delta is current - baseline; reward is higher-is-better.
+        arrow = "↑" if val >= 0 else "↓"
+        return f"reward {arrow}{abs(val):.3f}"
+
+    def _drops_phrase(val: float) -> str:
+        # Delta is current - baseline; drops is lower-is-better.
+        arrow = "↓" if val <= 0 else "↑"
+        return f"drops {arrow}{abs(val):.3f}"
+
+    def _energy_phrase(val: float) -> str:
+        # Delta is current - baseline; energy is lower-is-better.
+        if abs(val) < 5e-7:
+            return "energy ~0"
+        arrow = "↓" if val <= 0 else "↑"
+        return f"energy {arrow}{abs(val):.6f}"
+
+    valid_mask = pd.Series([False] * len(ppo_rows), index=ppo_rows.index, dtype=bool)
     for _, row in ppo_rows.sort_values("scenario").iterrows():
         scenario = str(row.get("scenario", "unknown"))
-        parts: List[str] = []
-        if reward_delta_col:
-            try:
-                parts.append(f"Δreward_vs_heuristic={float(row[reward_delta_col]):+.3f}")
-            except Exception:
-                pass
-        if dropped_delta_col:
-            try:
-                parts.append(f"Δdropped_vs_heuristic={float(row[dropped_delta_col]):+.3f}")
-            except Exception:
-                pass
-        if parts:
-            lines.append(f"{scenario}: " + ", ".join(parts))
+        # Reward + dropped are required for arrow-style scenario headline.
+        reward_val = float("nan")
+        dropped_val = float("nan")
+        if reward_delta_col and reward_delta_col in row.index:
+            reward_val = float(pd.to_numeric(pd.Series([row[reward_delta_col]]), errors="coerce").iloc[0])
+        if dropped_delta_col and dropped_delta_col in row.index:
+            dropped_val = float(pd.to_numeric(pd.Series([row[dropped_delta_col]]), errors="coerce").iloc[0])
+
+        if pd.isna(reward_val) or pd.isna(dropped_val):
+            lines.append(f"{scenario}: (no heuristic baseline; deltas unavailable)")
+            continue
+
+        valid_mask.loc[row.name] = True
+        parts: List[str] = [_reward_phrase(reward_val), _drops_phrase(dropped_val)]
+        if energy_delta_col and energy_delta_col in row.index:
+            energy_val = float(pd.to_numeric(pd.Series([row[energy_delta_col]]), errors="coerce").iloc[0])
+            if not pd.isna(energy_val):
+                parts.append(_energy_phrase(energy_val))
+        lines.append(f"{scenario}: " + ", ".join(parts))
 
     overall_parts: List[str] = []
+    valid_rows = ppo_rows[valid_mask] if len(ppo_rows) else ppo_rows
     if reward_delta_col:
         try:
-            overall_parts.append(f"avg_Δreward_vs_heuristic={float(pd.to_numeric(ppo_rows[reward_delta_col], errors='coerce').mean()):+.3f}")
+            reward_mean = float(pd.to_numeric(valid_rows[reward_delta_col], errors="coerce").mean())
+            if not pd.isna(reward_mean):
+                overall_parts.append(_reward_phrase(reward_mean))
         except Exception:
             pass
     if dropped_delta_col:
         try:
-            overall_parts.append(f"avg_Δdropped_vs_heuristic={float(pd.to_numeric(ppo_rows[dropped_delta_col], errors='coerce').mean()):+.3f}")
+            dropped_mean = float(pd.to_numeric(valid_rows[dropped_delta_col], errors="coerce").mean())
+            if not pd.isna(dropped_mean):
+                overall_parts.append(_drops_phrase(dropped_mean))
+        except Exception:
+            pass
+    if energy_delta_col:
+        try:
+            energy_mean = float(pd.to_numeric(valid_rows[energy_delta_col], errors="coerce").mean())
+            if not pd.isna(energy_mean):
+                overall_parts.append(_energy_phrase(energy_mean))
         except Exception:
             pass
 
@@ -196,6 +233,8 @@ def _auto_headline_from_leaderboard(leaderboard: pd.DataFrame) -> str:
         return "PPO headline unavailable: expected delta columns not found."
     if overall_parts:
         lines.append("overall: " + ", ".join(overall_parts))
+    else:
+        lines.append("overall: (no heuristic baseline; deltas unavailable)")
     return " | ".join(lines)
 
 

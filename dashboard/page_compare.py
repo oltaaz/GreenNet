@@ -617,13 +617,6 @@ def render_compare(runs: List[Path]) -> None:
     baseline_ref_key = "baseline" if "baseline" in kpis else ("all_on" if "all_on" in kpis else None)
     baseline_ref = kpis.get(baseline_ref_key) if baseline_ref_key else None
 
-    def _delta_text(val: float, ref_val: float, *, higher_is_better: bool, fmt: str) -> Optional[str]:
-        if pd.isna(val) or pd.isna(ref_val):
-            return None
-        # Positive delta always means improvement.
-        delta = (val - ref_val) if higher_is_better else (ref_val - val)
-        return f"{delta:+{fmt}}"
-
     metric_specs = [
         ("Reward (mean)", "reward_mean", True, ".3f"),
         ("Dropped (mean)", "dropped_mean", False, ".3f"),
@@ -631,6 +624,35 @@ def render_compare(runs: List[Path]) -> None:
         ("Toggle rate", "toggles_rate", False, ".4f"),
         ("QoS viol rate", "qos_violation_rate", False, ".4f"),
     ]
+    tolerances = {
+        "reward_mean": 1e-2,
+        "dropped_mean": 5.0,
+        # Treat tiny changes as visually neutral (~0) for thesis screenshots.
+        # Note: these are *display-only* tolerances; delta math stays the same.
+        "energy_mean": 1e-3,          # ~0.001 kWh
+        "qos_violation_rate": 1e-3,   # ~0.1% of steps if qos_violation is 0/1
+        "toggles_rate": 2e-3,         # ~0.2% toggles per step
+    }
+    status_colors = {
+        "good": "#16A34A",
+        "bad": "#DC2626",
+        "neutral": "#9CA3AF",
+    }
+
+    def _delta_display(
+        metric_key: str,
+        val: float,
+        ref_val: float,
+        *,
+        higher_is_better: bool,
+        fmt: str,
+    ) -> tuple[str, str]:
+        # Positive delta always means improvement by construction.
+        delta = (val - ref_val) if higher_is_better else (ref_val - val)
+        tol = float(tolerances.get(metric_key, 0.0))
+        if abs(delta) <= tol:
+            return "~0", "neutral"
+        return (f"{delta:+{fmt}}", "good" if delta > 0 else "bad")
 
     order = [k for k in ["baseline", "ppo", "all_on"] if k in kpis]
     kpi_cols = st.columns(len(order))
@@ -641,18 +663,27 @@ def render_compare(runs: List[Path]) -> None:
             st.markdown(f"#### {label_map.get(key, key)}")
             for title, field, higher_is_better, fmt in metric_specs:
                 value_text = f"{vals[field]:{fmt}}" if not pd.isna(vals[field]) else "nan"
-                delta_text = (
-                    _delta_text(vals[field], ref[field], higher_is_better=higher_is_better, fmt=fmt)
-                    if ref
-                    else None
-                )
                 st.metric(
                     title,
                     value_text,
-                    delta=delta_text,
-                    # With improvement-oriented deltas, positive should be green and negative red.
-                    delta_color="normal",
+                    delta=None,
                 )
+                if ref and not pd.isna(vals[field]) and not pd.isna(ref[field]):
+                    delta_text, status = _delta_display(
+                        field,
+                        float(vals[field]),
+                        float(ref[field]),
+                        higher_is_better=higher_is_better,
+                        fmt=fmt,
+                    )
+                    st.markdown(
+                        (
+                            f"<div style='color:{status_colors[status]}; "
+                            "font-size:0.85rem; margin-top:-0.25rem; margin-bottom:0.35rem;'>"
+                            f"Δ vs baseline: {delta_text}</div>"
+                        ),
+                        unsafe_allow_html=True,
+                    )
             st.metric(
                 "Active ratio",
                 f"{vals['active_ratio_mean']:.3f}",
