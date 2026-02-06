@@ -10,10 +10,11 @@ The simulator/environment can consume an iterator of TrafficBurst events.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable, Iterator, Sequence
 import math
 import random
+import re
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,108 @@ class StochasticTrafficConfig:
     spike_prob: float = 0.01
     spike_multiplier_range: tuple[float, float] = (2.0, 6.0)
     spike_duration_range: tuple[int, int] = (3, 12)
+
+
+_SCENARIO_ALIASES = {
+    "diurnal": "normal",
+    "normal diurnal": "normal",
+    "normal/diurnal": "normal",
+    "failure": "anomaly",
+}
+
+_SCENARIO_PRESETS: dict[str, dict[int, dict[str, object]]] = {
+    "normal": {
+        2: {
+            "avg_bursts_per_step": 3.0,
+            "spike_prob": 0.01,
+            "spike_multiplier_range": (1.5, 3.0),
+            "spike_duration_range": (2, 6),
+            "hotspots": (),
+        }
+    },
+    "burst": {
+        2: {
+            "avg_bursts_per_step": 4.0,
+            "spike_prob": 0.05,
+            "spike_multiplier_range": (2.0, 6.0),
+            "spike_duration_range": (3, 12),
+            "hotspots": (),
+        }
+    },
+    "hotspot": {
+        2: {
+            "avg_bursts_per_step": 3.0,
+            "spike_prob": 0.01,
+            "hotspots": ((0, 5, 3.0), (2, 7, 2.0)),
+        }
+    },
+    "anomaly": {
+        2: {
+            "avg_bursts_per_step": 3.0,
+            "spike_prob": 0.15,
+            "spike_multiplier_range": (3.0, 8.0),
+            "spike_duration_range": (5, 20),
+            "hotspots": (),
+        }
+    },
+}
+
+
+def _normalize_scenario_name(name: str) -> tuple[str, int | None]:
+    raw = name.strip().lower().replace("_", " ").replace("-", " ").replace("/", " ")
+    raw = re.sub(r"\s+", " ", raw)
+    match = re.match(r"^(.*?)(?:\s+v(\d+))?$", raw)
+    if match:
+        base = match.group(1).strip()
+        ver = int(match.group(2)) if match.group(2) is not None else None
+    else:
+        base = raw.strip()
+        ver = None
+    base = _SCENARIO_ALIASES.get(base, base)
+    return base, ver
+
+
+def _scale_int_range(rng: tuple[int, int], factor: float) -> tuple[int, int]:
+    lo, hi = rng
+    lo = max(1, int(round(float(lo) * factor)))
+    hi = max(lo, int(round(float(hi) * factor)))
+    return lo, hi
+
+
+def apply_traffic_scenario(
+    base: StochasticTrafficConfig,
+    scenario: str | None,
+    *,
+    intensity: float | None = None,
+    duration: float | None = None,
+    frequency: float | None = None,
+    version: int | None = None,
+) -> StochasticTrafficConfig:
+    if scenario is None or str(scenario).strip() == "":
+        return base
+
+    name, parsed_ver = _normalize_scenario_name(str(scenario))
+    use_ver = int(version) if version is not None else (parsed_ver or 2)
+
+    presets = _SCENARIO_PRESETS.get(name)
+    if presets is None or use_ver not in presets:
+        raise ValueError(f"Unknown traffic scenario '{scenario}' (version={use_ver})")
+
+    cfg = replace(base, **presets[use_ver])
+
+    if intensity is not None:
+        cfg.avg_bursts_per_step = max(0.0, float(cfg.avg_bursts_per_step) * float(intensity))
+
+    if frequency is not None:
+        scaled = float(cfg.spike_prob) * float(frequency)
+        cfg.spike_prob = min(1.0, max(0.0, scaled))
+
+    if duration is not None:
+        factor = max(0.1, float(duration))
+        cfg.duration_range = _scale_int_range(cfg.duration_range, factor)
+        cfg.spike_duration_range = _scale_int_range(cfg.spike_duration_range, factor)
+
+    return cfg
 
 
 class StochasticTrafficGenerator(TrafficGenerator):
@@ -235,4 +338,5 @@ __all__ = [
     "ConstantTrafficGenerator",
     "StochasticTrafficConfig",
     "StochasticTrafficGenerator",
+    "apply_traffic_scenario",
 ]

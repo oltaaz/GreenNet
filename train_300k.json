@@ -1,5 +1,9 @@
 {
   "seed": 42,
+  "train_seed": 42,
+  "eval_seed": 123,
+  "topology_seed": 0,
+  "traffic_seed": 10042,
   "total_timesteps": 300000,
   "ppo": {
     "policy": "MultiInputPolicy",

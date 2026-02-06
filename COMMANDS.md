@@ -66,8 +66,8 @@ This writes (inside a new folder under `results/`):
 
 Examples:
 
-python3 run_experiment.py --policy noop --scenario normal --seed 0 --episodes 1 --steps 300
-python3 run_experiment.py --policy baseline --scenario hotspot --seed 0 --episodes 1 --steps 300
+python3 run_experiment.py --policy all_on --scenario normal --seed 0 --episodes 1 --steps 300
+python3 run_experiment.py --policy heuristic --scenario hotspot --seed 0 --episodes 1 --steps 300
 python3 run_experiment.py --policy ppo --scenario normal --seed 0 --episodes 1 --steps 300
 
 Stochastic PPO evaluation:
@@ -90,6 +90,81 @@ python3 experiments/run_matrix.py --seeds 0,1,2 --scenarios normal,hotspot --pol
 Force fixed topology seed:
 
 python3 experiments/run_matrix.py --episodes 1 --steps 300 --topology-seed 0
+
+---------------------------------------------------------------------------------------------------------------------------------------
+
+## 6a) Official Matrix Run (canonical)
+
+Use this command for the **official results** (do not change without bumping the tag/version):
+
+python3 experiments/run_matrix.py \
+  --policies all_on,heuristic,ppo \
+  --scenarios normal,burst,hotspot \
+  --seeds 0,1,2,3,4,5,6,7,8,9 \
+  --episodes 50 \
+  --steps 300 \
+  --tag matrix_v1
+
+---------------------------------------------------------------------------------------------------------------------------------------
+
+## 6b) Official Matrix Run (matrix_v2 — energy_weight +50%)
+
+Train PPO v2 (energy_weight=1800 only; everything else unchanged):
+
+python3 train.py --config train_normal_v2.json --timesteps 300000
+
+Run the matrix using the exact PPO model you trained (pin model path):
+
+python3 experiments/run_matrix.py \
+  --policies all_on,heuristic,ppo \
+  --scenarios normal,burst,hotspot \
+  --seeds 0,1,2,3,4,5,6,7,8,9 \
+  --episodes 50 \
+  --steps 300 \
+  --tag matrix_v2 \
+  --ppo-model <PATH_TO_PPO_ZIP>
+
+---------------------------------------------------------------------------------------------------------------------------------------
+
+## 6c) Official Matrix Run (matrix_v3 — lower toggle penalties)
+
+Train PPO v3 (energy_weight=1800, toggle penalties reduced only):
+
+python3 train.py --config train_normal_v3.json --timesteps 300000
+
+Run the matrix using the exact PPO model you trained (pin model path):
+
+python3 experiments/run_matrix.py \
+  --policies all_on,heuristic,ppo \
+  --scenarios normal,burst,hotspot \
+  --seeds 0,1,2,3,4,5,6,7,8,9 \
+  --episodes 50 \
+  --steps 300 \
+  --tag matrix_v3 \
+  --ppo-model <PATH_TO_PPO_ZIP>
+
+Note: single knob change vs v2 = lower toggle_penalty (0.0005) and blocked_action_penalty (0.0003).
+
+---------------------------------------------------------------------------------------------------------------------------------------
+
+## 6d) Official Matrix Run (matrix_v4 — loosen cooldowns)
+
+Train PPO v4 (keep v3 settings, reduce cooldowns only):
+
+python3 train.py --config train_normal_v4.json --timesteps 300000
+
+Run the matrix using the exact PPO model you trained (pin model path):
+
+python3 experiments/run_matrix.py \
+  --policies all_on,heuristic,ppo \
+  --scenarios normal,burst,hotspot \
+  --seeds 0,1,2,3,4,5,6,7,8,9 \
+  --episodes 50 \
+  --steps 300 \
+  --tag matrix_v4 \
+  --ppo-model <PATH_TO_PPO_ZIP>
+
+Note: single knob change vs v3 = toggle_cooldown_steps=4 (was 12) and global_toggle_cooldown_steps=10 (was 40).
 
 ---------------------------------------------------------------------------------------------------------------------------------------
 

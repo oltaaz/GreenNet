@@ -195,6 +195,29 @@ def _metric_cards_from_summary(run: RunData) -> None:
     c9.metric("Avg util (mean)", str(ov.get("avg_utilization_mean", "")))
     c10.metric("Delay ms (mean)", str(ov.get("avg_delay_ms_mean", "")))
 
+    df = run.per_step
+    if "toggle_applied" in df.columns:
+        toggle_applied = pd.to_numeric(df["toggle_applied"], errors="coerce").fillna(0.0)
+    else:
+        toggle_applied = pd.Series([0.0] * len(df))
+    if "toggle_reverted" in df.columns:
+        toggle_reverted = pd.to_numeric(df["toggle_reverted"], errors="coerce").fillna(0.0)
+    else:
+        toggle_reverted = pd.Series([0.0] * len(df))
+    toggles_rate = float((toggle_applied + toggle_reverted).mean()) if len(df) > 0 else 0.0
+    if "qos_violation" in df.columns:
+        qos_violation = pd.to_numeric(df["qos_violation"], errors="coerce").fillna(0.0)
+    else:
+        qos_violation = pd.Series([0.0] * len(df))
+    qos_violation_rate = float(qos_violation.mean()) if len(df) > 0 else 0.0
+
+    c11, c12, c13, c14, c15 = st.columns(5)
+    c11.metric("Toggle rate", f"{toggles_rate:.4f}")
+    c12.metric("QoS viol rate", f"{qos_violation_rate:.4f}")
+    c13.metric("Active ratio (mean)", str(ov.get("active_ratio_mean", "")))
+    c14.metric("Avg util (mean)", str(ov.get("avg_utilization_mean", "")))
+    c15.metric("Energy kWh (mean)", str(ov.get("energy_kwh_total_mean", "")))
+
 
 def render_single_run(runs: List[Path]) -> None:
     st.subheader("Single run")
@@ -209,7 +232,7 @@ def render_single_run(runs: List[Path]) -> None:
     if not run_names:
         st.info(
             "No runs found in ./results yet. Create one with: "
-            "python3 run_experiment.py --policy noop --scenario normal --seed 0 --episodes 1 --steps 300"
+            "python3 run_experiment.py --policy all_on --scenario normal --seed 0 --episodes 1 --steps 300"
         )
         return
 

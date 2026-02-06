@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
-from dataclasses import replace
+from dataclasses import fields, is_dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
@@ -53,6 +53,111 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "clip_range": 0.2,
     },
 }
+
+_ENV_TUPLE_FIELDS = {
+    "topology_seeds",
+    "traffic_mice_size_range",
+    "traffic_elephant_size_range",
+    "traffic_duration_range",
+    "traffic_spike_multiplier_range",
+    "traffic_spike_duration_range",
+}
+
+
+def _coerce_env_value(key: str, value: Any) -> Any:
+    if key == "traffic_hotspots" and isinstance(value, list):
+        return tuple(tuple(item) for item in value)
+    if key == "topology_seeds" and isinstance(value, list):
+        return tuple(int(v) for v in value)
+    if key in _ENV_TUPLE_FIELDS and isinstance(value, list):
+        return tuple(value)
+    return value
+
+
+def _extract_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
+    env_overrides: Dict[str, Any] = {}
+    for key in ("env", "env_config", "env_kwargs"):
+        block = config.get(key)
+        if isinstance(block, dict):
+            env_overrides.update(block)
+
+    # Allow top-level seed keys to flow into env config.
+    for key in ("topology_seed", "topology_seeds", "topology_randomize", "traffic_seed"):
+        if key in config and key not in env_overrides:
+            env_overrides[key] = config[key]
+
+    if "traffic_seed_base" in config and "traffic_seed" not in env_overrides:
+        env_overrides["traffic_seed"] = config["traffic_seed_base"]
+
+    if is_dataclass(EnvConfig):
+        allowed = {f.name for f in fields(EnvConfig)}
+        env_overrides = {
+            k: _coerce_env_value(k, v)
+            for k, v in env_overrides.items()
+            if k in allowed
+        }
+    else:
+        env_overrides = {k: _coerce_env_value(k, v) for k, v in env_overrides.items()}
+
+    return env_overrides
+
+
+def _resolve_seed(config: Dict[str, Any], key: str, fallback: int) -> int:
+    value = config.get(key, fallback)
+    try:
+        return int(value)
+    except Exception:
+        return int(fallback)
+
+
+def default_train_env_config() -> EnvConfig:
+    return EnvConfig(
+        traffic_model="stochastic",
+        # Make energy matter enough to beat NOOP.
+        energy_weight=1200.0,
+
+        # Drops still matter, but don't drown everything.
+        drop_penalty_lambda=12.0,
+        normalize_drop=True,
+
+        # QoS penalty: sane + gated.
+        qos_target_norm_drop=0.0720,
+        qos_violation_penalty_scale=60.0,
+        qos_min_volume=3000.0,
+        qos_guard_margin=0.004,
+        qos_guard_penalty_scale=1.5,
+
+        # Let it explore without fear (tune if action thrashing).
+        toggle_penalty=0.0015,
+        blocked_action_penalty=0.0010,
+
+        # Keep action responsiveness but avoid flapping.
+        toggle_cooldown_steps=12,
+        global_toggle_cooldown_steps=40,
+        util_block_threshold=0.2,
+
+        traffic_hotspots=((0, 5, 3.0), (2, 7, 2.0)),
+        traffic_avg_bursts_per_step=2.0,
+        traffic_p_elephant=0.08,
+        traffic_elephant_size_range=(6, 20),
+        traffic_duration_range=(1, 3),
+        traffic_spike_prob=0.005,
+        traffic_spike_multiplier_range=(1.5, 3.0),
+        traffic_spike_duration_range=(2, 6),
+        topology_randomize=False,
+        topology_seed=0,
+        flows_per_step=6,
+        base_capacity=15.0,
+    )
+
+
+def build_train_env_config(config: Dict[str, Any]) -> EnvConfig:
+    env_config = default_train_env_config()
+
+    for key, value in _extract_env_overrides(config).items():
+        setattr(env_config, key, value)
+
+    return env_config
 
 
 def load_config(config_path: Path | None) -> Dict[str, Any]:
@@ -224,6 +329,19 @@ def eval_policy(model: Any | None, env_config: EnvConfig, episodes: int, seed: i
     ep_reward_drop: list[float] = []
     ep_reward_qos: list[float] = []
     ep_reward_toggle: list[float] = []
+    ep_toggle_total: list[int] = []
+    ep_toggle_rate: list[float] = []
+    ep_qos_violation_rate: list[float] = []
+    ep_toggle_attempted: list[int] = []
+    ep_toggle_allowed: list[int] = []
+    ep_blocked_util: list[int] = []
+    ep_blocked_cooldown: list[int] = []
+    ep_toggle_applied_count: list[int] = []
+    ep_toggle_attempted_rate: list[float] = []
+    ep_toggle_allowed_rate: list[float] = []
+    ep_blocked_util_rate: list[float] = []
+    ep_blocked_cooldown_rate: list[float] = []
+    ep_toggle_applied_rate: list[float] = []
 
     for ep in range(episodes):
         obs, info = env.reset(seed=seed + ep)
@@ -234,7 +352,13 @@ def eval_policy(model: Any | None, env_config: EnvConfig, episodes: int, seed: i
         total_delivered = 0.0
         applied = 0
         reverted = 0
+        attempted = 0
+        allowed = 0
+        blocked_util = 0
+        blocked_cooldown = 0
+        applied_count = 0
         steps = 0
+        qos_violation_steps = 0
         sum_reward_energy = 0.0
         sum_reward_drop = 0.0
         sum_reward_qos = 0.0
@@ -252,6 +376,8 @@ def eval_policy(model: Any | None, env_config: EnvConfig, episodes: int, seed: i
 
             obs, r, terminated, truncated, info = env.step(action)
             steps += 1
+            if info.get("qos_violation", False):
+                qos_violation_steps += 1
             if debug_energy and steps in (1, 10, 100, 1000):
                 print(
                     "dbg steps",
@@ -290,6 +416,11 @@ def eval_policy(model: Any | None, env_config: EnvConfig, episodes: int, seed: i
 
             applied += int(bool(info.get("toggle_applied")))
             reverted += int(bool(info.get("toggle_reverted")))
+            attempted += int(info.get("toggles_attempted_count", 0))
+            allowed += int(info.get("allowed_toggle_count", 0))
+            blocked_util += int(info.get("blocked_by_util_count", 0))
+            blocked_cooldown += int(info.get("blocked_by_cooldown_count", 0))
+            applied_count += int(info.get("toggles_applied_count", 0))
 
         if debug_energy:
             print("dbg episode steps total:", steps, "total_energy:", total_energy)
@@ -307,6 +438,33 @@ def eval_policy(model: Any | None, env_config: EnvConfig, episodes: int, seed: i
         ep_reward_drop.append(sum_reward_drop)
         ep_reward_qos.append(sum_reward_qos)
         ep_reward_toggle.append(sum_reward_toggle)
+        toggle_total = applied + reverted
+        ep_toggle_total.append(toggle_total)
+        if steps > 0:
+            ep_toggle_rate.append(toggle_total / float(steps))
+        else:
+            ep_toggle_rate.append(0.0)
+        ep_toggle_attempted.append(attempted)
+        ep_toggle_allowed.append(allowed)
+        ep_blocked_util.append(blocked_util)
+        ep_blocked_cooldown.append(blocked_cooldown)
+        ep_toggle_applied_count.append(applied_count)
+        if steps > 0:
+            ep_toggle_attempted_rate.append(attempted / float(steps))
+            ep_toggle_allowed_rate.append(allowed / float(steps))
+            ep_blocked_util_rate.append(blocked_util / float(steps))
+            ep_blocked_cooldown_rate.append(blocked_cooldown / float(steps))
+            ep_toggle_applied_rate.append(applied_count / float(steps))
+        else:
+            ep_toggle_attempted_rate.append(0.0)
+            ep_toggle_allowed_rate.append(0.0)
+            ep_blocked_util_rate.append(0.0)
+            ep_blocked_cooldown_rate.append(0.0)
+            ep_toggle_applied_rate.append(0.0)
+        if steps > 0:
+            ep_qos_violation_rate.append(qos_violation_steps / float(steps))
+        else:
+            ep_qos_violation_rate.append(0.0)
 
     def _mean_std(xs: list[float]) -> tuple[float, float]:
         arr = np.asarray(xs, dtype=np.float64)
@@ -321,6 +479,19 @@ def eval_policy(model: Any | None, env_config: EnvConfig, episodes: int, seed: i
     rd_m, rd_s = _mean_std(ep_reward_drop)
     rq_m, rq_s = _mean_std(ep_reward_qos)
     rt_m, rt_s = _mean_std(ep_reward_toggle)
+    tt_m, tt_s = _mean_std([float(v) for v in ep_toggle_total])
+    tr_m, tr_s = _mean_std([float(v) for v in ep_toggle_rate])
+    qv_m, qv_s = _mean_std(ep_qos_violation_rate)
+    ta_m, ta_s = _mean_std([float(v) for v in ep_toggle_attempted])
+    al_m, al_s = _mean_std([float(v) for v in ep_toggle_allowed])
+    bu_m, bu_s = _mean_std([float(v) for v in ep_blocked_util])
+    bc_m, bc_s = _mean_std([float(v) for v in ep_blocked_cooldown])
+    ap_m, ap_s = _mean_std([float(v) for v in ep_toggle_applied_count])
+    ta_r_m, ta_r_s = _mean_std([float(v) for v in ep_toggle_attempted_rate])
+    al_r_m, al_r_s = _mean_std([float(v) for v in ep_toggle_allowed_rate])
+    bu_r_m, bu_r_s = _mean_std([float(v) for v in ep_blocked_util_rate])
+    bc_r_m, bc_r_s = _mean_std([float(v) for v in ep_blocked_cooldown_rate])
+    ap_r_m, ap_r_s = _mean_std([float(v) for v in ep_toggle_applied_rate])
 
     mode = "det" if deterministic else "stoch"
     print(f"\n=== Evaluation: {label} ({mode}, {episodes} episodes) ===")
@@ -333,9 +504,19 @@ def eval_policy(model: Any | None, env_config: EnvConfig, episodes: int, seed: i
     print(f"reward_drop:    mean={rd_m:.3f} std={rd_s:.3f}")
     print(f"reward_qos:     mean={rq_m:.3f} std={rq_s:.3f}")
     print(f"reward_toggle:  mean={rt_m:.3f} std={rt_s:.3f}")
+    print(f"qos_violation:  mean={qv_m:.4f} std={qv_s:.4f}")
     print(
         f"toggles applied mean={float(np.mean(ep_applied)):.2f} "
         f"reverted mean={float(np.mean(ep_reverted)):.2f}"
+    )
+    print(f"toggles total   mean={tt_m:.2f} std={tt_s:.2f} rate={tr_m:.4f}")
+    print(
+        "toggle gates   "
+        f"attempted={ta_m:.2f} ({ta_r_m:.4f}/step) "
+        f"allowed={al_m:.2f} ({al_r_m:.4f}/step) "
+        f"blocked_util={bu_m:.2f} ({bu_r_m:.4f}/step) "
+        f"blocked_cd={bc_m:.2f} ({bc_r_m:.4f}/step) "
+        f"applied={ap_m:.2f} ({ap_r_m:.4f}/step)"
     )
 
     stats = {
@@ -351,6 +532,31 @@ def eval_policy(model: Any | None, env_config: EnvConfig, episodes: int, seed: i
         "norm_drop_std": nd_s,
         "toggles_applied_mean": float(np.mean(ep_applied)),
         "toggles_reverted_mean": float(np.mean(ep_reverted)),
+        "toggles_total_mean": tt_m,
+        "toggles_rate_mean": tr_m,
+        "toggles_rate_std": tr_s,
+        "qos_violation_rate_mean": qv_m,
+        "qos_violation_rate_std": qv_s,
+        "toggles_attempted_count_mean": ta_m,
+        "toggles_attempted_count_std": ta_s,
+        "allowed_toggle_count_mean": al_m,
+        "allowed_toggle_count_std": al_s,
+        "blocked_by_util_count_mean": bu_m,
+        "blocked_by_util_count_std": bu_s,
+        "blocked_by_cooldown_count_mean": bc_m,
+        "blocked_by_cooldown_count_std": bc_s,
+        "toggles_applied_count_mean": ap_m,
+        "toggles_applied_count_std": ap_s,
+        "toggles_attempted_rate_mean": ta_r_m,
+        "toggles_attempted_rate_std": ta_r_s,
+        "allowed_toggle_rate_mean": al_r_m,
+        "allowed_toggle_rate_std": al_r_s,
+        "blocked_by_util_rate_mean": bu_r_m,
+        "blocked_by_util_rate_std": bu_r_s,
+        "blocked_by_cooldown_rate_mean": bc_r_m,
+        "blocked_by_cooldown_rate_std": bc_r_s,
+        "toggles_applied_rate_mean": ap_r_m,
+        "toggles_applied_rate_std": ap_r_s,
     }
 
     env.close()
@@ -373,6 +579,11 @@ def main() -> None:
         "--robustness",
         action="store_true",
         help="Run multi-seed robustness eval (NOOP vs trained(det)) and write CSV+PNG under the model run dir.",
+    )
+    parser.add_argument(
+        "--sanity-eval",
+        action="store_true",
+        help="Quick sanity eval: print mean drops/energy/toggles/QoS violations for trained vs NOOP.",
     )
     parser.add_argument(
         "--timesteps",
@@ -399,8 +610,15 @@ def main() -> None:
     config["ppo"].setdefault("ent_coef", DEFAULT_CONFIG["ppo"]["ent_coef"])
     config["ppo"].setdefault("n_steps", DEFAULT_CONFIG["ppo"]["n_steps"])
 
-    seed = int(config.get("seed", 0))
-    set_seeds(seed)
+    train_seed = _resolve_seed(config, "train_seed", int(config.get("seed", DEFAULT_CONFIG["seed"])))
+    eval_seed = _resolve_seed(config, "eval_seed", train_seed)
+    # Keep backwards-compatible key for older configs.
+    config.setdefault("seed", train_seed)
+    config.setdefault("train_seed", train_seed)
+    config.setdefault("eval_seed", eval_seed)
+
+    active_seed = eval_seed if (args.eval or args.eval_noop or args.robustness) else train_seed
+    set_seeds(active_seed)
 
     # ---- Device selection (Apple Silicon GPU via MPS) ----
     # SB3 defaults to "auto" which primarily checks CUDA; it will NOT automatically pick MPS.
@@ -440,11 +658,72 @@ def main() -> None:
             model=model,
             base_env_config=env_config,
             episodes=int(args.episodes),
-            seed=seed,
+            seed=eval_seed,
             topology_seeds=seeds,
             out_csv=out_csv,
             out_png=out_png,
         )
+        return
+
+    if args.sanity_eval:
+        model_path = args.model or find_latest_model()
+        print(f"[sanity] using model: {model_path}")
+
+        model_run_dir = Path(model_path).parent
+        env_config = load_env_config_from_run(model_run_dir, verbose=True)
+        load_device = config.get("ppo", {}).get("device", "cpu")
+
+        if MASKABLE_AVAILABLE and MaskablePPO is not None:
+            model = MaskablePPO.load(str(model_path), device=load_device)
+        else:
+            model = PPO.load(str(model_path), device=load_device)
+
+        trained = eval_policy(
+            model,
+            env_config,
+            episodes=int(args.episodes),
+            seed=eval_seed,
+            label="trained",
+            deterministic=True,
+            debug_energy=args.debug_eval_energy,
+        )
+        noop = eval_policy(
+            None,
+            env_config,
+            episodes=int(args.episodes),
+            seed=eval_seed,
+            label="always_noop",
+            deterministic=True,
+            debug_energy=args.debug_eval_energy,
+        )
+
+        def _print_sanity(label: str, stats: Dict[str, float]) -> None:
+            print(
+                f"[sanity] {label}: drops_mean={stats['dropped_mean']:.3f} "
+                f"energy_mean={stats['energy_mean']:.6f} "
+                f"toggles_mean={stats['toggles_total_mean']:.2f} "
+                f"toggles_rate={stats.get('toggles_rate_mean', 0.0):.4f} "
+                f"qos_violation_mean={stats['qos_violation_rate_mean']:.4f}"
+            )
+            print(
+                f"[sanity] {label}: attempted={stats.get('toggles_attempted_count_mean', 0.0):.2f} "
+                f"({stats.get('toggles_attempted_rate_mean', 0.0):.4f}/step) "
+                f"allowed={stats.get('allowed_toggle_count_mean', 0.0):.2f} "
+                f"({stats.get('allowed_toggle_rate_mean', 0.0):.4f}/step) "
+                f"blocked_util={stats.get('blocked_by_util_count_mean', 0.0):.2f} "
+                f"({stats.get('blocked_by_util_rate_mean', 0.0):.4f}/step) "
+                f"blocked_cd={stats.get('blocked_by_cooldown_count_mean', 0.0):.2f} "
+                f"({stats.get('blocked_by_cooldown_rate_mean', 0.0):.4f}/step) "
+                f"applied={stats.get('toggles_applied_count_mean', 0.0):.2f} "
+                f"({stats.get('toggles_applied_rate_mean', 0.0):.4f}/step)"
+            )
+
+        _print_sanity("trained", trained)
+        _print_sanity("noop", noop)
+
+        d_energy = trained["energy_mean"] - noop["energy_mean"]
+        d_drop = trained["dropped_mean"] - noop["dropped_mean"]
+        print(f"[sanity] Δenergy={d_energy:+.6f} Δdrops={d_drop:+.3f}")
         return
 
     if args.eval_noop:
@@ -458,7 +737,7 @@ def main() -> None:
             None,
             env_config,
             episodes=int(args.episodes),
-            seed=seed,
+            seed=eval_seed,
             label="always_noop",
             deterministic=True,
             debug_energy=args.debug_eval_energy,
@@ -492,7 +771,7 @@ def main() -> None:
             model,
             env_config,
             episodes=int(args.episodes),
-            seed=seed,
+            seed=eval_seed,
             label="trained",
             deterministic=True,
             debug_energy=args.debug_eval_energy,
@@ -501,7 +780,7 @@ def main() -> None:
             model,
             env_config,
             episodes=int(args.episodes),
-            seed=seed,
+            seed=eval_seed,
             label="trained",
             deterministic=False,
             debug_energy=args.debug_eval_energy,
@@ -510,7 +789,7 @@ def main() -> None:
             None,
             env_config,
             episodes=int(args.episodes),
-            seed=seed,
+            seed=eval_seed,
             label="always_noop",
             deterministic=True,
             debug_energy=args.debug_eval_energy,
@@ -542,50 +821,13 @@ def main() -> None:
     save_train_config(run_dir, config)
     save_requirements_copy(run_dir)
 
-    env_config = EnvConfig(
-        traffic_model="stochastic",
-        # Make energy matter enough to beat NOOP.
-        energy_weight=2000.0,
-
-        # Drops still matter, but don't drown everything.
-        drop_penalty_lambda=5.0,
-        normalize_drop=True,
-
-        # QoS penalty: sane + gated.
-        qos_target_norm_drop=0.0720,
-        qos_violation_penalty_scale=30.0,
-        qos_min_volume=3000.0,
-        qos_guard_margin=0.003,
-        qos_guard_penalty_scale=1.0,
-
-        # Let it explore without fear (tune if action thrashing).
-        toggle_penalty=0.0002,
-        blocked_action_penalty=0.0002,
-
-        # Keep action responsiveness but avoid flapping.
-        toggle_cooldown_steps=10,
-        global_toggle_cooldown_steps=30,
-        util_block_threshold=0.2,
-
-        traffic_hotspots=((0, 5, 3.0), (2, 7, 2.0)),
-        traffic_avg_bursts_per_step=2.0,
-        traffic_p_elephant=0.08,
-        traffic_elephant_size_range=(6, 20),
-        traffic_duration_range=(1, 3),
-        traffic_spike_prob=0.005,
-        traffic_spike_multiplier_range=(1.5, 3.0),
-        traffic_spike_duration_range=(2, 6),
-        topology_randomize=False,
-        topology_seed=0,
-        flows_per_step=6,
-        base_capacity=15.0,
-    )
+    env_config = build_train_env_config(config)
 
     save_env_config(run_dir, env_config)
     print(f"[train] saved env_config keys: {sorted(env_config.__dict__.keys())}")
     print(f"[train] saved train_config keys: {sorted(config.keys())}")
 
-    env = DummyVecEnv([make_env(seed, env_config)])
+    env = DummyVecEnv([make_env(train_seed, env_config)])
 
     if MASKABLE_AVAILABLE and MaskablePPO is not None:
         model = MaskablePPO(env=env, **config["ppo"])

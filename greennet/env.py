@@ -13,7 +13,14 @@ from gymnasium import spaces
 from greennet.routing import ShortestPathPolicy
 from greennet.simulator import Flow, Simulator
 from greennet.topology import TopologyConfig, build_random_topology
-from greennet.traffic import (ConstantTrafficGenerator, StochasticTrafficConfig, StochasticTrafficGenerator, TrafficBurst, TrafficGenerator,)
+from greennet.traffic import (
+    ConstantTrafficGenerator,
+    StochasticTrafficConfig,
+    StochasticTrafficGenerator,
+    TrafficBurst,
+    TrafficGenerator,
+    apply_traffic_scenario,
+)
 
 
 @dataclass
@@ -43,6 +50,13 @@ class EnvConfig:
     # Seed for traffic generator; if None, we derive it from env.reset(seed=...).
     traffic_seed: int | None = None
 
+    # Canonical traffic scenarios (optional). If set, scenario presets override base traffic fields.
+    traffic_scenario: str | None = None
+    traffic_scenario_version: int = 2
+    traffic_scenario_intensity: float = 1.0
+    traffic_scenario_duration: float = 1.0
+    traffic_scenario_frequency: float = 1.0
+
     # Optional hotspot pairs for stochastic traffic: (src, dst, weight)
     traffic_hotspots: Tuple[Tuple[int, int, float], ...] = ()
 
@@ -56,7 +70,7 @@ class EnvConfig:
     traffic_spike_multiplier_range: Tuple[float, float] = (2.0, 6.0)
     traffic_spike_duration_range: Tuple[int, int] = (3, 12)
 
-    drop_penalty_lambda: float = 5.0
+    drop_penalty_lambda: float = 12.0
     # ENERGY WEIGHT: Increase to prioritize energy savings more; decrease to prioritize performance (drops).
     energy_weight: float = 50.0
 
@@ -175,7 +189,8 @@ class GreenNetEnv(gym.Env):
         if derived_seed is None and seed is not None:
             derived_seed = int(seed) + 10_000  # keep it separate from topology/model seeding
 
-        if self.config.traffic_model.lower() == "stochastic":
+        use_stochastic = self.config.traffic_model.lower() == "stochastic" or bool(self.config.traffic_scenario)
+        if use_stochastic:
             tcfg = StochasticTrafficConfig(
                 node_count=int(self.config.node_count),
                 avg_bursts_per_step=float(self.config.traffic_avg_bursts_per_step),
@@ -188,6 +203,15 @@ class GreenNetEnv(gym.Env):
                 spike_multiplier_range=tuple(self.config.traffic_spike_multiplier_range),
                 spike_duration_range=tuple(self.config.traffic_spike_duration_range),
             )
+            if self.config.traffic_scenario:
+                tcfg = apply_traffic_scenario(
+                    tcfg,
+                    self.config.traffic_scenario,
+                    intensity=float(self.config.traffic_scenario_intensity),
+                    duration=float(self.config.traffic_scenario_duration),
+                    frequency=float(self.config.traffic_scenario_frequency),
+                    version=int(self.config.traffic_scenario_version),
+                )
             self._traffic_generator = StochasticTrafficGenerator(tcfg, seed=derived_seed)
 
             # Precompute bursts and bucket them by integer step.
@@ -284,6 +308,12 @@ class GreenNetEnv(gym.Env):
         if blocked_any:
             toggle_cost = float(toggle_cost) + float(self.config.blocked_action_penalty)
 
+        toggles_attempted_count = int((not action_is_noop) and (not action_is_invalid))
+        toggles_applied_count = int(bool(toggle_applied))
+        blocked_by_util_count = int(bool(toggle_blocked_high_util))
+        blocked_by_cooldown_count = int(bool(toggle_blocked or toggle_blocked_global))
+        allowed_toggle_count = int(bool(toggles_attempted_count) and (not blocked_any))
+
         flows = self._generate_flows()
         metrics = self.simulator.step(flows)
 
@@ -378,8 +408,10 @@ class GreenNetEnv(gym.Env):
         # Extra QoS penalty if drop ratio exceeds the target (after enough volume is observed).
         volume = float(delivered_total + dropped_total)
         qos_excess = 0.0
+        qos_violation = False
         if volume >= float(self.config.qos_min_volume):
             qos_excess = max(0.0, float(norm_drop_total) - float(self.config.qos_target_norm_drop))
+            qos_violation = qos_excess > 0.0
         # Cap overshoot to prevent rare spikes from nuking reward (stabilizes training).
         qos_excess = min(qos_excess, 0.05)
         # Linear QoS penalty (less spiky than quadratic; prevents QoS term from dominating reward).
@@ -398,6 +430,11 @@ class GreenNetEnv(gym.Env):
             "toggle_blocked_high_util": toggle_blocked_high_util,
             "toggle_blocked_global_cooldown": toggle_blocked_global,
             "toggle_blocked_any": blocked_any,
+            "blocked_by_util_count": blocked_by_util_count,
+            "blocked_by_cooldown_count": blocked_by_cooldown_count,
+            "allowed_toggle_count": allowed_toggle_count,
+            "toggles_attempted_count": toggles_attempted_count,
+            "toggles_applied_count": toggles_applied_count,
             "reward_energy": reward_energy,
             "reward_drop": reward_drop,
             "delta_energy_kwh": float(delta_energy),
@@ -408,6 +445,8 @@ class GreenNetEnv(gym.Env):
             "reward_qos": reward_qos,
             "reward_toggle": reward_toggle,
             "total_reward": reward,
+            "qos_excess": float(qos_excess),
+            "qos_violation": bool(qos_violation),
             "action_int": action_int,
             "action_is_noop": action_is_noop,
             "action_is_invalid": action_is_invalid,
@@ -478,6 +517,7 @@ class GreenNetEnv(gym.Env):
                     mask[a] = False
                     continue
                 util = float(self.simulator.utilization.get(key, 0.0))
+                # Block turning OFF when utilization is ABOVE the threshold.
                 if util > float(self.config.util_block_threshold):
                     mask[a] = False
                     continue
@@ -678,6 +718,7 @@ class GreenNetEnv(gym.Env):
         # (Turning ON an edge is always allowed.)
         if current_state:
             util = float(self.simulator.utilization.get(key, 0.0))
+            # Block turning OFF when utilization is ABOVE the threshold.
             if util > self.config.util_block_threshold:
                 penalty = self.config.toggle_penalty * self.config.revert_penalty_scale
                 return penalty, False, False, False, True, False

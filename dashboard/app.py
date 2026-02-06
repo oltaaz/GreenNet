@@ -44,7 +44,7 @@ def render_launcher() -> None:
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        policy = st.selectbox("Policy", ["noop", "baseline", "ppo"], index=2, key="launch_policy")
+        policy = st.selectbox("Policy", ["all_on", "heuristic", "ppo"], index=2, key="launch_policy")
     with c2:
         scenario = st.selectbox("Scenario", ["normal", "burst", "hotspot"], index=0, key="launch_scenario")
     with c3:
