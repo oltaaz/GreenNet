@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 import pandas as pd
 import streamlit as st
 
-from dashboard.data_io import RESULTS_DIR, load_run
+from dashboard.data_io import ROOT, RESULTS_DIR, load_run
 from dashboard.models import RunData
 from dashboard.plotting import plot_overlay
 from dashboard.stats import behavior_stats, filter_episode, overall, safe_float
@@ -17,6 +17,8 @@ POLICY_ALIASES = {
     "heuristic": ["heuristic", "baseline"],
     "ppo": ["ppo"],
 }
+SCENARIO_RE = re.compile(r"__scenario-(.+?)__seed-")
+SEED_RE = re.compile(r"__seed-(\d+)")
 
 
 def _find_matching_runs(
@@ -53,6 +55,32 @@ def _to_float(x: Any) -> float:
         return float(x)
     except Exception:
         return float("inf")
+
+
+def _extract_scenario_seed(name: str) -> Tuple[Optional[str], Optional[int]]:
+    scenario_match = SCENARIO_RE.search(name)
+    seed_match = SEED_RE.search(name)
+    scenario = scenario_match.group(1).strip() if scenario_match else None
+    seed: Optional[int] = None
+    if seed_match:
+        try:
+            seed = int(seed_match.group(1))
+        except Exception:
+            seed = None
+    return scenario, seed
+
+
+def _scenario_seed_index(runs: List[Path], tag_contains: str) -> Dict[str, List[int]]:
+    mapping: Dict[str, set[int]] = {}
+    for run in runs:
+        name = run.name
+        if tag_contains and tag_contains not in name:
+            continue
+        scenario, seed = _extract_scenario_seed(name)
+        if scenario is None or seed is None:
+            continue
+        mapping.setdefault(scenario, set()).add(seed)
+    return {scenario: sorted(list(seeds)) for scenario, seeds in mapping.items()}
 
 
 def _best_ppo_run_name_from_summary(sumdf: pd.DataFrame, *, scenario: str, seed: int) -> Optional[str]:
@@ -224,8 +252,8 @@ def render_compare(runs: List[Path]) -> None:
     st.caption("Pick a scenario + seed and compare a baseline vs PPO (overlay plots + KPI cards).")
 
     st.subheader("Official Matrix Leaderboard")
-    results_dir = Path("results")
-    official_dir = Path("experiments")
+    results_dir = ROOT / "results"
+    official_dir = ROOT / "experiments"
 
     def _version_key(path: Path) -> int:
         match = re.search(r"matrix_v(\\d+)", str(path))
@@ -233,42 +261,41 @@ def render_compare(runs: List[Path]) -> None:
 
     def _display_name(path: Path) -> str:
         try:
-            return str(path.relative_to(Path.cwd()))
+            return str(path.relative_to(ROOT))
         except Exception:
             return str(path)
 
+    # Preference order:
+    # 1) latest official pack leaderboard
+    # 2) latest results leaderboard
     official_lb = sorted(official_dir.glob("official_matrix_*/leaderboard_matrix_*.csv"))
-    if not official_lb:
-        official_lb = sorted(official_dir.glob("official_matrix_*/leaderboard_*.csv"))
     results_lb = sorted(results_dir.glob("leaderboard_*.csv"))
     lb_files = (official_lb + results_lb) if official_lb else results_lb
-    leaderboard_path = results_dir / "leaderboard_matrix_v1.csv"
+    leaderboard_path: Optional[Path] = None
+
+    if not lb_files:
+        st.warning("No leaderboard files found. Run matrix + packaging first.")
+        return
 
     lb: Optional[pd.DataFrame] = None
-    if lb_files:
-        preferred_pool = official_lb if official_lb else results_lb
-        latest = max(
-            preferred_pool,
-            key=lambda p: (
-                p.parent.stat().st_mtime,
-                _version_key(p),
-                p.stat().st_mtime,
-            ),
-        )
-        options = [_display_name(p) for p in lb_files]
-        default_index = options.index(_display_name(latest))
-        chosen = st.selectbox(
-            "Leaderboard file",
-            options,
-            index=default_index,
-            key="lb_file_select",
-        )
-        leaderboard_path = Path(chosen)
+    preferred_pool = official_lb if official_lb else results_lb
+    latest = max(preferred_pool, key=lambda p: p.stat().st_mtime)
+    option_map = {_display_name(p): p for p in lb_files}
+    options = list(option_map.keys())
+    default_index = options.index(_display_name(latest))
+    chosen = st.selectbox(
+        "Leaderboard file",
+        options,
+        index=default_index,
+        key="lb_file_select",
+    )
+    leaderboard_path = option_map[chosen]
 
-    if leaderboard_path.exists():
+    if leaderboard_path is not None and leaderboard_path.exists():
         try:
             lb = pd.read_csv(leaderboard_path)
-        except Exception:
+        except Exception as exc:
+            st.warning(f"Failed to read leaderboard file: {leaderboard_path} ({exc})")
             lb = None
 
     if lb is not None and not lb.empty:
@@ -402,54 +429,71 @@ def render_compare(runs: List[Path]) -> None:
         st.download_button(
             "Download leaderboard CSV",
             data=lb_view.to_csv(index=False).encode("utf-8"),
-            file_name=f"{leaderboard_path.stem}_view.csv",
+            file_name=f"{leaderboard_path.stem if leaderboard_path else 'leaderboard'}_view.csv",
             mime="text/csv",
             key="lb_download_csv",
         )
     else:
-        st.info(
-            "Leaderboard not found at results/leaderboard_matrix_v1.csv. Run the matrix pack export first."
-        )
+        st.warning("No leaderboard files found. Run matrix + packaging first.")
+        return
+
+    def _apply_tag_filter() -> None:
+        st.session_state["cmp_tag"] = st.session_state.get("cmp_tag_input", "").strip()
+
+    if "cmp_tag" not in st.session_state:
+        st.session_state["cmp_tag"] = ""
+    if "cmp_tag_input" not in st.session_state:
+        st.session_state["cmp_tag_input"] = str(st.session_state.get("cmp_tag", ""))
 
     # Default values from results_summary.csv if present
     summary_csv = RESULTS_DIR / "results_summary.csv"
-    scenario_options = ["normal", "burst", "hotspot"]
-    seed_options = [0, 1, 2, 3, 4]
-
     sumdf2: Optional[pd.DataFrame] = None
     if summary_csv.exists():
         try:
             sumdf = pd.read_csv(summary_csv)
             sumdf2 = sumdf.copy()
-            if "scenario" in sumdf.columns:
-                vals = [str(x) for x in sumdf["scenario"].dropna().unique().tolist()]
-                if vals:
-                    scenario_options = sorted(list(set(vals)))
-            if "seed" in sumdf.columns:
-                vals2: List[int] = []
-                for x in sumdf["seed"].dropna().unique().tolist():
-                    try:
-                        vals2.append(int(x))
-                    except Exception:
-                        pass
-                if vals2:
-                    seed_options = sorted(list(set(vals2)))
         except Exception:
             sumdf2 = None
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        scenario = st.selectbox("Scenario", scenario_options, index=0, key="cmp_scenario")
-    with c2:
-        seed = st.selectbox("Seed", seed_options, index=0, key="cmp_seed")
-    with c3:
-        tag_contains = st.text_input(
+        st.text_input(
             "Tag contains (optional)",
-            value="",
-            help="If you use tags in run folder names, filter runs by substring (e.g., 'matrix' or 'compare').",
-            key="cmp_tag",
-        ).strip()
+            key="cmp_tag_input",
+            help="Filter runs by tag substring, e.g. matrix_v6.",
+            on_change=_apply_tag_filter,
+        )
+    with c2:
+        if st.button("Apply tag filter", key="cmp_tag_apply"):
+            _apply_tag_filter()
+        tag_contains = str(st.session_state.get("cmp_tag", "")).strip()
+        st.caption(f"Active tag filter: `{tag_contains or '(none)'}`")
+
+    scenario_seed_map = _scenario_seed_index(runs, tag_contains)
+    scenario_options = sorted(scenario_seed_map.keys())
+    if not scenario_options:
+        scenario_options = ["normal", "burst", "hotspot"]
+
+    with c3:
+        scenario_default = 0
+        current_scenario = st.session_state.get("cmp_scenario")
+        if current_scenario in scenario_options:
+            scenario_default = scenario_options.index(current_scenario)
+        scenario = st.selectbox("Scenario", scenario_options, index=scenario_default, key="cmp_scenario")
+
+    seed_options = scenario_seed_map.get(str(scenario), [])
+    if not seed_options:
+        seed_options = [0]
+
     with c4:
+        seed_default = 0
+        current_seed = st.session_state.get("cmp_seed")
+        if current_seed in seed_options:
+            seed_default = seed_options.index(current_seed)
+        seed = st.selectbox("Seed", seed_options, index=seed_default, key="cmp_seed")
+
+    c5, c6 = st.columns(2)
+    with c5:
         baseline_policy = st.selectbox(
             "Baseline policy",
             ["heuristic", "all_on"],
@@ -457,7 +501,8 @@ def render_compare(runs: List[Path]) -> None:
             key="cmp_baseline_policy",
         )
 
-    include_all_on = st.checkbox("Include all-on reference", value=False, key="cmp_include_all_on")
+    with c6:
+        include_all_on = st.checkbox("Include all-on reference", value=False, key="cmp_include_all_on")
 
     st.divider()
 
@@ -572,8 +617,20 @@ def render_compare(runs: List[Path]) -> None:
     baseline_ref_key = "baseline" if "baseline" in kpis else ("all_on" if "all_on" in kpis else None)
     baseline_ref = kpis.get(baseline_ref_key) if baseline_ref_key else None
 
-    def _delta(val: float, ref_val: float, *, higher_is_better: bool) -> float:
-        return (val - ref_val) if higher_is_better else (ref_val - val)
+    def _delta_text(val: float, ref_val: float, *, higher_is_better: bool, fmt: str) -> Optional[str]:
+        if pd.isna(val) or pd.isna(ref_val):
+            return None
+        # Positive delta always means improvement.
+        delta = (val - ref_val) if higher_is_better else (ref_val - val)
+        return f"{delta:+{fmt}}"
+
+    metric_specs = [
+        ("Reward (mean)", "reward_mean", True, ".3f"),
+        ("Dropped (mean)", "dropped_mean", False, ".3f"),
+        ("Energy (mean)", "energy_mean", False, ".6f"),
+        ("Toggle rate", "toggles_rate", False, ".4f"),
+        ("QoS viol rate", "qos_violation_rate", False, ".4f"),
+    ]
 
     order = [k for k in ["baseline", "ppo", "all_on"] if k in kpis]
     kpi_cols = st.columns(len(order))
@@ -582,36 +639,20 @@ def render_compare(runs: List[Path]) -> None:
         ref = baseline_ref if key != baseline_ref_key else None
         with kpi_cols[idx]:
             st.markdown(f"#### {label_map.get(key, key)}")
-            st.metric(
-                "Reward (mean)",
-                f"{vals['reward_mean']:.3f}",
-                delta=f"{_delta(vals['reward_mean'], ref['reward_mean'], higher_is_better=True):+.3f}" if ref else None,
-                delta_color="normal",
-            )
-            st.metric(
-                "Dropped (mean)",
-                f"{vals['dropped_mean']:.3f}",
-                delta=f"{_delta(vals['dropped_mean'], ref['dropped_mean'], higher_is_better=False):+.3f}" if ref else None,
-                delta_color="normal",
-            )
-            st.metric(
-                "Energy (mean)",
-                f"{vals['energy_mean']:.6f}",
-                delta=f"{_delta(vals['energy_mean'], ref['energy_mean'], higher_is_better=False):+.6f}" if ref else None,
-                delta_color="normal",
-            )
-            st.metric(
-                "Toggle rate",
-                f"{vals['toggles_rate']:.4f}",
-                delta=f"{_delta(vals['toggles_rate'], ref['toggles_rate'], higher_is_better=False):+.4f}" if ref else None,
-                delta_color="normal",
-            )
-            st.metric(
-                "QoS viol rate",
-                f"{vals['qos_violation_rate']:.4f}",
-                delta=f"{_delta(vals['qos_violation_rate'], ref['qos_violation_rate'], higher_is_better=False):+.4f}" if ref else None,
-                delta_color="normal",
-            )
+            for title, field, higher_is_better, fmt in metric_specs:
+                value_text = f"{vals[field]:{fmt}}" if not pd.isna(vals[field]) else "nan"
+                delta_text = (
+                    _delta_text(vals[field], ref[field], higher_is_better=higher_is_better, fmt=fmt)
+                    if ref
+                    else None
+                )
+                st.metric(
+                    title,
+                    value_text,
+                    delta=delta_text,
+                    # With improvement-oriented deltas, positive should be green and negative red.
+                    delta_color="normal",
+                )
             st.metric(
                 "Active ratio",
                 f"{vals['active_ratio_mean']:.3f}",

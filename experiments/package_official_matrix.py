@@ -87,6 +87,28 @@ def _model_path_from_command(command: str) -> str | None:
     return None
 
 
+def _matrix_filters_from_command(command: str) -> Dict[str, set[str]]:
+    try:
+        parts = shlex.split(command)
+    except Exception:
+        return {}
+
+    out: Dict[str, set[str]] = {}
+    mapping = {
+        "--policies": "policy",
+        "--scenarios": "scenario",
+        "--seeds": "seed",
+    }
+    for idx, part in enumerate(parts):
+        key = mapping.get(part)
+        if key is None or idx + 1 >= len(parts):
+            continue
+        values = {v.strip() for v in parts[idx + 1].split(",") if v.strip()}
+        if values:
+            out[key] = values
+    return out
+
+
 def _write_by_seed(summary_path: Path, out_path: Path) -> None:
     df = pd.read_csv(summary_path)
     if df.empty:
@@ -130,6 +152,53 @@ def _write_by_seed(summary_path: Path, out_path: Path) -> None:
     grouped.to_csv(out_path, index=False)
 
 
+def _auto_headline_from_leaderboard(leaderboard: pd.DataFrame) -> str:
+    if leaderboard.empty or "policy" not in leaderboard.columns or "scenario" not in leaderboard.columns:
+        return "PPO headline unavailable: leaderboard missing policy/scenario rows."
+
+    ppo_rows = leaderboard[leaderboard["policy"].astype(str) == "ppo"]
+    if ppo_rows.empty:
+        return "PPO headline unavailable: no PPO rows in leaderboard."
+
+    lines: List[str] = []
+    reward_delta_col = "delta_reward_vs_heuristic" if "delta_reward_vs_heuristic" in leaderboard.columns else None
+    dropped_delta_col = "delta_dropped_vs_heuristic" if "delta_dropped_vs_heuristic" in leaderboard.columns else None
+
+    for _, row in ppo_rows.sort_values("scenario").iterrows():
+        scenario = str(row.get("scenario", "unknown"))
+        parts: List[str] = []
+        if reward_delta_col:
+            try:
+                parts.append(f"Δreward_vs_heuristic={float(row[reward_delta_col]):+.3f}")
+            except Exception:
+                pass
+        if dropped_delta_col:
+            try:
+                parts.append(f"Δdropped_vs_heuristic={float(row[dropped_delta_col]):+.3f}")
+            except Exception:
+                pass
+        if parts:
+            lines.append(f"{scenario}: " + ", ".join(parts))
+
+    overall_parts: List[str] = []
+    if reward_delta_col:
+        try:
+            overall_parts.append(f"avg_Δreward_vs_heuristic={float(pd.to_numeric(ppo_rows[reward_delta_col], errors='coerce').mean()):+.3f}")
+        except Exception:
+            pass
+    if dropped_delta_col:
+        try:
+            overall_parts.append(f"avg_Δdropped_vs_heuristic={float(pd.to_numeric(ppo_rows[dropped_delta_col], errors='coerce').mean()):+.3f}")
+        except Exception:
+            pass
+
+    if not lines and not overall_parts:
+        return "PPO headline unavailable: expected delta columns not found."
+    if overall_parts:
+        lines.append("overall: " + ", ".join(overall_parts))
+    return " | ".join(lines)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Package an official matrix run (aggregate + leaderboard + notes).")
     parser.add_argument("--tag", required=True, help="Matrix tag (e.g., matrix_v6)")
@@ -165,6 +234,15 @@ def main() -> None:
     )
 
     # 2) By-seed summary
+    matrix_filters = _matrix_filters_from_command(args.matrix_command)
+    if matrix_filters and summary_path.exists():
+        summary_df = pd.read_csv(summary_path)
+        for col, allowed in matrix_filters.items():
+            if col in summary_df.columns:
+                summary_df = summary_df[summary_df[col].astype(str).isin(allowed)]
+        summary_df.to_csv(summary_path, index=False)
+
+    # 2) By-seed summary
     _write_by_seed(summary_path, by_seed_path)
 
     # 3) Leaderboard
@@ -186,6 +264,7 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(summary_path) if summary_path.exists() else pd.DataFrame()
+    lb_df = pd.read_csv(leaderboard_path) if leaderboard_path.exists() else pd.DataFrame()
     policies = sorted(df.get("policy", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
     scenarios = sorted(df.get("scenario", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
     seeds = []
@@ -205,6 +284,8 @@ def main() -> None:
         model_path = model_path_from_cmd
     commit = _git_head(repo_root)
     generated_at_utc = datetime.now(timezone.utc).isoformat()
+    auto_headline = _auto_headline_from_leaderboard(lb_df)
+    headline = args.headline if args.headline != "<FILL_HEADLINE_RESULT>" else auto_headline
 
     notes = """# Official Matrix {tag}
 
@@ -249,7 +330,7 @@ def main() -> None:
         episodes=", ".join(str(e) for e in episodes) if episodes else "<UNKNOWN>",
         steps=", ".join(str(s) for s in steps) if steps else "<UNKNOWN>",
         model_path=model_path,
-        headline=args.headline,
+        headline=headline,
     )
 
     notes_path = out_dir / "notes.md"
