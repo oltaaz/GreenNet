@@ -6,6 +6,7 @@ import csv
 import json
 import random
 import sys
+from dataclasses import fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import fmean, pstdev
@@ -37,6 +38,62 @@ def _load_json_file(path: Path) -> Dict[str, Any] | None:
         return data if isinstance(data, dict) else None
     except Exception:
         return None
+
+
+def _load_config_file(path: Path | None) -> Dict[str, Any]:
+    if path is None:
+        return {}
+    cfg = _load_json_file(path)
+    if cfg is None:
+        raise ValueError(f"Config file is not valid JSON: {path}")
+    return cfg
+
+
+_ENV_TUPLE_FIELDS = {
+    "topology_seeds",
+    "traffic_mice_size_range",
+    "traffic_elephant_size_range",
+    "traffic_duration_range",
+    "traffic_spike_multiplier_range",
+    "traffic_spike_duration_range",
+}
+
+
+def _coerce_env_value(key: str, value: Any) -> Any:
+    if key == "traffic_hotspots" and isinstance(value, list):
+        return tuple(tuple(item) for item in value)
+    if key == "topology_seeds" and isinstance(value, list):
+        return tuple(int(v) for v in value)
+    if key in _ENV_TUPLE_FIELDS and isinstance(value, list):
+        return tuple(value)
+    return value
+
+
+def _extract_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
+    env_overrides: Dict[str, Any] = {}
+    for key in ("env", "env_config", "env_kwargs"):
+        block = config.get(key)
+        if isinstance(block, dict):
+            env_overrides.update(block)
+
+    for key in ("topology_seed", "topology_seeds", "topology_randomize", "traffic_seed"):
+        if key in config and key not in env_overrides:
+            env_overrides[key] = config[key]
+
+    if "traffic_seed_base" in config and "traffic_seed" not in env_overrides:
+        env_overrides["traffic_seed"] = config["traffic_seed_base"]
+
+    if is_dataclass(EnvConfig):
+        allowed = {f.name for f in fields(EnvConfig)}
+        env_overrides = {
+            k: _coerce_env_value(k, v)
+            for k, v in env_overrides.items()
+            if k in allowed
+        }
+    else:
+        env_overrides = {k: _coerce_env_value(k, v) for k, v in env_overrides.items()}
+
+    return env_overrides
 
 
 def infer_topology_seed_from_model(model_path: Path) -> int | None:
@@ -99,12 +156,19 @@ FIELDNAMES = [
     "reward_drop",
     "reward_qos",
     "reward_toggle",
+    "qos_violation",
+    "qos_excess",
     "toggle_applied",
     "toggle_reverted",
     "toggle_blocked_any",
     "toggle_blocked_cooldown",
     "toggle_blocked_high_util",
     "toggle_blocked_global_cooldown",
+    "blocked_by_util_count",
+    "blocked_by_cooldown_count",
+    "allowed_toggle_count",
+    "toggles_attempted_count",
+    "toggles_applied_count",
     "action_is_noop",
     "action_is_invalid",
     "flows_count",
@@ -155,19 +219,19 @@ def build_env_config(scenario: str, max_steps: int | None) -> EnvConfig:
     if hasattr(cfg, "traffic_seed"):
         cfg.traffic_seed = None
 
-    if scenario == "normal":
-        cfg.traffic_model = "uniform"
-    elif scenario == "burst":
+    scenario_key = scenario.strip().lower()
+    if scenario_key in ("normal", "diurnal", "normal/diurnal", "normal diurnal"):
         cfg.traffic_model = "stochastic"
-        cfg.traffic_avg_bursts_per_step = 4.0
-        cfg.traffic_spike_prob = 0.05
-        cfg.traffic_spike_multiplier_range = (2.0, 6.0)
-        cfg.traffic_spike_duration_range = (3, 12)
-    elif scenario == "hotspot":
+        cfg.traffic_scenario = "normal"
+    elif scenario_key == "burst":
         cfg.traffic_model = "stochastic"
-        cfg.traffic_hotspots = ((0, 5, 3.0), (2, 7, 2.0))
-        cfg.traffic_avg_bursts_per_step = 3.0
-        cfg.traffic_spike_prob = 0.01
+        cfg.traffic_scenario = "burst"
+    elif scenario_key == "hotspot":
+        cfg.traffic_model = "stochastic"
+        cfg.traffic_scenario = "hotspot"
+    elif scenario_key in ("anomaly", "failure"):
+        cfg.traffic_model = "stochastic"
+        cfg.traffic_scenario = "anomaly"
     else:
         raise ValueError(f"Unknown scenario: {scenario}")
 
@@ -196,11 +260,11 @@ def load_policy(
     model_path: Path | None,
     deterministic: bool,
 ) -> Tuple[ActionFn, Dict[str, Any]]:
-    if policy == "noop":
-        return (lambda _obs, _info, _env: 0), {"policy_type": "noop"}
+    if policy in ("noop", "all_on"):
+        return (lambda _obs, _info, _env: 0), {"policy_type": "all_on"}
 
-    if policy == "baseline":
-        return action_sleep_if_idle, {"policy_type": "baseline"}
+    if policy in ("baseline", "heuristic"):
+        return action_sleep_if_idle, {"policy_type": "heuristic"}
 
     if policy != "ppo":
         raise ValueError(f"Unknown policy: {policy}")
@@ -307,12 +371,19 @@ def build_step_row(
         "reward_drop": float(info.get("reward_drop", 0.0)),
         "reward_qos": float(info.get("reward_qos", 0.0)),
         "reward_toggle": float(info.get("reward_toggle", 0.0)),
+        "qos_violation": bool(info.get("qos_violation", False)),
+        "qos_excess": float(info.get("qos_excess", 0.0)),
         "toggle_applied": bool(info.get("toggle_applied", False)),
         "toggle_reverted": bool(info.get("toggle_reverted", False)),
         "toggle_blocked_any": bool(info.get("toggle_blocked_any", False)),
         "toggle_blocked_cooldown": bool(info.get("toggle_blocked_cooldown", False)),
         "toggle_blocked_high_util": bool(info.get("toggle_blocked_high_util", False)),
         "toggle_blocked_global_cooldown": bool(info.get("toggle_blocked_global_cooldown", False)),
+        "blocked_by_util_count": int(info.get("blocked_by_util_count", 0)),
+        "blocked_by_cooldown_count": int(info.get("blocked_by_cooldown_count", 0)),
+        "allowed_toggle_count": int(info.get("allowed_toggle_count", 0)),
+        "toggles_attempted_count": int(info.get("toggles_attempted_count", 0)),
+        "toggles_applied_count": int(info.get("toggles_applied_count", 0)),
         "action_is_noop": bool(info.get("action_is_noop", False)),
         "action_is_invalid": bool(info.get("action_is_invalid", False)),
         "flows_count": int(flows_count),
@@ -338,6 +409,16 @@ def summarize_episodes(episode_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "carbon_g_total": [float(r["carbon_g_total"]) for r in episode_rows],
         "steps": [int(r["steps"]) for r in episode_rows],
     }
+    if any("toggles_total" in r for r in episode_rows):
+        totals["toggles_total"] = [float(r.get("toggles_total", 0.0)) for r in episode_rows]
+        totals["toggles_applied_total"] = [float(r.get("toggles_applied_total", 0.0)) for r in episode_rows]
+        totals["toggles_reverted_total"] = [float(r.get("toggles_reverted_total", 0.0)) for r in episode_rows]
+    if any("toggles_attempted_count" in r for r in episode_rows):
+        totals["toggles_attempted_count"] = [float(r.get("toggles_attempted_count", 0.0)) for r in episode_rows]
+        totals["allowed_toggle_count"] = [float(r.get("allowed_toggle_count", 0.0)) for r in episode_rows]
+        totals["blocked_by_util_count"] = [float(r.get("blocked_by_util_count", 0.0)) for r in episode_rows]
+        totals["blocked_by_cooldown_count"] = [float(r.get("blocked_by_cooldown_count", 0.0)) for r in episode_rows]
+        totals["toggles_applied_count"] = [float(r.get("toggles_applied_count", 0.0)) for r in episode_rows]
 
     overall = {
         "episodes": len(episode_rows),
@@ -357,6 +438,30 @@ def summarize_episodes(episode_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "active_ratio_mean": _mean([float(r["active_ratio_mean"]) for r in episode_rows]),
         "avg_delay_ms_mean": _mean([float(r["avg_delay_ms_mean"]) for r in episode_rows]),
     }
+    if "toggles_total" in totals:
+        overall.update(
+            {
+                "toggles_total_mean": _mean([float(v) for v in totals["toggles_total"]]),
+                "toggles_total_std": _std([float(v) for v in totals["toggles_total"]]),
+                "toggles_applied_mean": _mean([float(v) for v in totals["toggles_applied_total"]]),
+                "toggles_reverted_mean": _mean([float(v) for v in totals["toggles_reverted_total"]]),
+            }
+        )
+    if "toggles_attempted_count" in totals:
+        overall.update(
+            {
+                "toggles_attempted_count_mean": _mean([float(v) for v in totals["toggles_attempted_count"]]),
+                "toggles_attempted_count_std": _std([float(v) for v in totals["toggles_attempted_count"]]),
+                "allowed_toggle_count_mean": _mean([float(v) for v in totals["allowed_toggle_count"]]),
+                "allowed_toggle_count_std": _std([float(v) for v in totals["allowed_toggle_count"]]),
+                "blocked_by_util_count_mean": _mean([float(v) for v in totals["blocked_by_util_count"]]),
+                "blocked_by_util_count_std": _std([float(v) for v in totals["blocked_by_util_count"]]),
+                "blocked_by_cooldown_count_mean": _mean([float(v) for v in totals["blocked_by_cooldown_count"]]),
+                "blocked_by_cooldown_count_std": _std([float(v) for v in totals["blocked_by_cooldown_count"]]),
+                "toggles_applied_count_mean": _mean([float(v) for v in totals["toggles_applied_count"]]),
+                "toggles_applied_count_std": _std([float(v) for v in totals["toggles_applied_count"]]),
+            }
+        )
 
     return {"episodes": episode_rows, "overall": overall}
 
@@ -371,12 +476,13 @@ def run_episode(
     seed: int,
     episode_seed: int,
     episode_idx: int,
+    traffic_seed_base: int,
     save_flows: bool,
     writer: csv.DictWriter,
 ) -> Dict[str, Any]:
     # Vary traffic per episode (if supported) while keeping topology fixed
     if hasattr(env.config, "traffic_seed"):
-        env.config.traffic_seed = int(episode_seed) + 10_000
+        env.config.traffic_seed = int(traffic_seed_base) + int(episode_idx)
     obs, info = env.reset(seed=episode_seed)
 
     total_reward = 0.0
@@ -389,6 +495,13 @@ def run_episode(
     avg_delay_sum = 0.0
     steps = 0
     carbon_prev = 0.0
+    toggles_applied = 0
+    toggles_reverted = 0
+    toggles_attempted = 0
+    toggles_allowed = 0
+    blocked_by_util = 0
+    blocked_by_cooldown = 0
+    toggles_applied_count = 0
 
     for step_idx in range(1, int(env.config.max_steps) + 1):
         action = action_fn(obs, info, env)
@@ -428,6 +541,13 @@ def run_episode(
         avg_util_sum += float(getattr(info.get("metrics"), "avg_utilization", 0.0))
         active_ratio_sum += float(obs["active_ratio"][0])
         avg_delay_sum += float(getattr(info.get("metrics"), "avg_delay_ms", 0.0))
+        toggles_applied += int(bool(info.get("toggle_applied")))
+        toggles_reverted += int(bool(info.get("toggle_reverted")))
+        toggles_attempted += int(info.get("toggles_attempted_count", 0))
+        toggles_allowed += int(info.get("allowed_toggle_count", 0))
+        blocked_by_util += int(info.get("blocked_by_util_count", 0))
+        blocked_by_cooldown += int(info.get("blocked_by_cooldown_count", 0))
+        toggles_applied_count += int(info.get("toggles_applied_count", 0))
 
         steps += 1
         if terminated or truncated:
@@ -445,58 +565,129 @@ def run_episode(
         "avg_utilization_mean": float(avg_util_sum / denom),
         "active_ratio_mean": float(active_ratio_sum / denom),
         "avg_delay_ms_mean": float(avg_delay_sum / denom),
+        "toggles_applied_total": int(toggles_applied),
+        "toggles_reverted_total": int(toggles_reverted),
+        "toggles_total": int(toggles_applied + toggles_reverted),
+        "blocked_by_util_count": int(blocked_by_util),
+        "blocked_by_cooldown_count": int(blocked_by_cooldown),
+        "allowed_toggle_count": int(toggles_allowed),
+        "toggles_attempted_count": int(toggles_attempted),
+        "toggles_applied_count": int(toggles_applied_count),
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run GreenNet experiments and log per-step results.")
-    parser.add_argument("--policy", choices=["noop", "baseline", "ppo"], required=True)
-    parser.add_argument("--scenario", choices=["normal", "burst", "hotspot"], required=True)
-    parser.add_argument("--seed", type=int, required=True)
-    parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument("--config", type=Path, help="Path to JSON config for eval/experiment.")
+    parser.add_argument(
+        "--policy",
+        choices=["all_on", "heuristic", "baseline", "noop", "ppo"],
+        default=None,
+    )
+    parser.add_argument(
+        "--scenario",
+        choices=["normal", "diurnal", "burst", "hotspot", "anomaly", "failure"],
+        default=None,
+    )
+    parser.add_argument("--seed", type=int, default=None, help="Base eval seed (overrides config).")
+    parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--steps", type=int, default=None)
-    parser.add_argument("--runs-dir", type=Path, default=Path("runs"))
-    parser.add_argument("--out-dir", type=Path, default=Path("results"))
+    parser.add_argument("--runs-dir", type=Path, default=None)
+    parser.add_argument("--out-dir", type=Path, default=None)
     parser.add_argument("--tag", type=str, default=None)
     parser.add_argument("--model", type=Path, default=None)
-    parser.add_argument("--deterministic", action="store_true", default=True)
+    parser.add_argument("--deterministic", dest="deterministic", action="store_true")
     parser.add_argument("--stochastic", dest="deterministic", action="store_false")
-    parser.add_argument("--save-flows", action="store_true", default=False)
+    parser.set_defaults(deterministic=None)
+    parser.add_argument("--save-flows", action="store_true", default=None)
     parser.add_argument("--topology-seed", type=int, default=None)
     parser.add_argument("--traffic-seed", type=int, default=None)
     args = parser.parse_args()
 
-    seed_everything(int(args.seed))
+    config = _load_config_file(args.config)
+    env_overrides = _extract_env_overrides(config)
 
-    max_steps = args.max_steps
+    policy = args.policy or config.get("policy")
+    if not policy:
+        parser.error("Missing --policy (or set 'policy' in --config).")
+
+    scenario = args.scenario or config.get("scenario")
+    if not scenario:
+        parser.error("Missing --scenario (or set 'scenario' in --config).")
+
+    eval_seed_raw = args.seed if args.seed is not None else config.get("eval_seed", config.get("seed"))
+    if eval_seed_raw is None:
+        parser.error("Missing --seed (or set 'eval_seed' in --config).")
+    eval_seed = int(eval_seed_raw)
+
+    episodes = args.episodes if args.episodes is not None else int(config.get("episodes", 10))
+
+    max_steps = args.max_steps if args.max_steps is not None else config.get("max_steps")
     if args.steps is not None:
         max_steps = args.steps
+    elif "steps" in config and max_steps is None:
+        max_steps = config.get("steps")
+    if max_steps is not None:
+        max_steps = int(max_steps)
 
-    env_config = build_env_config(args.scenario, max_steps)
+    runs_dir = args.runs_dir or Path(config.get("runs_dir", "runs"))
+    out_dir_root = args.out_dir or Path(config.get("out_dir", "results"))
+    tag = args.tag or config.get("tag")
+    tag_str = str(tag).strip() if tag is not None else ""
+    if not tag_str:
+        tag_str = None
+
+    if args.deterministic is None:
+        deterministic = bool(config.get("deterministic", True))
+    else:
+        deterministic = bool(args.deterministic)
+
+    if args.save_flows is None:
+        save_flows = bool(config.get("save_flows", False))
+    else:
+        save_flows = bool(args.save_flows)
+
+    model_path = args.model
+    if model_path is None and config.get("model"):
+        model_path = Path(config["model"])
+
+    seed_everything(int(eval_seed))
+
+    env_config = build_env_config(scenario, max_steps)
+    for key, value in env_overrides.items():
+        setattr(env_config, key, value)
 
     action_fn, policy_meta = load_policy(
-        args.policy,
-        runs_dir=args.runs_dir,
-        model_path=args.model,
-        deterministic=bool(args.deterministic),
+        policy,
+        runs_dir=runs_dir,
+        model_path=model_path,
+        deterministic=bool(deterministic),
     )
 
     # Choose topology seed: allow override; otherwise keep PPO on its training topology to avoid action-space mismatches.
     chosen_topology_seed: int | None = args.topology_seed
-    if chosen_topology_seed is None and args.policy == "ppo":
+    if chosen_topology_seed is None:
+        chosen_topology_seed = config.get("topology_seed")
+    if chosen_topology_seed is None:
+        chosen_topology_seed = env_overrides.get("topology_seed")
+    if chosen_topology_seed is None and policy == "ppo":
         mp = policy_meta.get("model_path") if isinstance(policy_meta, dict) else None
         if mp:
             inferred = infer_topology_seed_from_model(Path(mp))
             if inferred is not None:
                 chosen_topology_seed = inferred
     if chosen_topology_seed is None:
-        chosen_topology_seed = int(args.seed)
+        chosen_topology_seed = int(eval_seed)
 
     # Choose base traffic seed: allow override; otherwise seed+10000.
     chosen_traffic_seed_base: int | None = args.traffic_seed
     if chosen_traffic_seed_base is None:
-        chosen_traffic_seed_base = int(args.seed) + 10_000
+        chosen_traffic_seed_base = config.get("traffic_seed")
+    if chosen_traffic_seed_base is None:
+        chosen_traffic_seed_base = env_overrides.get("traffic_seed")
+    if chosen_traffic_seed_base is None:
+        chosen_traffic_seed_base = int(eval_seed) + 10_000
 
     if hasattr(env_config, "topology_seed"):
         env_config.topology_seed = int(chosen_topology_seed)
@@ -505,10 +696,10 @@ def main() -> None:
 
     now = datetime.now(timezone.utc)
     run_id = now.strftime("%Y%m%d_%H%M%S")
-    folder = f"{run_id}__policy-{args.policy}__scenario-{args.scenario}__seed-{args.seed}"
-    if args.tag:
-        folder = f"{folder}__tag-{args.tag}"
-    out_dir = args.out_dir / folder
+    folder = f"{run_id}__policy-{policy}__scenario-{scenario}__seed-{eval_seed}"
+    if tag_str:
+        folder = f"{folder}__tag-{tag_str}"
+    out_dir = out_dir_root / folder
     out_dir.mkdir(parents=True, exist_ok=True)
 
     save_env_config(out_dir, env_config)
@@ -522,19 +713,20 @@ def main() -> None:
         writer = csv.DictWriter(handle, fieldnames=FIELDNAMES)
         writer.writeheader()
 
-        for ep in range(int(args.episodes)):
-            episode_seed = int(args.seed) + ep
+        for ep in range(int(episodes)):
+            episode_seed = int(eval_seed) + ep
             episode_summaries.append(
                 run_episode(
                     env,
                     action_fn,
                     run_id=run_id,
-                    policy=args.policy,
-                    scenario=args.scenario,
-                    seed=int(args.seed),
+                    policy=policy,
+                    scenario=scenario,
+                    seed=int(eval_seed),
                     episode_seed=episode_seed,
                     episode_idx=ep,
-                    save_flows=bool(args.save_flows),
+                    traffic_seed_base=int(chosen_traffic_seed_base),
+                    save_flows=bool(save_flows),
                     writer=writer,
                 )
             )
@@ -545,24 +737,48 @@ def main() -> None:
     summary_path = out_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
+    count_keys = [
+        "blocked_by_util_count",
+        "blocked_by_cooldown_count",
+        "allowed_toggle_count",
+        "toggles_attempted_count",
+        "toggles_applied_count",
+    ]
+    count_totals = {
+        key: int(sum(int(ep.get(key, 0)) for ep in episode_summaries)) for key in count_keys
+    }
+
     model_path_meta = policy_meta.get("model_path") if isinstance(policy_meta, dict) else None
     run_meta = {
         "run_id": run_id,
-        "policy": args.policy,
-        "scenario": args.scenario,
-        "seed": int(args.seed),
+        "policy": policy,
+        "scenario": scenario,
+        "seed": int(eval_seed),
+        "eval_seed": int(eval_seed),
         "topology_seed": int(chosen_topology_seed),
+        "traffic_seed": int(chosen_traffic_seed_base),
         "traffic_seed_base": int(chosen_traffic_seed_base),
-        "episodes": int(args.episodes),
+        "episodes": int(episodes),
         "max_steps": int(env_config.max_steps),
-        "deterministic": bool(args.deterministic),
-        "save_flows": bool(args.save_flows),
+        "deterministic": bool(deterministic),
+        "save_flows": bool(save_flows),
         "model_path": model_path_meta,
-        "runs_dir": str(args.runs_dir),
+        "runs_dir": str(runs_dir),
         "timestamp_utc": now.isoformat(),
+        "created_at_utc": now.isoformat(),
         "command": " ".join(sys.argv),
     }
+    run_meta.update(count_totals)
+    if getattr(env_config, "topology_seeds", None):
+        run_meta["topology_seeds"] = list(env_config.topology_seeds)
+    if getattr(env_config, "traffic_scenario", None):
+        run_meta["traffic_scenario"] = env_config.traffic_scenario
+        run_meta["traffic_scenario_version"] = int(getattr(env_config, "traffic_scenario_version", 2))
+        run_meta["traffic_scenario_intensity"] = float(getattr(env_config, "traffic_scenario_intensity", 1.0))
+        run_meta["traffic_scenario_duration"] = float(getattr(env_config, "traffic_scenario_duration", 1.0))
+        run_meta["traffic_scenario_frequency"] = float(getattr(env_config, "traffic_scenario_frequency", 1.0))
     run_meta.update(policy_meta)
+    run_meta["tag"] = tag_str
     run_meta_path = out_dir / "run_meta.json"
     run_meta_path.write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
 

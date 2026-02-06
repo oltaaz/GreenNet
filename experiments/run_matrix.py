@@ -6,6 +6,7 @@ import csv
 import json
 import re
 import subprocess
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -159,14 +160,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run a matrix of GreenNet experiments.")
     parser.add_argument("--seeds", type=str, default="0,1,2,3,4")
     parser.add_argument("--scenarios", type=str, default="normal,burst,hotspot")
-    parser.add_argument("--policies", type=str, default="noop,baseline,ppo")
+    parser.add_argument("--policies", type=str, default="all_on,heuristic,ppo")
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--steps", type=int, default=300)
     parser.add_argument("--out-dir", type=Path, default=Path("results"))
     parser.add_argument("--runs-dir", type=Path, default=Path("runs"))
-    parser.add_argument("--tag", type=str, default="matrix")
+    parser.add_argument("--tag", type=str, default=None)
     parser.add_argument("--deterministic", action="store_true", default=True)
     parser.add_argument("--stochastic", dest="deterministic", action="store_false")
+    parser.add_argument("--ppo-model", type=Path, default=None, help="Optional PPO model path to use for all PPO runs.")
     parser.add_argument(
         "--topology-seed",
         type=int,
@@ -180,12 +182,18 @@ def main() -> None:
     policies = _parse_csv_list(args.policies)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    summary_path = args.out_dir / "results_summary.csv"
+    summary_name = "results_summary.csv"
+    if args.tag:
+        summary_name = f"results_summary_{args.tag}.csv"
+    summary_path = args.out_dir / summary_name
 
     # Determine a single fixed topology seed for fairness + PPO action-space consistency.
     fixed_topology_seed: Optional[int] = args.topology_seed
+    ppo_model_path = args.ppo_model
+    if ppo_model_path is not None and not ppo_model_path.exists():
+        raise SystemExit(f"--ppo-model does not exist: {ppo_model_path}")
     if fixed_topology_seed is None and "ppo" in policies:
-        mp = _find_latest_model(args.runs_dir)
+        mp = ppo_model_path or _find_latest_model(args.runs_dir)
         if mp is None:
             # PPO requested but no model found -> we will mark PPO runs as skipped.
             fixed_topology_seed = None
@@ -200,7 +208,7 @@ def main() -> None:
         writer = csv.DictWriter(handle, fieldnames=SUMMARY_COLUMNS)
         writer.writeheader()
 
-        model_path = _find_latest_model(args.runs_dir)
+        model_path = ppo_model_path or _find_latest_model(args.runs_dir)
 
         for seed in seeds:
             for scenario in scenarios:
@@ -243,9 +251,11 @@ def main() -> None:
                         str(args.out_dir),
                         "--runs-dir",
                         str(args.runs_dir),
-                        "--tag",
-                        str(args.tag),
                     ]
+                    if args.tag:
+                        cmd.extend(["--tag", str(args.tag)])
+                    if policy == "ppo" and model_path is not None:
+                        cmd.extend(["--model", str(model_path)])
                     if not args.deterministic:
                         cmd.append("--stochastic")
 
@@ -291,6 +301,12 @@ def main() -> None:
                     else:
                         print(f"[matrix] seed={seed} scenario={scenario} policy={policy} -> FAIL ({error})")
 
+    if args.tag and summary_path.name != "results_summary.csv":
+        generic_path = args.out_dir / "results_summary.csv"
+        try:
+            shutil.copyfile(summary_path, generic_path)
+        except Exception:
+            pass
     print(f"[matrix] results_summary.csv saved to {summary_path}")
 
 
