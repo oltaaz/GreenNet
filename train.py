@@ -447,6 +447,7 @@ def eval_policy(
     ep_on_edges_count_mean: list[float] = []
     ep_off_edges_count_mean: list[float] = []
     ep_toggle_budget_remaining_mean: list[float] = []
+    ep_toggle_budget_remaining_available: list[bool] = []
     ep_valid_on_first20_decision_steps_mean: list[float] = []
     ep_fraction_decision_steps_any_on_valid: list[float] = []
     ep_noop_chosen_on_decision_steps_mean: list[float] = []
@@ -731,7 +732,12 @@ def eval_policy(
         ep_mean_demand_per_step.append(float(np.mean(demand_step_vals)) if demand_step_vals else 0.0)
         ep_on_edges_count_mean.append(float(np.mean(on_edges_vals)) if on_edges_vals else 0.0)
         ep_off_edges_count_mean.append(float(np.mean(off_edges_vals)) if off_edges_vals else 0.0)
-        ep_toggle_budget_remaining_mean.append(float(np.mean(budget_remaining_vals)) if budget_remaining_vals else -1.0)
+        if budget_remaining_vals:
+            ep_toggle_budget_remaining_mean.append(float(np.mean(budget_remaining_vals)))
+            ep_toggle_budget_remaining_available.append(True)
+        else:
+            ep_toggle_budget_remaining_mean.append(float("nan"))
+            ep_toggle_budget_remaining_available.append(False)
         first20 = decision_valid_on_counts[:20]
         ep_valid_on_first20_decision_steps_mean.append(float(np.mean(first20)) if first20 else 0.0)
         if decision_steps > 0:
@@ -880,10 +886,12 @@ def eval_policy(
         f"frac_decision_with_any_on={float(np.mean(ep_fraction_decision_steps_any_on_valid)):.3f} "
         f"noop_chosen@decision={float(np.mean(ep_noop_chosen_on_decision_steps_mean)):.3f}"
     )
+    budget_vals = [v for v, ok in zip(ep_toggle_budget_remaining_mean, ep_toggle_budget_remaining_available) if ok]
+    budget_text = f"{float(np.mean(budget_vals)):.2f}" if budget_vals else "N/A"
     print(
         f"edge state      on_edges_mean={float(np.mean(ep_on_edges_count_mean)):.2f} "
         f"off_edges_mean={float(np.mean(ep_off_edges_count_mean)):.2f} "
-        f"toggle_budget_remaining_mean={float(np.mean(ep_toggle_budget_remaining_mean)):.2f}"
+        f"toggle_budget_remaining_mean={budget_text}"
     )
     valid_saturation = [v for v in ep_decision_step_when_off_zero if v > 0]
     sat_mean = float(np.mean(valid_saturation)) if valid_saturation else -1.0
@@ -958,7 +966,7 @@ def eval_policy(
         "on_blockers_top_ex_missing": dict(on_top_ex_missing),
         "mean_on_edges_count": float(np.mean(ep_on_edges_count_mean)),
         "mean_off_edges_count": float(np.mean(ep_off_edges_count_mean)),
-        "mean_toggle_budget_remaining": float(np.mean(ep_toggle_budget_remaining_mean)),
+        "mean_toggle_budget_remaining": (float(np.mean(budget_vals)) if budget_vals else float("nan")),
         "mean_valid_on_actions_on_first20_decision_steps": float(np.mean(ep_valid_on_first20_decision_steps_mean)),
         "fraction_decision_steps_with_any_on_valid": float(np.mean(ep_fraction_decision_steps_any_on_valid)),
         "noop_chosen_on_decision_steps_mean": float(np.mean(ep_noop_chosen_on_decision_steps_mean)),
