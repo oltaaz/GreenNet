@@ -187,7 +187,7 @@ def default_train_env_config() -> EnvConfig:
         decision_interval_steps=10,
         max_off_toggles_per_episode=0,
         max_total_toggles_per_episode=3,
-        disable_off_actions=False,
+        disable_off_actions=True,
         initial_off_edges=3,
         initial_off_seed=123,
         util_block_threshold=0.85,
@@ -1400,6 +1400,7 @@ def main() -> None:
             base_env_config,
             initial_off_edges=3,
             max_total_toggles_per_episode=3,
+            disable_off_actions=True,
         )
         stability = _run_track("NORMAL_STABILITY", stability_cfg)
         capability = _run_track("NORMAL_CAPABILITY", capability_cfg)
@@ -1407,7 +1408,7 @@ def main() -> None:
         print(
             f"\n[two-track] seed={int(getattr(base_env_config, 'traffic_seed', -1))} eps={int(args.episodes)} | "
             f"STABILITY: Δreward={stability['delta_reward']:+.3f}, Δenergy={stability['delta_energy']:+.6f}, Δdropped={stability['delta_dropped']:+.3f} | "
-            f"CAPABILITY: Δreward={capability['delta_reward']:+.3f}, Δenergy={capability['delta_energy']:+.6f}, Δdropped={capability['delta_dropped']:+.3f}"
+            f"CAPABILITY: Δreward={capability['delta_reward']:+.3f}, Δenergy={capability['delta_energy']:+.6f}, Δdropped={capability['delta_dropped']:+.3f}, off_disabled=1"
         )
 
         if args.eval_out is not None:
