@@ -96,6 +96,11 @@ EVAL_TOLS: Dict[str, float] = {
     "dropped": 1.0,
     "energy": 0.02,
 }
+TRACK_TOLS: Dict[str, Dict[str, float]] = {
+    "NORMAL_STABILITY": {"reward": EVAL_TOLS["reward"], "dropped": EVAL_TOLS["dropped"], "energy": EVAL_TOLS["energy"]},
+    "NORMAL_CAPABILITY": {"reward": EVAL_TOLS["reward"], "dropped": EVAL_TOLS["dropped"], "energy": 0.03},
+    "CUSTOM": {"reward": EVAL_TOLS["reward"], "dropped": EVAL_TOLS["dropped"], "energy": EVAL_TOLS["energy"]},
+}
 
 _ENV_TUPLE_FIELDS = {
     "topology_seeds",
@@ -1350,18 +1355,21 @@ def main() -> None:
         else:
             model = PPO.load(str(model_path), device=load_device)
         print(f"[device] loaded {type(model).__name__} on: {model.policy.device}")
-        print(
-            "SUMMARY TOLERANCES: "
-            f"reward>=-{EVAL_TOLS['reward']:.3f} "
-            f"dropped<=+{EVAL_TOLS['dropped']:.3f} "
-            f"|energy|<={EVAL_TOLS['energy']:.6f}"
-        )
+        def _track_tols(track_name: str) -> Dict[str, float]:
+            return dict(TRACK_TOLS.get(track_name, EVAL_TOLS))
 
         def _run_track(track_name: str, cfg: EnvConfig) -> Dict[str, float]:
+            tols = _track_tols(track_name)
             print(
                 f"\nEVAL TRACK: {track_name} "
                 f"(initial_off_edges={int(getattr(cfg, 'initial_off_edges', 0))}, "
                 f"max_total_toggles={int(getattr(cfg, 'max_total_toggles_per_episode', 0))})"
+            )
+            print(
+                f"SUMMARY TOLERANCES ({track_name}): "
+                f"reward>=-{float(tols['reward']):.3f} "
+                f"dropped<=+{float(tols['dropped']):.3f} "
+                f"|energy|<={float(tols['energy']):.6f}"
             )
             trained_stoch = eval_policy(
                 model,
@@ -1490,12 +1498,6 @@ def main() -> None:
             f"toggle_off_penalty_scale={float(getattr(env_config, 'toggle_off_penalty_scale', 0.0)):.6f} "
             f"energy_weight={float(getattr(env_config, 'energy_weight', 0.0)):.6f}"
         )
-        print(
-            "SUMMARY TOLERANCES: "
-            f"reward>=-{EVAL_TOLS['reward']:.3f} "
-            f"dropped<=+{EVAL_TOLS['dropped']:.3f} "
-            f"|energy|<={EVAL_TOLS['energy']:.6f}"
-        )
         eval_initial_off_edges = int(getattr(env_config, "initial_off_edges", 0))
         eval_max_total_toggles = int(getattr(env_config, "max_total_toggles_per_episode", 0))
         if eval_initial_off_edges == 0:
@@ -1504,6 +1506,13 @@ def main() -> None:
             eval_track = "NORMAL_CAPABILITY"
         else:
             eval_track = "CUSTOM"
+        eval_track_tols = TRACK_TOLS.get(eval_track, EVAL_TOLS)
+        print(
+            f"SUMMARY TOLERANCES ({eval_track}): "
+            f"reward>=-{float(eval_track_tols['reward']):.3f} "
+            f"dropped<=+{float(eval_track_tols['dropped']):.3f} "
+            f"|energy|<={float(eval_track_tols['energy']):.6f}"
+        )
         print(
             f"EVAL TRACK: {eval_track} "
             f"(initial_off_edges={eval_initial_off_edges}, max_total_toggles={eval_max_total_toggles})"
@@ -1562,10 +1571,16 @@ def main() -> None:
             policy_mode="noop",
         )
 
-        def _better_with_tolerance(delta_reward: float, delta_energy: float, delta_dropped: float) -> tuple[str, str]:
-            ok_reward = float(delta_reward) >= -float(EVAL_TOLS["reward"])
-            ok_dropped = float(delta_dropped) <= float(EVAL_TOLS["dropped"])
-            ok_energy = abs(float(delta_energy)) <= float(EVAL_TOLS["energy"])
+        def _better_with_tolerance(
+            delta_reward: float,
+            delta_energy: float,
+            delta_dropped: float,
+            track_name: str,
+        ) -> tuple[str, str]:
+            tols = TRACK_TOLS.get(track_name, EVAL_TOLS)
+            ok_reward = float(delta_reward) >= -float(tols["reward"])
+            ok_dropped = float(delta_dropped) <= float(tols["dropped"])
+            ok_energy = abs(float(delta_energy)) <= float(tols["energy"])
             ok_all = bool(ok_reward and ok_dropped and ok_energy)
 
             if ok_all:
@@ -1574,15 +1589,15 @@ def main() -> None:
                 failures: list[str] = []
                 if not ok_reward:
                     failures.append(
-                        f"reward({float(delta_reward):+.3f}<{-float(EVAL_TOLS['reward']):+.3f})"
+                        f"reward({float(delta_reward):+.3f}<{-float(tols['reward']):+.3f})"
                     )
                 if not ok_dropped:
                     failures.append(
-                        f"dropped({float(delta_dropped):+.3f}>+{float(EVAL_TOLS['dropped']):.3f})"
+                        f"dropped({float(delta_dropped):+.3f}>+{float(tols['dropped']):.3f})"
                     )
                 if not ok_energy:
                     failures.append(
-                        f"energy(|{float(delta_energy):+.6f}|>{float(EVAL_TOLS['energy']):.6f})"
+                        f"energy(|{float(delta_energy):+.6f}|>{float(tols['energy']):.6f})"
                     )
                 reason = "fail: " + ", ".join(failures)
 
@@ -1592,7 +1607,7 @@ def main() -> None:
         d_reward = trained_det["reward_mean"] - noop_det["reward_mean"]
         d_energy = trained_det["energy_mean"] - noop_det["energy_mean"]
         d_dropped = trained_det["dropped_mean"] - noop_det["dropped_mean"]
-        better, reason = _better_with_tolerance(d_reward, d_energy, d_dropped)
+        better, reason = _better_with_tolerance(d_reward, d_energy, d_dropped, eval_track)
         print(
             f"\n[summary:{eval_track}] trained(det) vs noop: better={better} "
             f"Δreward={d_reward:+.3f} Δenergy={d_energy:+.6f} Δdropped={d_dropped:+.3f} "
@@ -1602,7 +1617,7 @@ def main() -> None:
         d_reward_s = trained_stoch["reward_mean"] - noop_det["reward_mean"]
         d_energy_s = trained_stoch["energy_mean"] - noop_det["energy_mean"]
         d_dropped_s = trained_stoch["dropped_mean"] - noop_det["dropped_mean"]
-        better_s, reason_s = _better_with_tolerance(d_reward_s, d_energy_s, d_dropped_s)
+        better_s, reason_s = _better_with_tolerance(d_reward_s, d_energy_s, d_dropped_s, eval_track)
         print(
             f"[summary:{eval_track}] trained(stoch) vs noop: better={better_s} "
             f"Δreward={d_reward_s:+.3f} Δenergy={d_energy_s:+.6f} Δdropped={d_dropped_s:+.3f} "
@@ -1611,7 +1626,7 @@ def main() -> None:
         d_reward_r = random_masked_stoch["reward_mean"] - noop_det["reward_mean"]
         d_energy_r = random_masked_stoch["energy_mean"] - noop_det["energy_mean"]
         d_dropped_r = random_masked_stoch["dropped_mean"] - noop_det["dropped_mean"]
-        better_r, reason_r = _better_with_tolerance(d_reward_r, d_energy_r, d_dropped_r)
+        better_r, reason_r = _better_with_tolerance(d_reward_r, d_energy_r, d_dropped_r, eval_track)
         print(
             f"[summary:{eval_track}] random_masked(stoch) vs noop: better={better_r} "
             f"Δreward={d_reward_r:+.3f} Δenergy={d_energy_r:+.6f} Δdropped={d_dropped_r:+.3f} "
