@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import random
 from dataclasses import fields, is_dataclass, replace
@@ -90,6 +91,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
 }
 
+EVAL_TOLS: Dict[str, float] = {
+    "reward": 0.5,
+    "dropped": 1.0,
+    "energy": 0.02,
+}
+
 _ENV_TUPLE_FIELDS = {
     "topology_seeds",
     "traffic_mice_size_range",
@@ -169,6 +176,9 @@ def default_train_env_config() -> EnvConfig:
         toggle_apply_penalty=0.02,
         toggle_on_penalty_scale=0.2,
         toggle_off_penalty_scale=5.0,
+        toggle_off_penalty_scale_safe=0.2,
+        toggle_harm_drop_penalty_scale=2.0,
+        toggle_harm_qos_penalty_scale=50.0,
         toggle_attempt_penalty=0.0,
         noop_bonus=0.0,
         debug_logs=False,
@@ -184,6 +194,9 @@ def default_train_env_config() -> EnvConfig:
         initial_off_edges=10,
         initial_off_seed=123,
         util_block_threshold=0.85,
+        safe_off_util_threshold=0.005,
+        safe_off_min_streak=3,
+        block_off_when_all_on=True,
 
         traffic_hotspots=((0, 5, 3.0), (2, 7, 2.0)),
         traffic_avg_bursts_per_step=2.0,
@@ -413,6 +426,7 @@ def eval_policy(
     ep_reward_toggle: list[float] = []
     ep_reward_toggle_on: list[float] = []
     ep_reward_toggle_off: list[float] = []
+    ep_reward_toggle_harm: list[float] = []
     ep_toggle_total: list[int] = []
     ep_toggle_rate: list[float] = []
     ep_qos_violation_rate: list[float] = []
@@ -444,6 +458,8 @@ def eval_policy(
     ep_valid_off_actions_on_decision_steps: list[float] = []
     ep_valid_noop_actions_on_decision_steps: list[float] = []
     ep_mean_demand_per_step: list[float] = []
+    ep_delta_dropped_after_toggle_mean: list[float] = []
+    ep_delta_qos_after_toggle_mean: list[float] = []
     ep_on_edges_count_mean: list[float] = []
     ep_off_edges_count_mean: list[float] = []
     ep_toggle_budget_remaining_mean: list[float] = []
@@ -451,6 +467,9 @@ def eval_policy(
     ep_valid_on_first20_decision_steps_mean: list[float] = []
     ep_fraction_decision_steps_any_on_valid: list[float] = []
     ep_noop_chosen_on_decision_steps_mean: list[float] = []
+    ep_pending_toggle_harm_mean: list[float] = []
+    ep_toggle_harm_max_dd_mean: list[float] = []
+    ep_toggle_harm_max_dq_mean: list[float] = []
     ep_edge_universe_size: list[float] = []
     ep_initial_off_requested: list[float] = []
     ep_initial_off_applied: list[float] = []
@@ -488,6 +507,9 @@ def eval_policy(
         sum_reward_toggle = 0.0
         sum_reward_toggle_on = 0.0
         sum_reward_toggle_off = 0.0
+        sum_reward_toggle_harm = 0.0
+        delta_drop_after_toggle_vals: list[float] = []
+        delta_qos_after_toggle_vals: list[float] = []
         valid_counts: list[int] = []
         decision_valid_counts: list[int] = []
         valid_toggle_counts: list[int] = []
@@ -508,6 +530,9 @@ def eval_policy(
         decision_off_edges_counts: list[int] = []
         decision_step_when_off_zero: int | None = None
         noop_chosen_on_decision_steps = 0
+        pending_toggle_harm_vals: list[float] = []
+        toggle_harm_max_dd_vals: list[float] = []
+        toggle_harm_max_dq_vals: list[float] = []
         debug_decision_reason_prints = 0
 
         while not (terminated or truncated):
@@ -604,6 +629,12 @@ def eval_policy(
             sum_reward_toggle += float(info.get("reward_toggle", 0.0))
             sum_reward_toggle_on += float(info.get("reward_toggle_on", 0.0))
             sum_reward_toggle_off += float(info.get("reward_toggle_off", 0.0))
+            sum_reward_toggle_harm += float(info.get("reward_toggle_harm", 0.0))
+            delta_drop_after_toggle_vals.append(float(info.get("delta_dropped_after_toggle", 0.0)))
+            delta_qos_after_toggle_vals.append(float(info.get("delta_qos_after_toggle", 0.0)))
+            pending_toggle_harm_vals.append(float(info.get("pending_toggle_harm", 0)))
+            toggle_harm_max_dd_vals.append(float(info.get("toggle_harm_max_dd", 0.0)))
+            toggle_harm_max_dq_vals.append(float(info.get("toggle_harm_max_dq", 0.0)))
 
             metrics = info.get("metrics", None)
 
@@ -691,6 +722,7 @@ def eval_policy(
         ep_reward_toggle.append(sum_reward_toggle)
         ep_reward_toggle_on.append(sum_reward_toggle_on)
         ep_reward_toggle_off.append(sum_reward_toggle_off)
+        ep_reward_toggle_harm.append(sum_reward_toggle_harm)
         toggle_total = applied_count
         ep_toggle_total.append(toggle_total)
         if steps > 0:
@@ -730,6 +762,12 @@ def eval_policy(
             float(np.mean(decision_valid_noop_counts)) if decision_valid_noop_counts else 0.0
         )
         ep_mean_demand_per_step.append(float(np.mean(demand_step_vals)) if demand_step_vals else 0.0)
+        ep_delta_dropped_after_toggle_mean.append(
+            float(np.mean(delta_drop_after_toggle_vals)) if delta_drop_after_toggle_vals else 0.0
+        )
+        ep_delta_qos_after_toggle_mean.append(
+            float(np.mean(delta_qos_after_toggle_vals)) if delta_qos_after_toggle_vals else 0.0
+        )
         ep_on_edges_count_mean.append(float(np.mean(on_edges_vals)) if on_edges_vals else 0.0)
         ep_off_edges_count_mean.append(float(np.mean(off_edges_vals)) if off_edges_vals else 0.0)
         if budget_remaining_vals:
@@ -744,6 +782,15 @@ def eval_policy(
             ep_noop_chosen_on_decision_steps_mean.append(float(noop_chosen_on_decision_steps) / float(decision_steps))
         else:
             ep_noop_chosen_on_decision_steps_mean.append(0.0)
+        ep_pending_toggle_harm_mean.append(
+            float(np.mean(pending_toggle_harm_vals)) if pending_toggle_harm_vals else 0.0
+        )
+        ep_toggle_harm_max_dd_mean.append(
+            float(np.mean(toggle_harm_max_dd_vals)) if toggle_harm_max_dd_vals else 0.0
+        )
+        ep_toggle_harm_max_dq_mean.append(
+            float(np.mean(toggle_harm_max_dq_vals)) if toggle_harm_max_dq_vals else 0.0
+        )
         first20_off = decision_off_edges_counts[:20]
         ep_off_edges_first20_decision_steps_mean.append(float(np.mean(first20_off)) if first20_off else 0.0)
         ep_off_edges_all_decision_steps_mean.append(float(np.mean(decision_off_edges_counts)) if decision_off_edges_counts else 0.0)
@@ -788,6 +835,7 @@ def eval_policy(
     rt_m, rt_s = _mean_std(ep_reward_toggle)
     rto_m, rto_s = _mean_std(ep_reward_toggle_on)
     rtf_m, rtf_s = _mean_std(ep_reward_toggle_off)
+    rth_m, rth_s = _mean_std(ep_reward_toggle_harm)
     tt_m, tt_s = _mean_std([float(v) for v in ep_toggle_total])
     tr_m, tr_s = _mean_std([float(v) for v in ep_toggle_rate])
     qv_m, qv_s = _mean_std(ep_qos_violation_rate)
@@ -827,6 +875,22 @@ def eval_policy(
     print(f"reward_toggle:  mean={rt_m:.3f} std={rt_s:.3f}")
     print(f"reward_toggle_on:  mean={rto_m:.3f} std={rto_s:.3f}")
     print(f"reward_toggle_off: mean={rtf_m:.3f} std={rtf_s:.3f}")
+    print(f"reward_toggle_harm: mean={rth_m:.3f} std={rth_s:.3f}")
+    print(
+        f"delta_dropped_after_toggle mean={float(np.mean(ep_delta_dropped_after_toggle_mean)):.4f}"
+    )
+    print(
+        f"delta_qos_after_toggle mean={float(np.mean(ep_delta_qos_after_toggle_mean)):.6f}"
+    )
+    print(
+        f"pending_toggle_harm mean={float(np.mean(ep_pending_toggle_harm_mean)):.3f}"
+    )
+    print(
+        f"toggle_harm_max_dd mean={float(np.mean(ep_toggle_harm_max_dd_mean)):.6f}"
+    )
+    print(
+        f"toggle_harm_max_dq mean={float(np.mean(ep_toggle_harm_max_dq_mean)):.6f}"
+    )
     print(f"qos_violation:  mean={qv_m:.4f} std={qv_s:.4f}")
     print(
         f"toggles applied mean={float(np.mean(ep_applied)):.2f} "
@@ -924,6 +988,13 @@ def eval_policy(
         "reward_toggle_on_std": rto_s,
         "reward_toggle_off_mean": rtf_m,
         "reward_toggle_off_std": rtf_s,
+        "reward_toggle_harm_mean": rth_m,
+        "reward_toggle_harm_std": rth_s,
+        "delta_dropped_after_toggle_mean": float(np.mean(ep_delta_dropped_after_toggle_mean)),
+        "delta_qos_after_toggle_mean": float(np.mean(ep_delta_qos_after_toggle_mean)),
+        "pending_toggle_harm_mean": float(np.mean(ep_pending_toggle_harm_mean)),
+        "toggle_harm_max_dd_mean": float(np.mean(ep_toggle_harm_max_dd_mean)),
+        "toggle_harm_max_dq_mean": float(np.mean(ep_toggle_harm_max_dq_mean)),
         "toggles_attempted_count_mean": ta_m,
         "toggles_attempted_count_std": ta_s,
         "allowed_toggle_count_mean": al_m,
@@ -992,7 +1063,7 @@ def main() -> None:
     parser.add_argument(
         "--debug-eval-energy",
         action="store_true",
-        help="Print evaluation energy accumulation diagnostics.",
+        help="Print evaluation energy running-total diagnostics.",
     )
     parser.add_argument(
         "--robustness",
@@ -1089,6 +1160,18 @@ def main() -> None:
         help="Convenience: during --eval, set max_total_toggles_per_episode=0 when initial_off_edges==0.",
     )
     parser.add_argument(
+        "--eval-two-track",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Run canonical two-track eval: NORMAL_STABILITY and NORMAL_CAPABILITY.",
+    )
+    parser.add_argument(
+        "--eval-out",
+        type=Path,
+        default=None,
+        help="Optional CSV path to append two-track eval rows.",
+    )
+    parser.add_argument(
         "--topology-seeds",
         type=str,
         default="0,1,2,3,4",
@@ -1114,7 +1197,7 @@ def main() -> None:
     config.setdefault("train_seed", train_seed)
     config.setdefault("eval_seed", eval_seed)
 
-    active_seed = eval_seed if (args.eval or args.eval_noop or args.robustness) else train_seed
+    active_seed = eval_seed if (args.eval or args.eval_two_track or args.eval_noop or args.robustness) else train_seed
     set_seeds(active_seed)
 
     # ---- Device selection (Apple Silicon GPU via MPS) ----
@@ -1245,6 +1328,138 @@ def main() -> None:
         )
         return
 
+    if args.eval_two_track:
+        model_path = args.model or find_latest_model()
+        print(f"Evaluating model (two-track): {model_path}")
+
+        model_run_dir = Path(model_path).parent
+        base_env_config = load_env_config_from_run(model_run_dir, verbose=True)
+        base_env_config = replace(base_env_config, drop_penalty_lambda=float(args.eval_drop_lambda), debug_logs=False)
+        if args.eval_traffic_seed is not None:
+            base_env_config = replace(base_env_config, traffic_seed=int(args.eval_traffic_seed))
+        if args.eval_toggle_on_penalty_scale is not None:
+            base_env_config = replace(base_env_config, toggle_on_penalty_scale=float(args.eval_toggle_on_penalty_scale))
+        if args.eval_toggle_off_penalty_scale is not None:
+            base_env_config = replace(base_env_config, toggle_off_penalty_scale=float(args.eval_toggle_off_penalty_scale))
+        if args.eval_energy_weight is not None:
+            base_env_config = replace(base_env_config, energy_weight=float(args.eval_energy_weight))
+
+        train_cfg = load_train_config_from_run(model_run_dir, verbose=False)
+        if train_cfg:
+            print(f"[eval] loaded train_config keys: {sorted(train_cfg.keys())}")
+        else:
+            print("[eval] no train_config found; using defaults for PPO keys.")
+
+        load_device = config.get("ppo", {}).get("device", "cpu")
+        if MASKABLE_AVAILABLE and MaskablePPO is not None:
+            model = MaskablePPO.load(str(model_path), device=load_device)
+        else:
+            model = PPO.load(str(model_path), device=load_device)
+        print(f"[device] loaded {type(model).__name__} on: {model.policy.device}")
+        print(
+            "SUMMARY TOLERANCES: "
+            f"reward>=-{EVAL_TOLS['reward']:.3f} "
+            f"dropped<=+{EVAL_TOLS['dropped']:.3f} "
+            f"|energy|<={EVAL_TOLS['energy']:.6f}"
+        )
+
+        def _run_track(track_name: str, cfg: EnvConfig) -> Dict[str, float]:
+            print(
+                f"\nEVAL TRACK: {track_name} "
+                f"(initial_off_edges={int(getattr(cfg, 'initial_off_edges', 0))}, "
+                f"max_total_toggles={int(getattr(cfg, 'max_total_toggles_per_episode', 0))})"
+            )
+            trained_stoch = eval_policy(
+                model,
+                cfg,
+                episodes=int(args.episodes),
+                seed=eval_seed,
+                label="trained",
+                deterministic=False,
+                debug_energy=args.debug_eval_energy,
+                policy_mode="model",
+            )
+            noop_det = eval_policy(
+                None,
+                cfg,
+                episodes=int(args.episodes),
+                seed=eval_seed,
+                label="always_noop",
+                deterministic=True,
+                debug_energy=args.debug_eval_energy,
+                policy_mode="noop",
+            )
+            return {
+                "delta_reward": float(trained_stoch["reward_mean"] - noop_det["reward_mean"]),
+                "delta_energy": float(trained_stoch["energy_mean"] - noop_det["energy_mean"]),
+                "delta_dropped": float(trained_stoch["dropped_mean"] - noop_det["dropped_mean"]),
+                "toggles_applied_mean": float(trained_stoch.get("toggles_applied_mean", 0.0)),
+                "toggled_on_mean": float(trained_stoch.get("toggled_on_mean", 0.0)),
+                "toggled_off_mean": float(trained_stoch.get("toggled_off_mean", 0.0)),
+            }
+
+        stability_cfg = replace(
+            base_env_config,
+            initial_off_edges=0,
+        )
+        capability_cfg = replace(
+            base_env_config,
+            initial_off_edges=3,
+            max_total_toggles_per_episode=3,
+        )
+        stability = _run_track("NORMAL_STABILITY", stability_cfg)
+        capability = _run_track("NORMAL_CAPABILITY", capability_cfg)
+
+        print(
+            f"\n[two-track] seed={int(getattr(base_env_config, 'traffic_seed', -1))} eps={int(args.episodes)} | "
+            f"STABILITY: Δreward={stability['delta_reward']:+.3f}, Δenergy={stability['delta_energy']:+.6f}, Δdropped={stability['delta_dropped']:+.3f} | "
+            f"CAPABILITY: Δreward={capability['delta_reward']:+.3f}, Δenergy={capability['delta_energy']:+.6f}, Δdropped={capability['delta_dropped']:+.3f}"
+        )
+
+        if args.eval_out is not None:
+            out_path = Path(args.eval_out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            write_header = not out_path.exists()
+            with out_path.open("a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                if write_header:
+                    writer.writerow(
+                        [
+                            "timestamp_utc",
+                            "model_path",
+                            "traffic_seed",
+                            "episodes",
+                            "stability_delta_reward",
+                            "stability_delta_energy",
+                            "stability_delta_dropped",
+                            "capability_delta_reward",
+                            "capability_delta_energy",
+                            "capability_delta_dropped",
+                            "capability_toggles_applied_mean",
+                            "capability_toggled_on_mean",
+                            "capability_toggled_off_mean",
+                        ]
+                    )
+                writer.writerow(
+                    [
+                        datetime.now(timezone.utc).isoformat(),
+                        str(model_path),
+                        int(getattr(base_env_config, "traffic_seed", -1)),
+                        int(args.episodes),
+                        f"{stability['delta_reward']:.6f}",
+                        f"{stability['delta_energy']:.6f}",
+                        f"{stability['delta_dropped']:.6f}",
+                        f"{capability['delta_reward']:.6f}",
+                        f"{capability['delta_energy']:.6f}",
+                        f"{capability['delta_dropped']:.6f}",
+                        f"{capability['toggles_applied_mean']:.6f}",
+                        f"{capability['toggled_on_mean']:.6f}",
+                        f"{capability['toggled_off_mean']:.6f}",
+                    ]
+                )
+            print(f"[two-track] appended CSV row: {out_path}")
+        return
+
     if args.eval:
         model_path = args.model or find_latest_model()
         print(f"Evaluating model: {model_path}")
@@ -1279,6 +1494,24 @@ def main() -> None:
             f"toggle_on_penalty_scale={float(getattr(env_config, 'toggle_on_penalty_scale', 0.0)):.6f} "
             f"toggle_off_penalty_scale={float(getattr(env_config, 'toggle_off_penalty_scale', 0.0)):.6f} "
             f"energy_weight={float(getattr(env_config, 'energy_weight', 0.0)):.6f}"
+        )
+        print(
+            "SUMMARY TOLERANCES: "
+            f"reward>=-{EVAL_TOLS['reward']:.3f} "
+            f"dropped<=+{EVAL_TOLS['dropped']:.3f} "
+            f"|energy|<={EVAL_TOLS['energy']:.6f}"
+        )
+        eval_initial_off_edges = int(getattr(env_config, "initial_off_edges", 0))
+        eval_max_total_toggles = int(getattr(env_config, "max_total_toggles_per_episode", 0))
+        if eval_initial_off_edges == 0:
+            eval_track = "NORMAL_STABILITY"
+        elif eval_initial_off_edges == 3 and eval_max_total_toggles == 3:
+            eval_track = "NORMAL_CAPABILITY"
+        else:
+            eval_track = "CUSTOM"
+        print(
+            f"EVAL TRACK: {eval_track} "
+            f"(initial_off_edges={eval_initial_off_edges}, max_total_toggles={eval_max_total_toggles})"
         )
         train_cfg = load_train_config_from_run(model_run_dir, verbose=False)
         if train_cfg:
@@ -1334,30 +1567,60 @@ def main() -> None:
             policy_mode="noop",
         )
 
+        def _better_with_tolerance(delta_reward: float, delta_energy: float, delta_dropped: float) -> tuple[str, str]:
+            ok_reward = float(delta_reward) >= -float(EVAL_TOLS["reward"])
+            ok_dropped = float(delta_dropped) <= float(EVAL_TOLS["dropped"])
+            ok_energy = abs(float(delta_energy)) <= float(EVAL_TOLS["energy"])
+            ok_all = bool(ok_reward and ok_dropped and ok_energy)
+
+            if ok_all:
+                reason = "ok"
+            else:
+                failures: list[str] = []
+                if not ok_reward:
+                    failures.append(
+                        f"reward({float(delta_reward):+.3f}<{-float(EVAL_TOLS['reward']):+.3f})"
+                    )
+                if not ok_dropped:
+                    failures.append(
+                        f"dropped({float(delta_dropped):+.3f}>+{float(EVAL_TOLS['dropped']):.3f})"
+                    )
+                if not ok_energy:
+                    failures.append(
+                        f"energy(|{float(delta_energy):+.6f}|>{float(EVAL_TOLS['energy']):.6f})"
+                    )
+                reason = "fail: " + ", ".join(failures)
+
+            better = "YES" if ok_all else "NO"
+            return better, reason
+
         d_reward = trained_det["reward_mean"] - noop_det["reward_mean"]
         d_energy = trained_det["energy_mean"] - noop_det["energy_mean"]
         d_dropped = trained_det["dropped_mean"] - noop_det["dropped_mean"]
-        better = "YES" if d_reward > 0 else "NO"
+        better, reason = _better_with_tolerance(d_reward, d_energy, d_dropped)
         print(
-            f"\n[summary] trained(det) vs noop: better={better} "
-            f"Δreward={d_reward:+.3f} Δenergy={d_energy:+.6f} Δdropped={d_dropped:+.3f}"
+            f"\n[summary:{eval_track}] trained(det) vs noop: better={better} "
+            f"Δreward={d_reward:+.3f} Δenergy={d_energy:+.6f} Δdropped={d_dropped:+.3f} "
+            f"({reason})"
         )
 
         d_reward_s = trained_stoch["reward_mean"] - noop_det["reward_mean"]
         d_energy_s = trained_stoch["energy_mean"] - noop_det["energy_mean"]
         d_dropped_s = trained_stoch["dropped_mean"] - noop_det["dropped_mean"]
-        better_s = "YES" if d_reward_s > 0 else "NO"
+        better_s, reason_s = _better_with_tolerance(d_reward_s, d_energy_s, d_dropped_s)
         print(
-            f"[summary] trained(stoch) vs noop: better={better_s} "
-            f"Δreward={d_reward_s:+.3f} Δenergy={d_energy_s:+.6f} Δdropped={d_dropped_s:+.3f}"
+            f"[summary:{eval_track}] trained(stoch) vs noop: better={better_s} "
+            f"Δreward={d_reward_s:+.3f} Δenergy={d_energy_s:+.6f} Δdropped={d_dropped_s:+.3f} "
+            f"({reason_s})"
         )
         d_reward_r = random_masked_stoch["reward_mean"] - noop_det["reward_mean"]
         d_energy_r = random_masked_stoch["energy_mean"] - noop_det["energy_mean"]
         d_dropped_r = random_masked_stoch["dropped_mean"] - noop_det["dropped_mean"]
-        better_r = "YES" if d_reward_r > 0 else "NO"
+        better_r, reason_r = _better_with_tolerance(d_reward_r, d_energy_r, d_dropped_r)
         print(
-            f"[summary] random_masked(stoch) vs noop: better={better_r} "
-            f"Δreward={d_reward_r:+.3f} Δenergy={d_energy_r:+.6f} Δdropped={d_dropped_r:+.3f}"
+            f"[summary:{eval_track}] random_masked(stoch) vs noop: better={better_r} "
+            f"Δreward={d_reward_r:+.3f} Δenergy={d_energy_r:+.6f} Δdropped={d_dropped_r:+.3f} "
+            f"({reason_r})"
         )
         if bool(args.eval_disable_off_actions):
             cond_initial = float(trained_stoch.get("initial_off_applied_mean", 0.0)) > 0.0
