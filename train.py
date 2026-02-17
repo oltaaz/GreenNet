@@ -157,18 +157,18 @@ def default_train_env_config() -> EnvConfig:
     return EnvConfig(
         traffic_model="stochastic",
         # Make energy matter enough to beat NOOP.
-        energy_weight=25.0,
+        energy_weight=20.0,
 
         # Drops still matter, but don't drown everything.
-        drop_penalty_lambda=40.0,
+        drop_penalty_lambda=60.0,
         normalize_drop=True,
 
         # QoS penalty: sane + gated.
         qos_target_norm_drop=0.0720,
-        qos_violation_penalty_scale=80.0,
+        qos_violation_penalty_scale=120.0,
         qos_min_volume=500.0,
         qos_guard_margin=0.004,
-        qos_guard_penalty_scale=3.0,
+        qos_guard_penalty_scale=4.5,
 
         # Let it explore without fear (tune if action thrashing).
         toggle_penalty=0.02,
@@ -176,9 +176,6 @@ def default_train_env_config() -> EnvConfig:
         toggle_apply_penalty=0.02,
         toggle_on_penalty_scale=0.2,
         toggle_off_penalty_scale=5.0,
-        toggle_off_penalty_scale_safe=0.2,
-        toggle_harm_drop_penalty_scale=2.0,
-        toggle_harm_qos_penalty_scale=50.0,
         toggle_attempt_penalty=0.0,
         noop_bonus=0.0,
         debug_logs=False,
@@ -189,14 +186,11 @@ def default_train_env_config() -> EnvConfig:
         global_toggle_cooldown_steps=5,
         decision_interval_steps=10,
         max_off_toggles_per_episode=0,
-        max_total_toggles_per_episode=10,
+        max_total_toggles_per_episode=3,
         disable_off_actions=False,
-        initial_off_edges=10,
+        initial_off_edges=3,
         initial_off_seed=123,
         util_block_threshold=0.85,
-        safe_off_util_threshold=0.005,
-        safe_off_min_streak=3,
-        block_off_when_all_on=True,
 
         traffic_hotspots=((0, 5, 3.0), (2, 7, 2.0)),
         traffic_avg_bursts_per_step=2.0,
@@ -1102,7 +1096,7 @@ def main() -> None:
     parser.add_argument(
         "--train-drop-lambda",
         type=float,
-        default=30.0,
+        default=60.0,
         help="Drop penalty lambda used for training environment reward shaping.",
     )
     parser.add_argument(
