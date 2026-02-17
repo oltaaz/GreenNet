@@ -373,6 +373,9 @@ class GreenNetEnv(gym.Env):
         # This creates available ON actions when OFF actions are disabled.
         self._initial_off_requested = int(getattr(self.config, "initial_off_edges", 0) or 0)
         self._initial_off_applied = int(self._apply_safe_initial_off_edges(seed=seed))
+        # Initial OFF edges are episode setup, not agent toggles: clear per-edge cooldown
+        # so repair ON actions are immediately available on decision steps.
+        self._clear_all_edge_cooldowns()
         self._edge_universe_size = int(len(self._edge_universe))
         for (u, v) in self._edge_universe:
             key = self._edge_key(u, v)
@@ -470,6 +473,15 @@ class GreenNetEnv(gym.Env):
             if off_applied >= k:
                 break
         return int(off_applied)
+
+    def _clear_all_edge_cooldowns(self) -> None:
+        if self.simulator is None:
+            return
+        reset_last_toggled = -max(1, int(getattr(self.config, "toggle_cooldown_steps", 1) or 1))
+        g = self.simulator.graph
+        for (u, v) in self._edge_universe:
+            if g.has_edge(u, v):
+                g.edges[u, v]["last_toggled"] = int(reset_last_toggled)
 
     def _ensure_edge_universe_on_graph(self, graph: nx.Graph) -> None:
         for (u, v) in self._edge_universe:
