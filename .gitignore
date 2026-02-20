@@ -8,6 +8,14 @@ ml-env/
 node_modules/
 runs/
 results/
+# Track artifacts (locked models, configs, plots, logs)
+!artifacts/
+!artifacts/**
+# Ignore zip files by default...
 *.zip
+# ...but keep locked artifacts and thesis-ready artifacts tracked
+!artifacts/**/*.zip
+!artifacts/**/ppo_greennet.zip
+
 *.joblib
 experiments/prune_log_*.txt

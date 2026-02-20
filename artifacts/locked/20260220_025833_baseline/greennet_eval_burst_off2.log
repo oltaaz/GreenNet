@@ -1,0 +1,195 @@
+[device] torch.mps_available=True torch.cuda_available=False sb3_device=mps
+Evaluating model: runs/20260220_111755/ppo_greennet.zip
+[env_config] Loaded from runs/20260220_111755/env_config.json (keys=['base_capacity', 'base_latency_ms', 'blocked_action_penalty', 'calm_toggle_multiplier_off', 'debug_logs', 'decision_interval_steps', 'demand_max', 'demand_min', 'demand_norm_scale', 'directed', 'disable_off_actions', 'drop_penalty_lambda', 'edge_prob', 'enable_forecasting', 'energy_weight', 'flows_per_step', 'forecast_alpha', 'forecast_horizon_steps', 'global_toggle_cooldown_steps', 'initial_off_edges', 'initial_off_seed', 'max_emergency_on_toggles_per_episode', 'max_off_toggles_per_episode', 'max_steps', 'max_total_toggles_per_episode', 'max_util_off_allow_threshold', 'node_count', 'noop_bonus', 'normalize_drop', 'off_calm_steps_required', 'off_start_guard_decision_steps', 'off_toggle_penalty_scale', 'qos_guard_margin', 'qos_guard_margin_off', 'qos_guard_margin_on', 'qos_guard_penalty_scale', 'qos_min_volume', 'qos_target_norm_drop', 'qos_toggle_discount_on', 'qos_violation_penalty_scale', 'revert_penalty_scale', 'saturation_util_threshold', 'toggle_apply_penalty', 'toggle_attempt_penalty', 'toggle_cooldown_steps', 'toggle_off_penalty_scale', 'toggle_on_penalty_scale', 'toggle_penalty', 'top_k_edge_utils', 'topology_randomize', 'topology_seed', 'topology_seeds', 'traffic_avg_bursts_per_step', 'traffic_duration_range', 'traffic_elephant_size_range', 'traffic_hotspots', 'traffic_mice_size_range', 'traffic_model', 'traffic_p_elephant', 'traffic_scenario', 'traffic_scenario_duration', 'traffic_scenario_frequency', 'traffic_scenario_intensity', 'traffic_scenario_version', 'traffic_seed', 'traffic_spike_duration_range', 'traffic_spike_multiplier_range', 'traffic_spike_prob', 'util_block_threshold', 'util_unblock_threshold'])
+[eval] using env_config keys: ['base_capacity', 'base_latency_ms', 'blocked_action_penalty', 'calm_toggle_multiplier_off', 'debug_logs', 'decision_interval_steps', 'demand_max', 'demand_min', 'demand_norm_scale', 'directed', 'disable_off_actions', 'drop_penalty_lambda', 'edge_prob', 'enable_forecasting', 'energy_weight', 'flows_per_step', 'forecast_alpha', 'forecast_horizon_steps', 'global_toggle_cooldown_steps', 'initial_off_edges', 'initial_off_seed', 'max_emergency_on_toggles_per_episode', 'max_off_toggles_per_episode', 'max_steps', 'max_total_toggles_per_episode', 'max_util_off_allow_threshold', 'node_count', 'noop_bonus', 'normalize_drop', 'off_calm_steps_required', 'off_start_guard_decision_steps', 'off_toggle_penalty_scale', 'qos_guard_margin', 'qos_guard_margin_off', 'qos_guard_margin_on', 'qos_guard_penalty_scale', 'qos_min_volume', 'qos_target_norm_drop', 'qos_toggle_discount_on', 'qos_violation_penalty_scale', 'revert_penalty_scale', 'saturation_util_threshold', 'toggle_apply_penalty', 'toggle_attempt_penalty', 'toggle_cooldown_steps', 'toggle_off_penalty_scale', 'toggle_on_penalty_scale', 'toggle_penalty', 'top_k_edge_utils', 'topology_randomize', 'topology_seed', 'topology_seeds', 'traffic_avg_bursts_per_step', 'traffic_duration_range', 'traffic_elephant_size_range', 'traffic_hotspots', 'traffic_mice_size_range', 'traffic_model', 'traffic_p_elephant', 'traffic_scenario', 'traffic_scenario_duration', 'traffic_scenario_frequency', 'traffic_scenario_intensity', 'traffic_scenario_version', 'traffic_seed', 'traffic_spike_duration_range', 'traffic_spike_multiplier_range', 'traffic_spike_prob', 'util_block_threshold', 'util_unblock_threshold']
+EVAL MODE: disable_off_actions=False initial_off_edges=2 max_total_toggles=4 traffic_scenario=burst toggle_on_penalty_scale=0.300000 toggle_off_penalty_scale=0.200000 energy_weight=240.000000
+SUMMARY TOLERANCES (CUSTOM): reward>=-0.500 dropped<=+1.000 |energy|<=0.020000
+EVAL TRACK: CUSTOM (initial_off_edges=2, max_total_toggles=4)
+[eval] loaded train_config keys: ['eval_seed', 'ppo', 'seed', 'total_timesteps', 'train_seed']
+[device] loaded MaskablePPO on: mps:0
+[mask reasons ep1 step=10] {'interval': 0, 'sim_none_or_no_edges': 0, 'invalid_index': 0, 'missing_edge': 0, 'bridge': 0, 'global_cd': 0, 'off_disabled': 0, 'off_start_guard': 0, 'off_cap': 0, 'off_all_on_calm': 0, 'off_calm_streak': 16, 'demand_gate': 0, 'qos_guard': 0, 'off_stress_gate': 0, 'util_gate': 0, 'edge_cooldown': 0, 'total_cap': 0, 'on_disabled_by_interval': 0, 'on_disabled_by_missing_edge': 0, 'on_disabled_by_invalid_index': 0, 'on_disabled_by_edge_cooldown': 0, 'on_disabled_by_global_cd': 0, 'on_disabled_by_qos_gate': 0, 'on_disabled_by_sim_none_or_no_edges': 0}
+[mask reasons ep1 step=20] {'interval': 0, 'sim_none_or_no_edges': 0, 'invalid_index': 0, 'missing_edge': 0, 'bridge': 0, 'global_cd': 0, 'off_disabled': 0, 'off_start_guard': 0, 'off_cap': 0, 'off_all_on_calm': 0, 'off_calm_streak': 17, 'demand_gate': 0, 'qos_guard': 0, 'off_stress_gate': 0, 'util_gate': 0, 'edge_cooldown': 0, 'total_cap': 0, 'on_disabled_by_interval': 0, 'on_disabled_by_missing_edge': 0, 'on_disabled_by_invalid_index': 0, 'on_disabled_by_edge_cooldown': 0, 'on_disabled_by_global_cd': 0, 'on_disabled_by_qos_gate': 0, 'on_disabled_by_sim_none_or_no_edges': 0}
+[mask reasons ep1 step=30] {'interval': 0, 'sim_none_or_no_edges': 0, 'invalid_index': 0, 'missing_edge': 0, 'bridge': 0, 'global_cd': 0, 'off_disabled': 0, 'off_start_guard': 0, 'off_cap': 0, 'off_all_on_calm': 0, 'off_calm_streak': 18, 'demand_gate': 0, 'qos_guard': 0, 'off_stress_gate': 0, 'util_gate': 0, 'edge_cooldown': 0, 'total_cap': 0, 'on_disabled_by_interval': 0, 'on_disabled_by_missing_edge': 0, 'on_disabled_by_invalid_index': 0, 'on_disabled_by_edge_cooldown': 0, 'on_disabled_by_global_cd': 0, 'on_disabled_by_qos_gate': 0, 'on_disabled_by_sim_none_or_no_edges': 0}
+[mask reasons ep1 step=40] {'interval': 0, 'sim_none_or_no_edges': 0, 'invalid_index': 0, 'missing_edge': 0, 'bridge': 0, 'global_cd': 0, 'off_disabled': 0, 'off_start_guard': 0, 'off_cap': 0, 'off_all_on_calm': 0, 'off_calm_streak': 18, 'demand_gate': 0, 'qos_guard': 0, 'off_stress_gate': 0, 'util_gate': 0, 'edge_cooldown': 0, 'total_cap': 0, 'on_disabled_by_interval': 0, 'on_disabled_by_missing_edge': 0, 'on_disabled_by_invalid_index': 0, 'on_disabled_by_edge_cooldown': 0, 'on_disabled_by_global_cd': 0, 'on_disabled_by_qos_gate': 0, 'on_disabled_by_sim_none_or_no_edges': 0}
+[mask reasons ep1 step=50] {'interval': 0, 'sim_none_or_no_edges': 0, 'invalid_index': 0, 'missing_edge': 0, 'bridge': 0, 'global_cd': 0, 'off_disabled': 0, 'off_start_guard': 0, 'off_cap': 0, 'off_all_on_calm': 0, 'off_calm_streak': 18, 'demand_gate': 0, 'qos_guard': 0, 'off_stress_gate': 0, 'util_gate': 0, 'edge_cooldown': 0, 'total_cap': 0, 'on_disabled_by_interval': 0, 'on_disabled_by_missing_edge': 0, 'on_disabled_by_invalid_index': 0, 'on_disabled_by_edge_cooldown': 0, 'on_disabled_by_global_cd': 0, 'on_disabled_by_qos_gate': 0, 'on_disabled_by_sim_none_or_no_edges': 0}
+
+=== Evaluation: trained (det, 10 episodes) ===
+traffic cfg:    model=stochastic seed=None avg_bursts=2.0 p_elephant=0.05 scenario=burst disable_off_actions=False initial_off_edges=2
+edge universe   size_mean=18.00 initial_off_requested_mean=2.00 initial_off_applied_mean=2.00
+episode_reward: mean=-1041.602 std=75.836
+energy_kwh:     mean=1.809056 std=0.117052
+dropped:        mean=1954.250 std=370.437
+delivered:      mean=34327.951 std=1847.710
+norm_drop:      mean=0.05352 std=0.00729
+reward_energy:  mean=-434.173 std=28.093
+reward_drop:    mean=-603.861 std=81.556
+reward_qos:     mean=-2.320 std=4.651
+reward_toggle:  mean=-1.247 std=0.213
+reward_other:   mean=0.000 std=0.000
+reward parts    total=-1041.602 energy=-434.173 drop=-603.861 qos=-2.320 toggle=-1.247 other=0.000 | per_step total=-1.041602 energy=-0.434173 drop=-0.603861 qos=-0.002320 toggle=-0.001247 other=0.000000
+reward_toggle_on:  mean=-0.870 std=0.090
+reward_toggle_off: mean=-0.360 std=0.120
+reward_toggle_harm: mean=0.000 std=0.000
+delta_dropped_after_toggle mean=0.0000
+delta_qos_after_toggle mean=0.000000
+pending_toggle_harm mean=0.000
+toggle_harm_max_dd mean=0.000000
+toggle_harm_max_dq mean=0.000000
+qos_violation:  mean=0.0155 std=0.0316
+qos debug       qos_viol_steps_mean=15.50 qos_allow_on_steps_mean=15.50 norm_drop_step_mean=0.024154 qos_sum_mean=-2.320 qos_penalty_per_viol_step_mean=-0.030517
+cd mask debug   dbg_cd_block_mask_val_last_mean=-999.00 dbg_cd_block_mask_samples_mean=0.00 cd_block_mask_mismatch_count_mean=0.00
+toggles applied mean=3.80 reverted mean=0.00
+toggles total   mean=3.80 std=0.60 rate=0.0038
+toggles dir     toggled_on mean=2.90 toggled_off mean=0.90
+off budget      used mean=0.90 blocked mean=0.00
+total budget    used mean=3.80 blocked mean=0.00
+toggle gates   attempted=3.80 (0.0038/step) allowed=3.80 (0.0038/step) blocked_budget=0.00 (0.0000/step) blocked_util=0.00 (0.0000/step) blocked_cd=0.00 (0.0000/step) blocked_off_stress=0.00 (0.0000/step) emergency_on_applied=0.00 max_util_mean=0.5977 applied=3.80 (0.0038/step)
+gate counters  edge_cd=0.00 global_cd=0.00 budget=0.00 util=0.00 off_stress=0.00 qos_off=0.00 qos_on=0.00
+mask stats      valid/step mean=1.02 decision_steps mean=100.00 valid@decision mean=1.23 mask_calls_mean=1000.00
+mask split      toggles/step=0.02 on/step=0.00 off/step=0.02 noop/step=1.00
+mask split@dec  toggles=0.24 on=0.04 off=0.20 noop=1.00
+valid_on_actions@decision mean=0.04
+on blockers    top=[('on_disabled_by_interval', 0), ('on_disabled_by_missing_edge', 0), ('on_disabled_by_invalid_index', 0), ('on_disabled_by_edge_cooldown', 0), ('on_disabled_by_global_cd', 0)]
+on blockers    top_ex_missing=[('on_disabled_by_interval', 0), ('on_disabled_by_invalid_index', 0), ('on_disabled_by_edge_cooldown', 0), ('on_disabled_by_global_cd', 0), ('on_disabled_by_qos_gate', 0)]
+on availability early20 mean=0.18 frac_decision_with_any_on=0.029 noop_chosen@decision=0.962
+edge state      on_edges_mean=17.96 off_edges_mean=0.04 toggle_budget_remaining_mean=0.66
+off saturation  off_edges_first20_dec_mean=0.09 off_edges_all_dec_mean=0.02 decision_step_off_zero_mean=2.00
+demand stats:   mean_demand_per_step=36.327
+[mask reasons ep1 step=10] {'interval': 0, 'sim_none_or_no_edges': 0, 'invalid_index': 0, 'missing_edge': 0, 'bridge': 0, 'global_cd': 0, 'off_disabled': 0, 'off_start_guard': 0, 'off_cap': 0, 'off_all_on_calm': 0, 'off_calm_streak': 16, 'demand_gate': 0, 'qos_guard': 0, 'off_stress_gate': 0, 'util_gate': 0, 'edge_cooldown': 0, 'total_cap': 0, 'on_disabled_by_interval': 0, 'on_disabled_by_missing_edge': 0, 'on_disabled_by_invalid_index': 0, 'on_disabled_by_edge_cooldown': 0, 'on_disabled_by_global_cd': 0, 'on_disabled_by_qos_gate': 0, 'on_disabled_by_sim_none_or_no_edges': 0}
+[mask reasons ep1 step=20] {'interval': 0, 'sim_none_or_no_edges': 0, 'invalid_index': 0, 'missing_edge': 0, 'bridge': 0, 'global_cd': 0, 'off_disabled': 0, 'off_start_guard': 0, 'off_cap': 0, 'off_all_on_calm': 0, 'off_calm_streak': 17, 'demand_gate': 0, 'qos_guard': 0, 'off_stress_gate': 0, 'util_gate': 0, 'edge_cooldown': 0, 'total_cap': 0, 'on_disabled_by_interval': 0, 'on_disabled_by_missing_edge': 0, 'on_disabled_by_invalid_index': 0, 'on_disabled_by_edge_cooldown': 0, 'on_disabled_by_global_cd': 0, 'on_disabled_by_qos_gate': 0, 'on_disabled_by_sim_none_or_no_edges': 0}
+[mask reasons ep1 step=30] {'interval': 0, 'sim_none_or_no_edges': 0, 'invalid_index': 0, 'missing_edge': 0, 'bridge': 0, 'global_cd': 0, 'off_disabled': 0, 'off_start_guard': 0, 'off_cap': 0, 'off_all_on_calm': 0, 'off_calm_streak': 17, 'demand_gate': 0, 'qos_guard': 0, 'off_stress_gate': 0, 'util_gate': 0, 'edge_cooldown': 0, 'total_cap': 0, 'on_disabled_by_interval': 0, 'on_disabled_by_missing_edge': 0, 'on_disabled_by_invalid_index': 0, 'on_disabled_by_edge_cooldown': 0, 'on_disabled_by_global_cd': 0, 'on_disabled_by_qos_gate': 0, 'on_disabled_by_sim_none_or_no_edges': 0}
+[mask reasons ep1 step=40] {'interval': 0, 'sim_none_or_no_edges': 0, 'invalid_index': 0, 'missing_edge': 0, 'bridge': 0, 'global_cd': 0, 'off_disabled': 0, 'off_start_guard': 0, 'off_cap': 0, 'off_all_on_calm': 0, 'off_calm_streak': 17, 'demand_gate': 0, 'qos_guard': 0, 'off_stress_gate': 0, 'util_gate': 0, 'edge_cooldown': 0, 'total_cap': 0, 'on_disabled_by_interval': 0, 'on_disabled_by_missing_edge': 0, 'on_disabled_by_invalid_index': 0, 'on_disabled_by_edge_cooldown': 0, 'on_disabled_by_global_cd': 0, 'on_disabled_by_qos_gate': 0, 'on_disabled_by_sim_none_or_no_edges': 0}
+[mask reasons ep1 step=50] {'interval': 0, 'sim_none_or_no_edges': 0, 'invalid_index': 0, 'missing_edge': 0, 'bridge': 0, 'global_cd': 0, 'off_disabled': 0, 'off_start_guard': 0, 'off_cap': 0, 'off_all_on_calm': 0, 'off_calm_streak': 18, 'demand_gate': 0, 'qos_guard': 0, 'off_stress_gate': 0, 'util_gate': 0, 'edge_cooldown': 0, 'total_cap': 0, 'on_disabled_by_interval': 0, 'on_disabled_by_missing_edge': 0, 'on_disabled_by_invalid_index': 0, 'on_disabled_by_edge_cooldown': 0, 'on_disabled_by_global_cd': 0, 'on_disabled_by_qos_gate': 0, 'on_disabled_by_sim_none_or_no_edges': 0}
+
+=== Evaluation: trained (stoch, 10 episodes) ===
+traffic cfg:    model=stochastic seed=None avg_bursts=2.0 p_elephant=0.05 scenario=burst disable_off_actions=False initial_off_edges=2
+edge universe   size_mean=18.00 initial_off_requested_mean=2.00 initial_off_applied_mean=2.00
+episode_reward: mean=-1043.330 std=76.135
+energy_kwh:     mean=1.797644 std=0.118006
+dropped:        mean=1970.276 std=377.256
+delivered:      mean=34308.986 std=1832.428
+norm_drop:      mean=0.05394 std=0.00735
+reward_energy:  mean=-431.435 std=28.321
+reward_drop:    mean=-608.226 std=81.344
+reward_qos:     mean=-2.473 std=4.993
+reward_toggle:  mean=-1.197 std=0.297
+reward_other:   mean=0.000 std=0.000
+reward parts    total=-1043.330 energy=-431.435 drop=-608.226 qos=-2.473 toggle=-1.197 other=0.000 | per_step total=-1.043330 energy=-0.431435 drop=-0.608226 qos=-0.002473 toggle=-0.001197 other=0.000000
+reward_toggle_on:  mean=-0.780 std=0.147
+reward_toggle_off: mean=-0.400 std=0.253
+reward_toggle_harm: mean=0.000 std=0.000
+delta_dropped_after_toggle mean=0.0000
+delta_qos_after_toggle mean=0.000000
+pending_toggle_harm mean=0.000
+toggle_harm_max_dd mean=0.000000
+toggle_harm_max_dq mean=0.000000
+qos_violation:  mean=0.0165 std=0.0340
+qos debug       qos_viol_steps_mean=16.50 qos_allow_on_steps_mean=16.50 norm_drop_step_mean=0.024329 qos_sum_mean=-2.473 qos_penalty_per_viol_step_mean=-0.030694
+cd mask debug   dbg_cd_block_mask_val_last_mean=-999.00 dbg_cd_block_mask_samples_mean=0.00 cd_block_mask_mismatch_count_mean=0.00
+toggles applied mean=3.60 reverted mean=0.00
+toggles total   mean=3.60 std=0.80 rate=0.0036
+toggles dir     toggled_on mean=2.60 toggled_off mean=1.00
+off budget      used mean=1.00 blocked mean=0.00
+total budget    used mean=3.60 blocked mean=0.00
+toggle gates   attempted=3.60 (0.0036/step) allowed=3.60 (0.0036/step) blocked_budget=0.00 (0.0000/step) blocked_util=0.00 (0.0000/step) blocked_cd=0.00 (0.0000/step) blocked_off_stress=0.00 (0.0000/step) emergency_on_applied=0.00 max_util_mean=0.5984 applied=3.60 (0.0036/step)
+gate counters  edge_cd=0.00 global_cd=0.00 budget=0.00 util=0.00 off_stress=0.00 qos_off=0.00 qos_on=0.00
+mask stats      valid/step mean=1.02 decision_steps mean=100.00 valid@decision mean=1.24 mask_calls_mean=1000.00
+mask split      toggles/step=0.02 on/step=0.00 off/step=0.02 noop/step=1.00
+mask split@dec  toggles=0.24 on=0.05 off=0.20 noop=1.00
+valid_on_actions@decision mean=0.05
+on blockers    top=[('on_disabled_by_global_cd', 198), ('on_disabled_by_interval', 0), ('on_disabled_by_missing_edge', 0), ('on_disabled_by_invalid_index', 0), ('on_disabled_by_edge_cooldown', 0)]
+on blockers    top_ex_missing=[('on_disabled_by_global_cd', 198), ('on_disabled_by_interval', 0), ('on_disabled_by_invalid_index', 0), ('on_disabled_by_edge_cooldown', 0), ('on_disabled_by_qos_gate', 0)]
+on availability early20 mean=0.22 frac_decision_with_any_on=0.036 noop_chosen@decision=0.964
+edge state      on_edges_mean=17.76 off_edges_mean=0.24 toggle_budget_remaining_mean=0.85
+off saturation  off_edges_first20_dec_mean=0.27 off_edges_all_dec_mean=0.23 decision_step_off_zero_mean=2.60
+demand stats:   mean_demand_per_step=36.327
+
+=== Evaluation: random_masked (stoch, 10 episodes) ===
+traffic cfg:    model=stochastic seed=None avg_bursts=2.0 p_elephant=0.05 scenario=burst disable_off_actions=False initial_off_edges=2
+edge universe   size_mean=18.00 initial_off_requested_mean=2.00 initial_off_applied_mean=2.00
+episode_reward: mean=-1044.511 std=75.774
+energy_kwh:     mean=1.798033 std=0.118079
+dropped:        mean=1975.532 std=378.313
+delivered:      mean=34306.669 std=1829.975
+norm_drop:      mean=0.05408 std=0.00741
+reward_energy:  mean=-431.528 std=28.339
+reward_drop:    mean=-609.395 std=81.719
+reward_qos:     mean=-2.320 std=4.651
+reward_toggle:  mean=-1.268 std=0.224
+reward_other:   mean=0.000 std=0.000
+reward parts    total=-1044.511 energy=-431.528 drop=-609.395 qos=-2.320 toggle=-1.268 other=0.000 | per_step total=-1.044511 energy=-0.431528 drop=-0.609395 qos=-0.002320 toggle=-0.001268 other=0.000000
+reward_toggle_on:  mean=-0.810 std=0.137
+reward_toggle_off: mean=-0.440 std=0.215
+reward_toggle_harm: mean=0.000 std=0.000
+delta_dropped_after_toggle mean=0.0000
+delta_qos_after_toggle mean=0.000000
+pending_toggle_harm mean=0.000
+toggle_harm_max_dd mean=0.000000
+toggle_harm_max_dq mean=0.000000
+qos_violation:  mean=0.0155 std=0.0316
+qos debug       qos_viol_steps_mean=15.50 qos_allow_on_steps_mean=15.50 norm_drop_step_mean=0.024376 qos_sum_mean=-2.320 qos_penalty_per_viol_step_mean=-0.030517
+cd mask debug   dbg_cd_block_mask_val_last_mean=-999.00 dbg_cd_block_mask_samples_mean=0.00 cd_block_mask_mismatch_count_mean=0.00
+toggles applied mean=3.80 reverted mean=0.00
+toggles total   mean=3.80 std=0.60 rate=0.0038
+toggles dir     toggled_on mean=2.70 toggled_off mean=1.10
+off budget      used mean=1.10 blocked mean=0.00
+total budget    used mean=3.80 blocked mean=0.00
+toggle gates   attempted=3.80 (0.0038/step) allowed=3.80 (0.0038/step) blocked_budget=0.00 (0.0000/step) blocked_util=0.00 (0.0000/step) blocked_cd=0.00 (0.0000/step) blocked_off_stress=0.00 (0.0000/step) emergency_on_applied=0.00 max_util_mean=0.5992 applied=3.80 (0.0038/step)
+gate counters  edge_cd=0.00 global_cd=0.00 budget=0.00 util=0.00 off_stress=0.00 qos_off=0.00 qos_on=0.00
+mask stats      valid/step mean=1.02 decision_steps mean=100.00 valid@decision mean=1.23 mask_calls_mean=1000.00
+mask split      toggles/step=0.02 on/step=0.00 off/step=0.02 noop/step=1.00
+mask split@dec  toggles=0.24 on=0.04 off=0.20 noop=1.00
+valid_on_actions@decision mean=0.04
+on blockers    top=[('on_disabled_by_global_cd', 198), ('on_disabled_by_interval', 0), ('on_disabled_by_missing_edge', 0), ('on_disabled_by_invalid_index', 0), ('on_disabled_by_edge_cooldown', 0)]
+on blockers    top_ex_missing=[('on_disabled_by_global_cd', 198), ('on_disabled_by_interval', 0), ('on_disabled_by_invalid_index', 0), ('on_disabled_by_edge_cooldown', 0), ('on_disabled_by_qos_gate', 0)]
+on availability early20 mean=0.18 frac_decision_with_any_on=0.029 noop_chosen@decision=0.962
+edge state      on_edges_mean=17.76 off_edges_mean=0.24 toggle_budget_remaining_mean=0.66
+off saturation  off_edges_first20_dec_mean=0.24 off_edges_all_dec_mean=0.22 decision_step_off_zero_mean=2.00
+demand stats:   mean_demand_per_step=36.327
+
+=== Evaluation: always_noop (det, 10 episodes) ===
+traffic cfg:    model=stochastic seed=None avg_bursts=2.0 p_elephant=0.05 scenario=burst disable_off_actions=False initial_off_edges=2
+edge universe   size_mean=18.00 initial_off_requested_mean=2.00 initial_off_applied_mean=2.00
+episode_reward: mean=-1172.246 std=267.767
+energy_kwh:     mean=1.700000 std=0.117063
+dropped:        mean=2205.143 std=434.773
+delivered:      mean=34076.026 std=1764.023
+norm_drop:      mean=0.06032 std=0.00842
+reward_energy:  mean=-408.000 std=28.095
+reward_drop:    mean=-670.755 std=94.632
+reward_qos:     mean=-93.491 std=196.453
+reward_toggle:  mean=0.000 std=0.000
+reward_other:   mean=0.000 std=0.000
+reward parts    total=-1172.246 energy=-408.000 drop=-670.755 qos=-93.491 toggle=0.000 other=0.000 | per_step total=-1.172246 energy=-0.408000 drop=-0.670755 qos=-0.093491 toggle=0.000000 other=0.000000
+reward_toggle_on:  mean=0.000 std=0.000
+reward_toggle_off: mean=0.000 std=0.000
+reward_toggle_harm: mean=0.000 std=0.000
+delta_dropped_after_toggle mean=0.0000
+delta_qos_after_toggle mean=0.000000
+pending_toggle_harm mean=0.000
+toggle_harm_max_dd mean=0.000000
+toggle_harm_max_dq mean=0.000000
+qos_violation:  mean=0.1163 std=0.2341
+qos debug       qos_viol_steps_mean=116.30 qos_allow_on_steps_mean=116.10 norm_drop_step_mean=0.026830 qos_sum_mean=-93.491 qos_penalty_per_viol_step_mean=-0.157709
+cd mask debug   dbg_cd_block_mask_val_last_mean=-999.00 dbg_cd_block_mask_samples_mean=0.00 cd_block_mask_mismatch_count_mean=0.00
+toggles applied mean=0.00 reverted mean=0.00
+toggles total   mean=0.00 std=0.00 rate=0.0000
+toggles dir     toggled_on mean=0.00 toggled_off mean=0.00
+off budget      used mean=0.00 blocked mean=0.00
+total budget    used mean=0.00 blocked mean=0.00
+toggle gates   attempted=0.00 (0.0000/step) allowed=0.00 (0.0000/step) blocked_budget=0.00 (0.0000/step) blocked_util=0.00 (0.0000/step) blocked_cd=0.00 (0.0000/step) blocked_off_stress=0.00 (0.0000/step) emergency_on_applied=0.00 max_util_mean=0.6068 applied=0.00 (0.0000/step)
+gate counters  edge_cd=0.00 global_cd=0.00 budget=0.00 util=0.00 off_stress=0.00 qos_off=0.00 qos_on=0.00
+mask stats      valid/step mean=1.23 decision_steps mean=100.00 valid@decision mean=3.32 mask_calls_mean=1000.00
+mask split      toggles/step=0.23 on/step=0.20 off/step=0.03 noop/step=1.00
+mask split@dec  toggles=2.32 on=2.00 off=0.32 noop=1.00
+valid_on_actions@decision mean=2.00
+on blockers    top=[('on_disabled_by_interval', 0), ('on_disabled_by_missing_edge', 0), ('on_disabled_by_invalid_index', 0), ('on_disabled_by_edge_cooldown', 0), ('on_disabled_by_global_cd', 0)]
+on blockers    top_ex_missing=[('on_disabled_by_interval', 0), ('on_disabled_by_invalid_index', 0), ('on_disabled_by_edge_cooldown', 0), ('on_disabled_by_global_cd', 0), ('on_disabled_by_qos_gate', 0)]
+on availability early20 mean=2.00 frac_decision_with_any_on=1.000 noop_chosen@decision=1.000
+edge state      on_edges_mean=16.00 off_edges_mean=2.00 toggle_budget_remaining_mean=4.00
+off saturation  off_edges_first20_dec_mean=2.00 off_edges_all_dec_mean=2.00 decision_step_off_zero_mean=-1.00
+demand stats:   mean_demand_per_step=36.327
+
+[summary:CUSTOM] trained(det) vs noop: better=YES Δreward=+130.644 Δenergy=+0.109056 Δdropped=-250.893 (pass: offstart(dropped+energy))
+[summary:CUSTOM] trained(stoch) vs noop: better=YES Δreward=+128.915 Δenergy=+0.097644 Δdropped=-234.867 (pass: offstart(dropped+energy))
+[summary:CUSTOM] random_masked(stoch) vs noop: better=YES Δreward=+127.735 Δenergy=+0.098033 Δdropped=-229.611 (pass: offstart(dropped+energy))
