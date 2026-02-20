@@ -8,14 +8,21 @@ ml-env/
 node_modules/
 runs/
 results/
-# Track artifacts (locked models, configs, plots, logs)
-!artifacts/
-!artifacts/**
-# Ignore zip files by default...
+
+
+# --- artifacts: track only locked (blessed) outputs ---
+artifacts/**
+!artifacts/locked/
+!artifacts/locked/**
+
+# ignore zip files by default...
 *.zip
-# ...but keep locked artifacts and thesis-ready artifacts tracked
-!artifacts/**/*.zip
-!artifacts/**/ppo_greennet.zip
+# ...but allow model zips inside locked artifacts
+!artifacts/locked/**/ppo_greennet.zip
+
+# ignore macOS junk everywhere
+**/.DS_Store
+__MACOSX/
 
 *.joblib
 experiments/prune_log_*.txt
