@@ -48,6 +48,12 @@ Example training run:
 
 python3 train.py --timesteps 300000
 
+Scenario-specific training configs (recommended):
+
+python3 train.py --config configs/train_normal.json --timesteps 300000
+python3 train.py --config configs/train_burst.json --timesteps 300000
+python3 train.py --config configs/train_hotspot.json --timesteps 300000
+
 ---------------------------------------------------------------------------------------------------------------------------------------
 
 ## 4) Evaluate a trained model (quick sanity)
@@ -165,6 +171,22 @@ python3 experiments/run_matrix.py \
   --ppo-model <PATH_TO_PPO_ZIP>
 
 Note: single knob change vs v3 = toggle_cooldown_steps=4 (was 12) and global_toggle_cooldown_steps=10 (was 40).
+
+---------------------------------------------------------------------------------------------------------------------------------------
+
+## 6e) Scenario lock + eval matrix (thesis reproducibility)
+
+Lock a run to scenario-specific artifacts:
+
+scripts/lock_run.sh --scenario normal --run-id <RUN_ID>
+
+Run fixed eval matrix (scenarios normal/burst/hotspot, off edges 0/2/4, held-out topology seeds 10..19):
+
+scripts/eval_matrix.sh --model runs/<RUN_ID>/ppo_greennet.zip --lock-scenario normal --episodes 10
+
+By default, matrix logs are written to:
+
+artifacts/locked/<train_scenario>/<RUN_ID>/eval_<scenario>_off<k>.txt
 
 ---------------------------------------------------------------------------------------------------------------------------------------
 
