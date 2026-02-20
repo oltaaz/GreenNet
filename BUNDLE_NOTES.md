@@ -1,4 +1,4 @@
-# GreenNet ChatGPT Analysis Bundle
+# GreenNet Analysis Bundle
 
 This archive is a curated subset of the repository focused on source code and run configuration.
 

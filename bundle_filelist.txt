@@ -1,4 +1,4 @@
-CHATGPT_BUNDLE_NOTES.md
+BUNDLE_NOTES.md
 COMMANDS.md
 api_app.py
 baselines.py

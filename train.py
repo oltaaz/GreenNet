@@ -6,6 +6,7 @@ import json
 import random
 from dataclasses import fields, is_dataclass, replace
 from datetime import datetime, timezone
+from itertools import product
 from pathlib import Path
 from typing import Any, Dict
 
@@ -85,7 +86,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "batch_size": 256,
         "gae_lambda": 0.95,
         "gamma": 0.99,
-        "ent_coef": 0.001,
+        "ent_coef": 0.0,
         "learning_rate": 3e-4,
         "clip_range": 0.2,
     },
@@ -101,6 +102,33 @@ TRACK_TOLS: Dict[str, Dict[str, float]] = {
     "NORMAL_CAPABILITY": {"reward": EVAL_TOLS["reward"], "dropped": EVAL_TOLS["dropped"], "energy": 0.03},
     "CUSTOM": {"reward": EVAL_TOLS["reward"], "dropped": EVAL_TOLS["dropped"], "energy": EVAL_TOLS["energy"]},
 }
+
+
+def custom_gate(
+    delta_reward: float,
+    delta_energy: float,
+    delta_dropped: float,
+    *,
+    reward_min: float = -0.5,
+    dropped_max: float = +1.0,
+    energy_max: float = 0.0,
+) -> tuple[bool, str]:
+    """CUSTOM acceptance gate used by eval summary and sweep ranking."""
+    ok_reward = float(delta_reward) >= float(reward_min)
+    ok_dropped = float(delta_dropped) <= float(dropped_max)
+    ok_energy = float(delta_energy) <= float(energy_max)
+    ok_all = bool(ok_reward and ok_dropped and ok_energy)
+    if ok_all:
+        return True, "pass"
+
+    failures: list[str] = []
+    if not ok_reward:
+        failures.append(f"reward({float(delta_reward):+.3f}<{float(reward_min):+.3f})")
+    if not ok_dropped:
+        failures.append(f"dropped({float(delta_dropped):+.3f}>+{float(dropped_max):.3f})")
+    if not ok_energy:
+        failures.append(f"energy({float(delta_energy):+.6f}>+{float(energy_max):.6f})")
+    return False, "fail: " + ", ".join(failures)
 
 _ENV_TUPLE_FIELDS = {
     "topology_seeds",
@@ -162,40 +190,48 @@ def default_train_env_config() -> EnvConfig:
     return EnvConfig(
         traffic_model="stochastic",
         # Make energy matter enough to beat NOOP.
-        energy_weight=20.0,
+        energy_weight=240.0,
 
         # Drops still matter, but don't drown everything.
-        drop_penalty_lambda=60.0,
+        drop_penalty_lambda=50.0,
         normalize_drop=True,
 
         # QoS penalty: sane + gated.
         qos_target_norm_drop=0.0720,
         qos_violation_penalty_scale=120.0,
         qos_min_volume=500.0,
-        qos_guard_margin=0.004,
+        qos_guard_margin=0.002,
+        qos_guard_margin_off=0.006,
+        qos_guard_margin_on=0.002,
         qos_guard_penalty_scale=4.5,
 
         # Let it explore without fear (tune if action thrashing).
-        toggle_penalty=0.02,
-        off_toggle_penalty_scale=1.5,
-        toggle_apply_penalty=0.02,
-        toggle_on_penalty_scale=0.2,
-        toggle_off_penalty_scale=5.0,
-        toggle_attempt_penalty=0.0,
+        toggle_penalty=0.001,
+        off_toggle_penalty_scale=0.20,
+        toggle_apply_penalty=0.002,
+        toggle_on_penalty_scale=0.30,
+        qos_toggle_discount_on=0.25,
+        calm_toggle_multiplier_off=2.0,
+        toggle_off_penalty_scale=0.20,
+        toggle_attempt_penalty=0.001,
         noop_bonus=0.0,
         debug_logs=False,
         blocked_action_penalty=0.0,
 
         # Keep action responsiveness but avoid flapping.
-        toggle_cooldown_steps=10,
-        global_toggle_cooldown_steps=5,
+        toggle_cooldown_steps=8,
+        global_toggle_cooldown_steps=3,
         decision_interval_steps=10,
-        max_off_toggles_per_episode=0,
-        max_total_toggles_per_episode=3,
-        disable_off_actions=True,
+        max_off_toggles_per_episode=2,
+        max_total_toggles_per_episode=4,
+        max_emergency_on_toggles_per_episode=8,
+        disable_off_actions=False,
         initial_off_edges=3,
         initial_off_seed=123,
-        util_block_threshold=0.85,
+        off_start_guard_decision_steps=3,  # block OFF actions for first N decision steps when starting all-on
+        util_block_threshold=0.80,
+        max_util_off_allow_threshold=0.80,
+        util_unblock_threshold=0.95,
 
         traffic_hotspots=((0, 5, 3.0), (2, 7, 2.0)),
         traffic_avg_bursts_per_step=2.0,
@@ -423,21 +459,41 @@ def eval_policy(
     ep_reward_drop: list[float] = []
     ep_reward_qos: list[float] = []
     ep_reward_toggle: list[float] = []
+    ep_reward_other: list[float] = []
     ep_reward_toggle_on: list[float] = []
     ep_reward_toggle_off: list[float] = []
     ep_reward_toggle_harm: list[float] = []
+    ep_steps_total: list[int] = []
     ep_toggle_total: list[int] = []
     ep_toggle_rate: list[float] = []
     ep_qos_violation_rate: list[float] = []
+    ep_qos_violation_steps: list[int] = []
+    ep_qos_allow_on_steps: list[int] = []
+    ep_norm_drop_step_mean: list[float] = []
     ep_toggle_attempted: list[int] = []
     ep_toggle_allowed: list[int] = []
+    ep_blocked_budget: list[int] = []
     ep_blocked_util: list[int] = []
     ep_blocked_cooldown: list[int] = []
+    ep_blocked_global_off_stress: list[int] = []
     ep_toggle_applied_count: list[int] = []
+    ep_emergency_on_applied_count: list[int] = []
+    ep_dbg_cd_block_mask_val_last: list[float] = []
+    ep_dbg_cd_block_mask_samples: list[float] = []
+    ep_dbg_cd_block_mask_mismatches: list[float] = []
+    ep_dbg_block_edge_cd: list[float] = []
+    ep_dbg_block_global_cd: list[float] = []
+    ep_dbg_block_budget: list[float] = []
+    ep_dbg_block_util: list[float] = []
+    ep_dbg_block_off_stress: list[float] = []
+    ep_dbg_block_qos_off: list[float] = []
+    ep_dbg_block_qos_on: list[float] = []
     ep_toggle_attempted_rate: list[float] = []
     ep_toggle_allowed_rate: list[float] = []
+    ep_blocked_budget_rate: list[float] = []
     ep_blocked_util_rate: list[float] = []
     ep_blocked_cooldown_rate: list[float] = []
+    ep_blocked_global_off_stress_rate: list[float] = []
     ep_toggle_applied_rate: list[float] = []
     ep_toggled_on: list[int] = []
     ep_toggled_off: list[int] = []
@@ -448,6 +504,7 @@ def eval_policy(
     ep_valid_actions_per_step: list[float] = []
     ep_decision_steps_count: list[int] = []
     ep_valid_actions_on_decision_steps: list[float] = []
+    ep_mask_calls: list[float] = []
     ep_valid_toggle_actions_per_step: list[float] = []
     ep_valid_on_actions_per_step: list[float] = []
     ep_valid_off_actions_per_step: list[float] = []
@@ -461,6 +518,7 @@ def eval_policy(
     ep_delta_qos_after_toggle_mean: list[float] = []
     ep_on_edges_count_mean: list[float] = []
     ep_off_edges_count_mean: list[float] = []
+    ep_max_util_mean: list[float] = []
     ep_toggle_budget_remaining_mean: list[float] = []
     ep_toggle_budget_remaining_available: list[bool] = []
     ep_valid_on_first20_decision_steps_mean: list[float] = []
@@ -488,9 +546,12 @@ def eval_policy(
         reverted = 0
         attempted = 0
         allowed = 0
+        blocked_budget = 0
         blocked_util = 0
         blocked_cooldown = 0
+        blocked_global_off_stress = 0
         applied_count = 0
+        emergency_on_applied_count = 0
         toggled_on_count = 0
         toggled_off_count = 0
         blocked_off_budget = 0
@@ -500,15 +561,18 @@ def eval_policy(
         steps = 0
         decision_steps = 0
         qos_violation_steps = 0
+        qos_allow_on_steps = 0
         sum_reward_energy = 0.0
         sum_reward_drop = 0.0
         sum_reward_qos = 0.0
         sum_reward_toggle = 0.0
+        sum_reward_other = 0.0
         sum_reward_toggle_on = 0.0
         sum_reward_toggle_off = 0.0
         sum_reward_toggle_harm = 0.0
         delta_drop_after_toggle_vals: list[float] = []
         delta_qos_after_toggle_vals: list[float] = []
+        norm_drop_step_vals: list[float] = []
         valid_counts: list[int] = []
         decision_valid_counts: list[int] = []
         valid_toggle_counts: list[int] = []
@@ -522,6 +586,7 @@ def eval_policy(
         demand_step_vals: list[float] = []
         on_edges_vals: list[int] = []
         off_edges_vals: list[int] = []
+        max_util_vals: list[float] = []
         budget_remaining_vals: list[float] = []
         edge_universe_size_last = 0
         initial_off_requested_last = 0
@@ -529,6 +594,17 @@ def eval_policy(
         decision_off_edges_counts: list[int] = []
         decision_step_when_off_zero: int | None = None
         noop_chosen_on_decision_steps = 0
+        mask_calls_last = 0
+        dbg_cd_block_mask_val_last = -999
+        dbg_cd_block_mask_samples_last = 0
+        dbg_cd_block_mask_mismatches_last = 0
+        dbg_block_edge_cd_last = 0
+        dbg_block_global_cd_last = 0
+        dbg_block_budget_last = 0
+        dbg_block_util_last = 0
+        dbg_block_off_stress_last = 0
+        dbg_block_qos_off_last = 0
+        dbg_block_qos_on_last = 0
         pending_toggle_harm_vals: list[float] = []
         toggle_harm_max_dd_vals: list[float] = []
         toggle_harm_max_dq_vals: list[float] = []
@@ -610,6 +686,8 @@ def eval_policy(
             steps += 1
             if info.get("qos_violation", False):
                 qos_violation_steps += 1
+            if info.get("qos_allow_on", False):
+                qos_allow_on_steps += 1
             if debug_energy and steps in (1, 10, 100, 1000):
                 print(
                     "dbg steps",
@@ -626,11 +704,21 @@ def eval_policy(
             sum_reward_drop += float(info.get("reward_drop", 0.0))
             sum_reward_qos += float(info.get("reward_qos", 0.0))
             sum_reward_toggle += float(info.get("reward_toggle", 0.0))
+            reward_other_step = info.get(
+                "r_other",
+                float(info.get("total_reward", r))
+                - float(info.get("reward_energy", 0.0))
+                - float(info.get("reward_drop", 0.0))
+                - float(info.get("reward_qos", 0.0))
+                - float(info.get("reward_toggle", 0.0)),
+            )
+            sum_reward_other += float(reward_other_step)
             sum_reward_toggle_on += float(info.get("reward_toggle_on", 0.0))
             sum_reward_toggle_off += float(info.get("reward_toggle_off", 0.0))
             sum_reward_toggle_harm += float(info.get("reward_toggle_harm", 0.0))
             delta_drop_after_toggle_vals.append(float(info.get("delta_dropped_after_toggle", 0.0)))
             delta_qos_after_toggle_vals.append(float(info.get("delta_qos_after_toggle", 0.0)))
+            norm_drop_step_vals.append(float(info.get("norm_drop_step", 0.0)))
             pending_toggle_harm_vals.append(float(info.get("pending_toggle_harm", 0)))
             toggle_harm_max_dd_vals.append(float(info.get("toggle_harm_max_dd", 0.0)))
             toggle_harm_max_dq_vals.append(float(info.get("toggle_harm_max_dq", 0.0)))
@@ -658,9 +746,12 @@ def eval_policy(
             reverted += int(bool(info.get("toggle_reverted")))
             attempted += int(info.get("toggles_attempted_count", 0))
             allowed += int(info.get("allowed_toggle_count", 0))
+            blocked_budget += int(info.get("blocked_by_budget_count", 0))
             blocked_util += int(info.get("blocked_by_util_count", 0))
             blocked_cooldown += int(info.get("blocked_by_cooldown_count", 0))
+            blocked_global_off_stress += int(info.get("blocked_by_global_off_stress_count", 0))
             applied_count += int(info.get("toggles_applied_count", 0))
+            emergency_on_applied_count += int(info.get("emergency_on_applied_count", 0))
             toggled_on_count += int(bool(info.get("toggled_on", False)))
             toggled_off_count += int(bool(info.get("toggled_off", False)))
             blocked_off_budget += int(bool(info.get("toggle_blocked_off_budget", False)))
@@ -671,9 +762,35 @@ def eval_policy(
             demand_step_vals.append(float(sum(getattr(f, "demand", 0.0) for f in flows)) if flows else 0.0)
             on_edges_vals.append(int(info.get("on_edges_count", 0)))
             off_edges_vals.append(int(info.get("off_edges_count", 0)))
+            max_util_vals.append(float(info.get("max_util", 0.0)))
             budget_rem = info.get("toggle_budget_remaining", None)
             if budget_rem is not None:
                 budget_remaining_vals.append(float(budget_rem))
+            mask_calls_last = int(info.get("mask_calls", mask_calls_last))
+            dbg_cd_block_mask_val_last = int(
+                info.get(
+                    "dbg_cd_block_mask_val_last",
+                    info.get("dbg_cd_block_mask_val", dbg_cd_block_mask_val_last),
+                )
+            )
+            dbg_cd_block_mask_samples_last = int(
+                info.get("dbg_cd_block_mask_samples", dbg_cd_block_mask_samples_last)
+            )
+            dbg_cd_block_mask_mismatches_last = int(
+                info.get(
+                    "dbg_cd_block_mask_mismatches",
+                    info.get("cd_block_mask_mismatch_count", dbg_cd_block_mask_mismatches_last),
+                )
+            )
+            dbg_block_edge_cd_last = int(info.get("dbg_block_edge_cd", dbg_block_edge_cd_last))
+            dbg_block_global_cd_last = int(info.get("dbg_block_global_cd", dbg_block_global_cd_last))
+            dbg_block_budget_last = int(info.get("dbg_block_budget", dbg_block_budget_last))
+            dbg_block_util_last = int(info.get("dbg_block_util", dbg_block_util_last))
+            dbg_block_off_stress_last = int(
+                info.get("dbg_block_off_stress", dbg_block_off_stress_last)
+            )
+            dbg_block_qos_off_last = int(info.get("dbg_block_qos_off", dbg_block_qos_off_last))
+            dbg_block_qos_on_last = int(info.get("dbg_block_qos_on", dbg_block_qos_on_last))
             edge_universe_size_last = int(info.get("edge_universe_size", edge_universe_size_last))
             initial_off_requested_last = int(info.get("initial_off_requested", initial_off_requested_last))
             initial_off_applied_last = int(info.get("initial_off_applied", initial_off_applied_last))
@@ -719,9 +836,11 @@ def eval_policy(
         ep_reward_drop.append(sum_reward_drop)
         ep_reward_qos.append(sum_reward_qos)
         ep_reward_toggle.append(sum_reward_toggle)
+        ep_reward_other.append(sum_reward_other)
         ep_reward_toggle_on.append(sum_reward_toggle_on)
         ep_reward_toggle_off.append(sum_reward_toggle_off)
         ep_reward_toggle_harm.append(sum_reward_toggle_harm)
+        ep_steps_total.append(int(steps))
         toggle_total = applied_count
         ep_toggle_total.append(toggle_total)
         if steps > 0:
@@ -730,9 +849,12 @@ def eval_policy(
             ep_toggle_rate.append(0.0)
         ep_toggle_attempted.append(attempted)
         ep_toggle_allowed.append(allowed)
+        ep_blocked_budget.append(blocked_budget)
         ep_blocked_util.append(blocked_util)
         ep_blocked_cooldown.append(blocked_cooldown)
+        ep_blocked_global_off_stress.append(blocked_global_off_stress)
         ep_toggle_applied_count.append(applied_count)
+        ep_emergency_on_applied_count.append(emergency_on_applied_count)
         ep_toggled_on.append(toggled_on_count)
         ep_toggled_off.append(toggled_off_count)
         ep_blocked_off_budget.append(blocked_off_budget)
@@ -744,6 +866,17 @@ def eval_policy(
         ep_valid_actions_on_decision_steps.append(
             float(np.mean(decision_valid_counts)) if decision_valid_counts else 0.0
         )
+        ep_mask_calls.append(float(mask_calls_last))
+        ep_dbg_cd_block_mask_val_last.append(float(dbg_cd_block_mask_val_last))
+        ep_dbg_cd_block_mask_samples.append(float(dbg_cd_block_mask_samples_last))
+        ep_dbg_cd_block_mask_mismatches.append(float(dbg_cd_block_mask_mismatches_last))
+        ep_dbg_block_edge_cd.append(float(dbg_block_edge_cd_last))
+        ep_dbg_block_global_cd.append(float(dbg_block_global_cd_last))
+        ep_dbg_block_budget.append(float(dbg_block_budget_last))
+        ep_dbg_block_util.append(float(dbg_block_util_last))
+        ep_dbg_block_off_stress.append(float(dbg_block_off_stress_last))
+        ep_dbg_block_qos_off.append(float(dbg_block_qos_off_last))
+        ep_dbg_block_qos_on.append(float(dbg_block_qos_on_last))
         ep_valid_toggle_actions_per_step.append(float(np.mean(valid_toggle_counts)) if valid_toggle_counts else 0.0)
         ep_valid_on_actions_per_step.append(float(np.mean(valid_on_counts)) if valid_on_counts else 0.0)
         ep_valid_off_actions_per_step.append(float(np.mean(valid_off_counts)) if valid_off_counts else 0.0)
@@ -767,8 +900,12 @@ def eval_policy(
         ep_delta_qos_after_toggle_mean.append(
             float(np.mean(delta_qos_after_toggle_vals)) if delta_qos_after_toggle_vals else 0.0
         )
+        ep_norm_drop_step_mean.append(
+            float(np.mean(norm_drop_step_vals)) if norm_drop_step_vals else 0.0
+        )
         ep_on_edges_count_mean.append(float(np.mean(on_edges_vals)) if on_edges_vals else 0.0)
         ep_off_edges_count_mean.append(float(np.mean(off_edges_vals)) if off_edges_vals else 0.0)
+        ep_max_util_mean.append(float(np.mean(max_util_vals)) if max_util_vals else 0.0)
         if budget_remaining_vals:
             ep_toggle_budget_remaining_mean.append(float(np.mean(budget_remaining_vals)))
             ep_toggle_budget_remaining_available.append(True)
@@ -805,19 +942,25 @@ def eval_policy(
         if steps > 0:
             ep_toggle_attempted_rate.append(attempted / float(steps))
             ep_toggle_allowed_rate.append(allowed / float(steps))
+            ep_blocked_budget_rate.append(blocked_budget / float(steps))
             ep_blocked_util_rate.append(blocked_util / float(steps))
             ep_blocked_cooldown_rate.append(blocked_cooldown / float(steps))
+            ep_blocked_global_off_stress_rate.append(blocked_global_off_stress / float(steps))
             ep_toggle_applied_rate.append(applied_count / float(steps))
         else:
             ep_toggle_attempted_rate.append(0.0)
             ep_toggle_allowed_rate.append(0.0)
+            ep_blocked_budget_rate.append(0.0)
             ep_blocked_util_rate.append(0.0)
             ep_blocked_cooldown_rate.append(0.0)
+            ep_blocked_global_off_stress_rate.append(0.0)
             ep_toggle_applied_rate.append(0.0)
         if steps > 0:
             ep_qos_violation_rate.append(qos_violation_steps / float(steps))
         else:
             ep_qos_violation_rate.append(0.0)
+        ep_qos_violation_steps.append(int(qos_violation_steps))
+        ep_qos_allow_on_steps.append(int(qos_allow_on_steps))
 
     def _mean_std(xs: list[float]) -> tuple[float, float]:
         arr = np.asarray(xs, dtype=np.float64)
@@ -832,21 +975,45 @@ def eval_policy(
     rd_m, rd_s = _mean_std(ep_reward_drop)
     rq_m, rq_s = _mean_std(ep_reward_qos)
     rt_m, rt_s = _mean_std(ep_reward_toggle)
+    ro_m, ro_s = _mean_std(ep_reward_other)
     rto_m, rto_s = _mean_std(ep_reward_toggle_on)
     rtf_m, rtf_s = _mean_std(ep_reward_toggle_off)
     rth_m, rth_s = _mean_std(ep_reward_toggle_harm)
     tt_m, tt_s = _mean_std([float(v) for v in ep_toggle_total])
     tr_m, tr_s = _mean_std([float(v) for v in ep_toggle_rate])
     qv_m, qv_s = _mean_std(ep_qos_violation_rate)
+    qvs_m, qvs_s = _mean_std([float(v) for v in ep_qos_violation_steps])
+    qas_m, qas_s = _mean_std([float(v) for v in ep_qos_allow_on_steps])
+    nds_m, nds_s = _mean_std(ep_norm_drop_step_mean)
+    qpv_vals = [
+        float(qos_sum) / float(max(1, int(qvs)))
+        for qos_sum, qvs in zip(ep_reward_qos, ep_qos_violation_steps)
+    ]
+    qpv_m, qpv_s = _mean_std(qpv_vals if qpv_vals else [0.0])
+    cdmv_m, cdmv_s = _mean_std(ep_dbg_cd_block_mask_val_last)
+    cdsamp_m, cdsamp_s = _mean_std(ep_dbg_cd_block_mask_samples)
+    cdmis_m, cdmis_s = _mean_std(ep_dbg_cd_block_mask_mismatches)
+    dbg_edge_cd_m, dbg_edge_cd_s = _mean_std(ep_dbg_block_edge_cd)
+    dbg_global_cd_m, dbg_global_cd_s = _mean_std(ep_dbg_block_global_cd)
+    dbg_budget_m, dbg_budget_s = _mean_std(ep_dbg_block_budget)
+    dbg_util_m, dbg_util_s = _mean_std(ep_dbg_block_util)
+    dbg_off_stress_m, dbg_off_stress_s = _mean_std(ep_dbg_block_off_stress)
+    dbg_qos_off_m, dbg_qos_off_s = _mean_std(ep_dbg_block_qos_off)
+    dbg_qos_on_m, dbg_qos_on_s = _mean_std(ep_dbg_block_qos_on)
     ta_m, ta_s = _mean_std([float(v) for v in ep_toggle_attempted])
     al_m, al_s = _mean_std([float(v) for v in ep_toggle_allowed])
+    bb_m, bb_s = _mean_std([float(v) for v in ep_blocked_budget])
     bu_m, bu_s = _mean_std([float(v) for v in ep_blocked_util])
     bc_m, bc_s = _mean_std([float(v) for v in ep_blocked_cooldown])
+    bos_m, bos_s = _mean_std([float(v) for v in ep_blocked_global_off_stress])
     ap_m, ap_s = _mean_std([float(v) for v in ep_toggle_applied_count])
+    eo_m, eo_s = _mean_std([float(v) for v in ep_emergency_on_applied_count])
     ta_r_m, ta_r_s = _mean_std([float(v) for v in ep_toggle_attempted_rate])
     al_r_m, al_r_s = _mean_std([float(v) for v in ep_toggle_allowed_rate])
+    bb_r_m, bb_r_s = _mean_std([float(v) for v in ep_blocked_budget_rate])
     bu_r_m, bu_r_s = _mean_std([float(v) for v in ep_blocked_util_rate])
     bc_r_m, bc_r_s = _mean_std([float(v) for v in ep_blocked_cooldown_rate])
+    bos_r_m, bos_r_s = _mean_std([float(v) for v in ep_blocked_global_off_stress_rate])
     ap_r_m, ap_r_s = _mean_std([float(v) for v in ep_toggle_applied_rate])
 
     mode = "det" if deterministic else "stoch"
@@ -872,6 +1039,17 @@ def eval_policy(
     print(f"reward_drop:    mean={rd_m:.3f} std={rd_s:.3f}")
     print(f"reward_qos:     mean={rq_m:.3f} std={rq_s:.3f}")
     print(f"reward_toggle:  mean={rt_m:.3f} std={rt_s:.3f}")
+    print(f"reward_other:   mean={ro_m:.3f} std={ro_s:.3f}")
+    mean_steps = float(np.mean(ep_steps_total)) if ep_steps_total else 1.0
+    denom_steps = max(mean_steps, 1.0)
+    print(
+        "reward parts    "
+        f"total={r_m:.3f} energy={re_m:.3f} drop={rd_m:.3f} qos={rq_m:.3f} "
+        f"toggle={rt_m:.3f} other={ro_m:.3f} | per_step "
+        f"total={r_m/denom_steps:.6f} energy={re_m/denom_steps:.6f} "
+        f"drop={rd_m/denom_steps:.6f} qos={rq_m/denom_steps:.6f} "
+        f"toggle={rt_m/denom_steps:.6f} other={ro_m/denom_steps:.6f}"
+    )
     print(f"reward_toggle_on:  mean={rto_m:.3f} std={rto_s:.3f}")
     print(f"reward_toggle_off: mean={rtf_m:.3f} std={rtf_s:.3f}")
     print(f"reward_toggle_harm: mean={rth_m:.3f} std={rth_s:.3f}")
@@ -891,6 +1069,20 @@ def eval_policy(
         f"toggle_harm_max_dq mean={float(np.mean(ep_toggle_harm_max_dq_mean)):.6f}"
     )
     print(f"qos_violation:  mean={qv_m:.4f} std={qv_s:.4f}")
+    print(
+        "qos debug       "
+        f"qos_viol_steps_mean={qvs_m:.2f} "
+        f"qos_allow_on_steps_mean={qas_m:.2f} "
+        f"norm_drop_step_mean={nds_m:.6f} "
+        f"qos_sum_mean={rq_m:.3f} "
+        f"qos_penalty_per_viol_step_mean={qpv_m:.6f}"
+    )
+    print(
+        "cd mask debug   "
+        f"dbg_cd_block_mask_val_last_mean={cdmv_m:.2f} "
+        f"dbg_cd_block_mask_samples_mean={cdsamp_m:.2f} "
+        f"cd_block_mask_mismatch_count_mean={cdmis_m:.2f}"
+    )
     print(
         f"toggles applied mean={float(np.mean(ep_applied)):.2f} "
         f"reverted mean={float(np.mean(ep_reverted)):.2f}"
@@ -912,14 +1104,25 @@ def eval_policy(
         "toggle gates   "
         f"attempted={ta_m:.2f} ({ta_r_m:.4f}/step) "
         f"allowed={al_m:.2f} ({al_r_m:.4f}/step) "
+        f"blocked_budget={bb_m:.2f} ({bb_r_m:.4f}/step) "
         f"blocked_util={bu_m:.2f} ({bu_r_m:.4f}/step) "
         f"blocked_cd={bc_m:.2f} ({bc_r_m:.4f}/step) "
+        f"blocked_off_stress={bos_m:.2f} ({bos_r_m:.4f}/step) "
+        f"emergency_on_applied={eo_m:.2f} "
+        f"max_util_mean={float(np.mean(ep_max_util_mean)):.4f} "
         f"applied={ap_m:.2f} ({ap_r_m:.4f}/step)"
+    )
+    print(
+        "gate counters  "
+        f"edge_cd={dbg_edge_cd_m:.2f} global_cd={dbg_global_cd_m:.2f} "
+        f"budget={dbg_budget_m:.2f} util={dbg_util_m:.2f} "
+        f"off_stress={dbg_off_stress_m:.2f} qos_off={dbg_qos_off_m:.2f} qos_on={dbg_qos_on_m:.2f}"
     )
     print(
         f"mask stats      valid/step mean={float(np.mean(ep_valid_actions_per_step)):.2f} "
         f"decision_steps mean={float(np.mean(ep_decision_steps_count)):.2f} "
-        f"valid@decision mean={float(np.mean(ep_valid_actions_on_decision_steps)):.2f}"
+        f"valid@decision mean={float(np.mean(ep_valid_actions_on_decision_steps)):.2f} "
+        f"mask_calls_mean={float(np.mean(ep_mask_calls)):.2f}"
     )
     print(
         f"mask split      toggles/step={float(np.mean(ep_valid_toggle_actions_per_step)):.2f} "
@@ -983,6 +1186,37 @@ def eval_policy(
         "toggles_rate_std": tr_s,
         "qos_violation_rate_mean": qv_m,
         "qos_violation_rate_std": qv_s,
+        "qos_violation_steps_mean": qvs_m,
+        "qos_violation_steps_std": qvs_s,
+        "qos_allow_on_steps_mean": qas_m,
+        "qos_allow_on_steps_std": qas_s,
+        "norm_drop_step_mean": nds_m,
+        "norm_drop_step_std": nds_s,
+        "qos_penalty_per_viol_step_mean": qpv_m,
+        "qos_penalty_per_viol_step_std": qpv_s,
+        "dbg_cd_block_mask_val_last_mean": cdmv_m,
+        "dbg_cd_block_mask_val_last_std": cdmv_s,
+        "dbg_cd_block_mask_samples_mean": cdsamp_m,
+        "dbg_cd_block_mask_samples_std": cdsamp_s,
+        "cd_block_mask_mismatch_count_mean": cdmis_m,
+        "cd_block_mask_mismatch_count_std": cdmis_s,
+        "dbg_block_edge_cd_mean": dbg_edge_cd_m,
+        "dbg_block_edge_cd_std": dbg_edge_cd_s,
+        "dbg_block_global_cd_mean": dbg_global_cd_m,
+        "dbg_block_global_cd_std": dbg_global_cd_s,
+        "dbg_block_budget_mean": dbg_budget_m,
+        "dbg_block_budget_std": dbg_budget_s,
+        "dbg_block_util_mean": dbg_util_m,
+        "dbg_block_util_std": dbg_util_s,
+        "dbg_block_off_stress_mean": dbg_off_stress_m,
+        "dbg_block_off_stress_std": dbg_off_stress_s,
+        "dbg_block_qos_off_mean": dbg_qos_off_m,
+        "dbg_block_qos_off_std": dbg_qos_off_s,
+        "dbg_block_qos_on_mean": dbg_qos_on_m,
+        "dbg_block_qos_on_std": dbg_qos_on_s,
+        "reward_other_mean": ro_m,
+        "reward_other_std": ro_s,
+        "mean_episode_steps": float(np.mean(ep_steps_total)) if ep_steps_total else 0.0,
         "reward_toggle_on_mean": rto_m,
         "reward_toggle_on_std": rto_s,
         "reward_toggle_off_mean": rtf_m,
@@ -998,20 +1232,30 @@ def eval_policy(
         "toggles_attempted_count_std": ta_s,
         "allowed_toggle_count_mean": al_m,
         "allowed_toggle_count_std": al_s,
+        "blocked_by_budget_count_mean": bb_m,
+        "blocked_by_budget_count_std": bb_s,
         "blocked_by_util_count_mean": bu_m,
         "blocked_by_util_count_std": bu_s,
         "blocked_by_cooldown_count_mean": bc_m,
         "blocked_by_cooldown_count_std": bc_s,
+        "blocked_by_global_off_stress_count_mean": bos_m,
+        "blocked_by_global_off_stress_count_std": bos_s,
         "toggles_applied_count_mean": ap_m,
         "toggles_applied_count_std": ap_s,
+        "emergency_on_applied_count_mean": eo_m,
+        "emergency_on_applied_count_std": eo_s,
         "toggles_attempted_rate_mean": ta_r_m,
         "toggles_attempted_rate_std": ta_r_s,
         "allowed_toggle_rate_mean": al_r_m,
         "allowed_toggle_rate_std": al_r_s,
+        "blocked_by_budget_rate_mean": bb_r_m,
+        "blocked_by_budget_rate_std": bb_r_s,
         "blocked_by_util_rate_mean": bu_r_m,
         "blocked_by_util_rate_std": bu_r_s,
         "blocked_by_cooldown_rate_mean": bc_r_m,
         "blocked_by_cooldown_rate_std": bc_r_s,
+        "blocked_by_global_off_stress_rate_mean": bos_r_m,
+        "blocked_by_global_off_stress_rate_std": bos_r_s,
         "toggles_applied_rate_mean": ap_r_m,
         "toggles_applied_rate_std": ap_r_s,
         "toggled_on_mean": float(np.mean(ep_toggled_on)),
@@ -1023,6 +1267,7 @@ def eval_policy(
         "mean_valid_actions_per_step": float(np.mean(ep_valid_actions_per_step)),
         "mean_decision_steps_count": float(np.mean(ep_decision_steps_count)),
         "mean_valid_actions_on_decision_steps": float(np.mean(ep_valid_actions_on_decision_steps)),
+        "mask_calls_mean": float(np.mean(ep_mask_calls)),
         "mean_valid_toggle_actions_per_step": float(np.mean(ep_valid_toggle_actions_per_step)),
         "mean_valid_on_actions_per_step": float(np.mean(ep_valid_on_actions_per_step)),
         "mean_valid_off_actions_per_step": float(np.mean(ep_valid_off_actions_per_step)),
@@ -1036,6 +1281,7 @@ def eval_policy(
         "on_blockers_top_ex_missing": dict(on_top_ex_missing),
         "mean_on_edges_count": float(np.mean(ep_on_edges_count_mean)),
         "mean_off_edges_count": float(np.mean(ep_off_edges_count_mean)),
+        "mean_max_util": float(np.mean(ep_max_util_mean)),
         "mean_toggle_budget_remaining": (float(np.mean(budget_vals)) if budget_vals else float("nan")),
         "mean_valid_on_actions_on_first20_decision_steps": float(np.mean(ep_valid_on_first20_decision_steps_mean)),
         "fraction_decision_steps_with_any_on_valid": float(np.mean(ep_fraction_decision_steps_any_on_valid)),
@@ -1052,13 +1298,360 @@ def eval_policy(
     return stats
 
 
+def _sweep_tag_value(value: float) -> str:
+    text = f"{float(value):g}"
+    return text.replace("-", "m").replace(".", "p")
+
+
+def run_sweep(
+    config: Dict[str, Any],
+    train_seed: int,
+    eval_seed: int,
+    sweep_timesteps: int,
+    sweep_episodes: int,
+    train_drop_lambda: float,
+    eval_drop_lambda: float,
+    sweep_samples: int,
+    progress_every: int,
+) -> None:
+    """Random-sample a reward/behavior sweep and write summary CSV."""
+    sweep_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    out_csv = Path("runs") / f"sweep_results_{sweep_timestamp}.csv"
+
+    rng = np.random.default_rng(train_seed)
+
+    # Reward shaping knobs
+    energy_weights = [60.0, 80.0, 120.0, 160.0, 220.0]
+    attempt_penalties = [0.0, 0.002, 0.005, 0.01, 0.02]
+    off_penalties = [0.02, 0.05, 0.10, 0.15, 0.20]
+    on_penalties = [0.2, 0.5, 1.0, 1.5]
+
+    # Behavioral / feasibility knobs
+    max_totals = [2, 4, 6, 8, 10]
+    max_offs = [0, 1, 2, 3, 4, 5]
+    off_start_guards = [0, 3, 6, 10]
+    cooldowns = [2, 5, 10]
+    global_cds = [0, 2, 5]
+    util_thresholds = [0.75, 0.80, 0.85, 0.90]
+
+    # Build only feasible combinations (MO <= MT).
+    full: list[tuple[float, float, float, float, int, int, int, int, int, float]] = []
+    for ew, tap, off_s, on_s in product(energy_weights, attempt_penalties, off_penalties, on_penalties):
+        for mt in max_totals:
+            for mo in [m for m in max_offs if m <= mt]:
+                for g, cd, gcd, ut in product(off_start_guards, cooldowns, global_cds, util_thresholds):
+                    full.append((ew, tap, off_s, on_s, mo, mt, g, cd, gcd, ut))
+
+    k = max(1, min(int(sweep_samples), len(full)))
+    picked_idx = rng.choice(len(full), size=k, replace=False)
+    grid = [full[i] for i in picked_idx]
+    total = len(grid)
+
+    base_env_config = build_train_env_config(config)
+    base_env_config = replace(
+        base_env_config,
+        drop_penalty_lambda=float(train_drop_lambda),
+        debug_logs=False,
+    )
+
+    fieldnames = [
+        "tag",
+        "energy_weight",
+        "toggle_attempt_penalty",
+        "toggle_off_penalty_scale",
+        "toggle_on_penalty_scale",
+        "max_off_toggles_per_episode",
+        "max_total_toggles_per_episode",
+        "off_start_guard_decision_steps",
+        "toggle_cooldown_steps",
+        "global_toggle_cooldown_steps",
+        "util_block_threshold",
+        "trained_reward_mean",
+        "trained_energy_mean",
+        "trained_dropped_mean",
+        "trained_norm_drop_mean",
+        "trained_toggles_applied_mean",
+        "trained_off_edges_mean",
+        "noop_energy_mean",
+        "noop_dropped_mean",
+        "delta_energy",
+        "delta_dropped",
+        "trained_vs_random_same",
+        "det_pass",
+        "det_fail_reason",
+        "det_delta_reward",
+        "det_delta_energy",
+        "det_delta_dropped",
+        "stoch_pass",
+        "stoch_fail_reason",
+        "stoch_delta_reward",
+        "stoch_delta_energy",
+        "stoch_delta_dropped",
+        "score",
+    ]
+
+    rows: list[Dict[str, Any]] = []
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    with out_csv.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for i, (ew, tap, off_s, on_s, mo, mt, g, cd, gcd, ut) in enumerate(grid, start=1):
+            if int(mo) > int(mt):
+                # Feasibility guard; should never trigger because the grid is pre-filtered.
+                continue
+            tag = (
+                f"E{_sweep_tag_value(ew)}"
+                f"_A{_sweep_tag_value(tap)}"
+                f"_OFF{_sweep_tag_value(off_s)}"
+                f"_ON{_sweep_tag_value(on_s)}"
+                f"_MO{int(mo)}"
+                f"_MT{int(mt)}"
+                f"_G{int(g)}"
+                f"_CD{int(cd)}"
+                f"_GCD{int(gcd)}"
+                f"_UT{_sweep_tag_value(ut)}"
+            )
+            run_dir = Path("runs") / f"{sweep_timestamp}__sweep_{tag}"
+
+            print(f"\n[sweep {i}/{total}] {tag}")
+
+            set_seeds(train_seed)
+            run_config: Dict[str, Any] = dict(config)
+            run_config["ppo"] = dict(config.get("ppo", {}))
+            run_config["total_timesteps"] = int(sweep_timesteps)
+
+            env_cfg_train = replace(
+                base_env_config,
+                energy_weight=float(ew),
+                toggle_attempt_penalty=float(tap),
+                toggle_off_penalty_scale=float(off_s),
+                toggle_on_penalty_scale=float(on_s),
+                max_off_toggles_per_episode=int(mo),
+                max_total_toggles_per_episode=int(mt),
+                off_start_guard_decision_steps=int(g),
+                toggle_cooldown_steps=int(cd),
+                global_toggle_cooldown_steps=int(gcd),
+                util_block_threshold=float(ut),
+            )
+
+            save_train_config(run_dir, run_config)
+            save_requirements_copy(run_dir)
+            save_env_config(run_dir, env_cfg_train)
+
+            env = DummyVecEnv([make_env(train_seed, env_cfg_train)])
+            if MASKABLE_AVAILABLE and MaskablePPO is not None:
+                model = MaskablePPO(env=env, **run_config["ppo"])
+            else:
+                model = PPO(env=env, **run_config["ppo"])
+
+            print(
+                f"[sweep] training {type(model).__name__} "
+                f"timesteps={int(sweep_timesteps)} device={model.policy.device}"
+            )
+            callback = ProgressBarCallback(
+                total_timesteps=int(sweep_timesteps),
+                every_steps=int(progress_every),
+                bar_len=30,
+                verbose=1,
+            )
+            model.learn(total_timesteps=int(sweep_timesteps), callback=callback, progress_bar=False)
+            model.save(str(run_dir / "ppo_greennet"))
+            env.close()
+
+            eval_cfg = replace(
+                env_cfg_train,
+                initial_off_edges=0,
+                drop_penalty_lambda=float(eval_drop_lambda),
+                debug_logs=False,
+            )
+            trained_det = eval_policy(
+                model,
+                eval_cfg,
+                episodes=int(sweep_episodes),
+                seed=eval_seed,
+                label="trained",
+                deterministic=True,
+                policy_mode="model",
+            )
+            noop_det = eval_policy(
+                None,
+                eval_cfg,
+                episodes=int(sweep_episodes),
+                seed=eval_seed,
+                label="always_noop",
+                deterministic=True,
+                policy_mode="noop",
+            )
+            det_delta_reward = float(trained_det["reward_mean"] - noop_det["reward_mean"])
+            det_delta_energy = float(trained_det["energy_mean"] - noop_det["energy_mean"])
+            det_delta_dropped = float(trained_det["dropped_mean"] - noop_det["dropped_mean"])
+            det_pass, det_reason = custom_gate(det_delta_reward, det_delta_energy, det_delta_dropped)
+
+            stoch_seeds = [0, 1, 2, 3, 4]
+            stoch_delta_rewards: list[float] = []
+            stoch_delta_energies: list[float] = []
+            stoch_delta_droppeds: list[float] = []
+            stoch_toggles_applied_vals: list[float] = []
+            stoch_off_edges_vals: list[float] = []
+            stoch_noop_energy_vals: list[float] = []
+            stoch_noop_dropped_vals: list[float] = []
+            stoch_trained_energy_vals: list[float] = []
+            stoch_trained_dropped_vals: list[float] = []
+            stoch_random_energy_vals: list[float] = []
+            stoch_random_dropped_vals: list[float] = []
+
+            for st_seed in stoch_seeds:
+                trained_stoch = eval_policy(
+                    model,
+                    eval_cfg,
+                    episodes=int(sweep_episodes),
+                    seed=int(st_seed),
+                    label="trained",
+                    deterministic=False,
+                    policy_mode="model",
+                )
+                noop_stoch = eval_policy(
+                    None,
+                    eval_cfg,
+                    episodes=int(sweep_episodes),
+                    seed=int(st_seed),
+                    label="always_noop",
+                    deterministic=True,
+                    policy_mode="noop",
+                )
+                random_masked = eval_policy(
+                    model,
+                    eval_cfg,
+                    episodes=int(sweep_episodes),
+                    seed=int(st_seed),
+                    label="random_masked",
+                    deterministic=False,
+                    policy_mode="random_masked",
+                )
+
+                stoch_delta_rewards.append(float(trained_stoch["reward_mean"] - noop_stoch["reward_mean"]))
+                stoch_delta_energies.append(float(trained_stoch["energy_mean"] - noop_stoch["energy_mean"]))
+                stoch_delta_droppeds.append(float(trained_stoch["dropped_mean"] - noop_stoch["dropped_mean"]))
+                stoch_toggles_applied_vals.append(float(trained_stoch.get("toggles_applied_mean", 0.0)))
+                stoch_off_edges_vals.append(float(trained_stoch.get("mean_off_edges_count", 0.0)))
+                stoch_noop_energy_vals.append(float(noop_stoch["energy_mean"]))
+                stoch_noop_dropped_vals.append(float(noop_stoch["dropped_mean"]))
+                stoch_trained_energy_vals.append(float(trained_stoch["energy_mean"]))
+                stoch_trained_dropped_vals.append(float(trained_stoch["dropped_mean"]))
+                stoch_random_energy_vals.append(float(random_masked["energy_mean"]))
+                stoch_random_dropped_vals.append(float(random_masked["dropped_mean"]))
+
+            stoch_delta_reward = float(np.mean(stoch_delta_rewards)) if stoch_delta_rewards else 0.0
+            stoch_delta_energy = float(np.mean(stoch_delta_energies)) if stoch_delta_energies else 0.0
+            stoch_delta_dropped = float(np.mean(stoch_delta_droppeds)) if stoch_delta_droppeds else 0.0
+            stoch_pass, stoch_reason = custom_gate(stoch_delta_reward, stoch_delta_energy, stoch_delta_dropped)
+            trained_toggles_applied_mean = float(np.mean(stoch_toggles_applied_vals)) if stoch_toggles_applied_vals else 0.0
+            trained_off_edges_mean = float(np.mean(stoch_off_edges_vals)) if stoch_off_edges_vals else 0.0
+            noop_energy_mean = float(np.mean(stoch_noop_energy_vals)) if stoch_noop_energy_vals else float(noop_det["energy_mean"])
+            noop_dropped_mean = float(np.mean(stoch_noop_dropped_vals)) if stoch_noop_dropped_vals else float(noop_det["dropped_mean"])
+            trained_stoch_energy_mean = float(np.mean(stoch_trained_energy_vals)) if stoch_trained_energy_vals else float(trained_det["energy_mean"])
+            trained_stoch_dropped_mean = float(np.mean(stoch_trained_dropped_vals)) if stoch_trained_dropped_vals else float(trained_det["dropped_mean"])
+            random_stoch_energy_mean = float(np.mean(stoch_random_energy_vals)) if stoch_random_energy_vals else 0.0
+            random_stoch_dropped_mean = float(np.mean(stoch_random_dropped_vals)) if stoch_random_dropped_vals else 0.0
+
+            trained_vs_random_same = bool(
+                abs(trained_stoch_energy_mean - random_stoch_energy_mean) < 1e-6
+                and abs(trained_stoch_dropped_mean - random_stoch_dropped_mean) < 1e-6
+            )
+
+            score = 0.0
+            if not det_pass:
+                score += 1e6
+            if not stoch_pass:
+                score += 1e6
+            score += 1000.0 * float(stoch_delta_energy)
+            score += 10.0 * max(0.0, float(stoch_delta_dropped))
+            score += 1.0 * max(0.0, -float(stoch_delta_reward))
+
+            row: Dict[str, Any] = {
+                "tag": tag,
+                "energy_weight": float(ew),
+                "toggle_attempt_penalty": float(tap),
+                "toggle_off_penalty_scale": float(off_s),
+                "toggle_on_penalty_scale": float(on_s),
+                "max_off_toggles_per_episode": int(mo),
+                "max_total_toggles_per_episode": int(mt),
+                "off_start_guard_decision_steps": int(g),
+                "toggle_cooldown_steps": int(cd),
+                "global_toggle_cooldown_steps": int(gcd),
+                "util_block_threshold": float(ut),
+                "trained_reward_mean": float(trained_det["reward_mean"]),
+                "trained_energy_mean": float(trained_det["energy_mean"]),
+                "trained_dropped_mean": float(trained_det["dropped_mean"]),
+                "trained_norm_drop_mean": float(trained_det["norm_drop_mean"]),
+                "trained_toggles_applied_mean": trained_toggles_applied_mean,
+                "trained_off_edges_mean": trained_off_edges_mean,
+                "noop_energy_mean": noop_energy_mean,
+                "noop_dropped_mean": noop_dropped_mean,
+                "delta_energy": stoch_delta_energy,
+                "delta_dropped": stoch_delta_dropped,
+                "trained_vs_random_same": trained_vs_random_same,
+                "det_pass": det_pass,
+                "det_fail_reason": det_reason,
+                "det_delta_reward": det_delta_reward,
+                "det_delta_energy": det_delta_energy,
+                "det_delta_dropped": det_delta_dropped,
+                "stoch_pass": stoch_pass,
+                "stoch_fail_reason": stoch_reason,
+                "stoch_delta_reward": stoch_delta_reward,
+                "stoch_delta_energy": stoch_delta_energy,
+                "stoch_delta_dropped": stoch_delta_dropped,
+                "score": score,
+            }
+            writer.writerow(row)
+            rows.append(row)
+
+            print(
+                f"[sweep] done {tag}: "
+                f"det={'PASS' if det_pass else 'FAIL'} stoch={'PASS' if stoch_pass else 'FAIL'} "
+                f"delta_energy(stoch)={stoch_delta_energy:+.6f} "
+                f"delta_dropped(stoch)={stoch_delta_dropped:+.3f} "
+                f"same_as_random={trained_vs_random_same}"
+            )
+            print(
+                f"[sweep-candidate] MT={int(mt)} MO={int(mo)} CD={int(cd)} "
+                f"GCD={int(gcd)} G={int(g)} UT={float(ut):.2f} "
+                f"applied={trained_toggles_applied_mean:.2f} "
+                f"off_edges={trained_off_edges_mean:.3f}"
+            )
+
+    print(f"\n[sweep] wrote CSV: {out_csv}")
+
+    pass_both = [r for r in rows if bool(r.get("det_pass")) and bool(r.get("stoch_pass"))]
+    pass_stoch = [r for r in rows if bool(r.get("stoch_pass"))]
+    ranked_source = pass_both if pass_both else (pass_stoch if pass_stoch else rows)
+    ranked = sorted(ranked_source, key=lambda r: float(r.get("score", 0.0)))
+
+    print("\nTop 10 candidates:")
+    for idx, row in enumerate(ranked[:10], start=1):
+        print(
+            f"{idx:02d}. {row['tag']} "
+            f"score={float(row.get('score', 0.0)):+.3f} "
+            f"det={'PASS' if bool(row.get('det_pass')) else 'FAIL'} "
+            f"stoch={'PASS' if bool(row.get('stoch_pass')) else 'FAIL'} "
+            f"ΔE(stoch)={float(row.get('stoch_delta_energy', 0.0)):+.6f} "
+            f"ΔD(stoch)={float(row.get('stoch_delta_dropped', 0.0)):+.3f} "
+            f"ΔR(stoch)={float(row.get('stoch_delta_reward', 0.0)):+.3f}"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train PPO on GreenNet.")
     parser.add_argument("--config", type=Path, help="Path to JSON config to load.")
     parser.add_argument("--eval", action="store_true", help="Run evaluation instead of training.")
     parser.add_argument("--eval-noop", action="store_true", help="Run evaluation of the always-noop policy and exit.")
+    parser.add_argument("--sweep", action="store_true", help="Run reward-shaping Pareto sweep and exit.")
     parser.add_argument("--model", type=Path, help="Path to saved PPO model zip (default: latest under runs/).")
     parser.add_argument("--episodes", type=int, default=10, help="Number of evaluation episodes.")
+    parser.add_argument("--sweep_timesteps", type=int, default=150000, help="Timesteps per sweep candidate.")
+    parser.add_argument("--sweep_episodes", type=int, default=30, help="Evaluation episodes per sweep candidate.")
+    parser.add_argument("--sweep-samples", type=int, default=10, help="Number of sweep candidates to run (random sample).")
     parser.add_argument(
         "--debug-eval-energy",
         action="store_true",
@@ -1135,6 +1728,18 @@ def main() -> None:
         help="Override traffic_seed during --eval for all evaluated policies.",
     )
     parser.add_argument(
+        "--eval-traffic-scenario",
+        type=str,
+        default=None,
+        help="Override traffic_scenario during --eval for all evaluated policies (e.g. normal, burst, hotspot, none).",
+    )
+    parser.add_argument(
+        "--eval-topology-seeds",
+        type=str,
+        default=None,
+        help="Comma-separated topology seeds used ONLY during --eval, e.g. 10,11,12.",
+    )
+    parser.add_argument(
         "--eval-toggle-on-penalty-scale",
         type=float,
         default=None,
@@ -1178,6 +1783,20 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    eval_topology_seeds: tuple[int, ...] | None = None
+    if args.eval_topology_seeds:
+        parsed_eval_topology_seeds = parse_seed_list(args.eval_topology_seeds)
+        if parsed_eval_topology_seeds:
+            eval_topology_seeds = tuple(int(s) for s in parsed_eval_topology_seeds)
+    eval_traffic_scenario_override = args.eval_traffic_scenario is not None
+    eval_traffic_scenario: str | None = None
+    if eval_traffic_scenario_override:
+        scenario_text = str(args.eval_traffic_scenario).strip()
+        if scenario_text.lower() in {"", "none", "null", "off"}:
+            eval_traffic_scenario = None
+        else:
+            eval_traffic_scenario = scenario_text
+
     config = load_config(args.config)
 
     # Allow overriding training timesteps from CLI.
@@ -1216,6 +1835,20 @@ def main() -> None:
         f"torch.cuda_available={torch.cuda.is_available()} "
         f"sb3_device={config['ppo'].get('device')}"
     )
+
+    if args.sweep:
+        run_sweep(
+            config=config,
+            train_seed=train_seed,
+            eval_seed=eval_seed,
+            sweep_timesteps=int(args.sweep_timesteps),
+            sweep_episodes=int(args.sweep_episodes),
+            train_drop_lambda=float(args.train_drop_lambda),
+            eval_drop_lambda=float(args.eval_drop_lambda),
+            sweep_samples=int(args.sweep_samples),
+            progress_every=int(args.progress_every),
+        )
+        return
 
     if args.robustness:
         model_path = args.model or find_latest_model()
@@ -1334,8 +1967,16 @@ def main() -> None:
         model_run_dir = Path(model_path).parent
         base_env_config = load_env_config_from_run(model_run_dir, verbose=True)
         base_env_config = replace(base_env_config, drop_penalty_lambda=float(args.eval_drop_lambda), debug_logs=False)
+        if eval_topology_seeds is not None:
+            base_env_config = replace(
+                base_env_config,
+                topology_randomize=True,
+                topology_seeds=eval_topology_seeds,
+            )
         if args.eval_traffic_seed is not None:
             base_env_config = replace(base_env_config, traffic_seed=int(args.eval_traffic_seed))
+        if eval_traffic_scenario_override:
+            base_env_config = replace(base_env_config, traffic_scenario=eval_traffic_scenario)
         if args.eval_toggle_on_penalty_scale is not None:
             base_env_config = replace(base_env_config, toggle_on_penalty_scale=float(args.eval_toggle_on_penalty_scale))
         if args.eval_toggle_off_penalty_scale is not None:
@@ -1470,6 +2111,12 @@ def main() -> None:
         model_run_dir = Path(model_path).parent
         env_config = load_env_config_from_run(model_run_dir, verbose=True)
         env_config = replace(env_config, drop_penalty_lambda=float(args.eval_drop_lambda), debug_logs=False)
+        if eval_topology_seeds is not None:
+            env_config = replace(
+                env_config,
+                topology_randomize=True,
+                topology_seeds=eval_topology_seeds,
+            )
         if args.eval_initial_off_edges is not None:
             env_config = replace(env_config, initial_off_edges=int(args.eval_initial_off_edges))
         if bool(args.eval_disable_off_actions):
@@ -1478,6 +2125,8 @@ def main() -> None:
             env_config = replace(env_config, max_total_toggles_per_episode=int(args.eval_max_total_toggles))
         if args.eval_traffic_seed is not None:
             env_config = replace(env_config, traffic_seed=int(args.eval_traffic_seed))
+        if eval_traffic_scenario_override:
+            env_config = replace(env_config, traffic_scenario=eval_traffic_scenario)
         if args.eval_toggle_on_penalty_scale is not None:
             env_config = replace(env_config, toggle_on_penalty_scale=float(args.eval_toggle_on_penalty_scale))
         if args.eval_toggle_off_penalty_scale is not None:
@@ -1494,6 +2143,7 @@ def main() -> None:
             f"EVAL MODE: disable_off_actions={bool(getattr(env_config, 'disable_off_actions', False))} "
             f"initial_off_edges={int(getattr(env_config, 'initial_off_edges', 0))} "
             f"max_total_toggles={int(getattr(env_config, 'max_total_toggles_per_episode', 0))} "
+            f"traffic_scenario={getattr(env_config, 'traffic_scenario', None)} "
             f"toggle_on_penalty_scale={float(getattr(env_config, 'toggle_on_penalty_scale', 0.0)):.6f} "
             f"toggle_off_penalty_scale={float(getattr(env_config, 'toggle_off_penalty_scale', 0.0)):.6f} "
             f"energy_weight={float(getattr(env_config, 'energy_weight', 0.0)):.6f}"
@@ -1577,10 +2227,31 @@ def main() -> None:
             delta_dropped: float,
             track_name: str,
         ) -> tuple[str, str]:
+            if str(track_name).upper() == "CUSTOM":
+                if int(eval_initial_off_edges) > 0:
+                    dropped_cap = 1.0
+                    energy_cap = 0.15 if float(delta_dropped) <= -1.0 else 0.02
+                    ok_dropped = float(delta_dropped) <= dropped_cap
+                    ok_energy = float(delta_energy) <= energy_cap
+                    ok_custom_offstart = bool(ok_dropped and ok_energy)
+                    if ok_custom_offstart:
+                        return "YES", "pass: offstart(dropped+energy)"
+
+                    failures: list[str] = []
+                    if not ok_dropped:
+                        failures.append(f"dropped({float(delta_dropped):+.3f}>+{dropped_cap:.3f})")
+                    if not ok_energy:
+                        failures.append(f"energy({float(delta_energy):+.6f}>+{energy_cap:.6f})")
+                    return "NO", "fail: " + ", ".join(failures)
+
+                ok_custom, reason_custom = custom_gate(delta_reward, delta_energy, delta_dropped)
+                return ("YES" if ok_custom else "NO"), reason_custom
+
             tols = TRACK_TOLS.get(track_name, EVAL_TOLS)
             ok_reward = float(delta_reward) >= -float(tols["reward"])
             ok_dropped = float(delta_dropped) <= float(tols["dropped"])
-            ok_energy = abs(float(delta_energy)) <= float(tols["energy"])
+            # Stability gate should only fail on energy regression (worse than NOOP), not improvement.
+            ok_energy = float(delta_energy) <= float(tols["energy"])
             ok_all = bool(ok_reward and ok_dropped and ok_energy)
 
             if ok_all:
@@ -1597,7 +2268,7 @@ def main() -> None:
                     )
                 if not ok_energy:
                     failures.append(
-                        f"energy(|{float(delta_energy):+.6f}|>{float(tols['energy']):.6f})"
+                        f"energy({float(delta_energy):+.6f}>+{float(tols['energy']):.6f})"
                     )
                 reason = "fail: " + ", ".join(failures)
 

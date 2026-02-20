@@ -72,9 +72,9 @@ class EnvConfig:
     traffic_spike_multiplier_range: Tuple[float, float] = (2.0, 6.0)
     traffic_spike_duration_range: Tuple[int, int] = (3, 12)
 
-    drop_penalty_lambda: float = 40.0
+    drop_penalty_lambda: float = 50.0
     # ENERGY WEIGHT: Increase to prioritize energy savings more; decrease to prioritize performance (drops).
-    energy_weight: float = 25.0
+    energy_weight: float = 40.0
 
     # QoS constraint: target maximum normalized drop ratio (dropped / (delivered + dropped)).
     # If norm_drop exceeds this, we add an extra penalty (linear by default) so QoS stays stable while optimizing energy.
@@ -85,16 +85,25 @@ class EnvConfig:
 
     # Strength of the extra penalty when norm_drop exceeds qos_target_norm_drop.
     # For linear QoS penalty, this should be small (tens), otherwise it will dominate reward.
-    qos_violation_penalty_scale: float = 80.0
+    qos_violation_penalty_scale: float = 120.0
 
     # When norm_drop_total is close to qos_target_norm_drop, block turning edges OFF.
     qos_guard_margin: float = 0.004  # headroom; tune 0.001–0.005
-    qos_guard_penalty_scale: float = 1.0  # multiplier for blocked OFF attempts due to QoS
+    # Split margins:
+    # - OFF brake should trigger earlier (larger margin)
+    # - ON recovery should trigger easier (smaller margin)
+    qos_guard_margin_off: float = 0.004
+    qos_guard_margin_on: float = 0.002
+    qos_guard_penalty_scale: float = 4.5  # multiplier for blocked OFF attempts due to QoS
 
     toggle_penalty: float = 0.02
     off_toggle_penalty_scale: float = 1.5
     toggle_apply_penalty: float = 0.02
     toggle_on_penalty_scale: float = 0.2
+    # Discount ON-toggle costs when QoS is violated so recovery actions are not over-penalized.
+    qos_toggle_discount_on: float = 0.25
+    # Increase OFF-toggle costs when the network is calm to discourage unnecessary toggles.
+    calm_toggle_multiplier_off: float = 2.0
     toggle_off_penalty_scale: float = 5.0
     # Penalize any non-NOOP toggle attempt (encourages the agent to choose NOOP unless confident)
     toggle_attempt_penalty: float = 0.0
@@ -109,19 +118,25 @@ class EnvConfig:
     saturation_util_threshold: float = 0.9  # for counting near-saturated edges
     toggle_cooldown_steps: int = 10  # minimum steps between toggles of the same edge
     util_block_threshold: float = 0.85  # block turning OFF an edge if its utilization is above this threshold
+    max_util_off_allow_threshold: float = 0.80  # block turning OFF any edge when global max utilization is high
+    util_unblock_threshold: float = 0.90  # allow turning ON an edge only when utilization is above this threshold (or QoS violated)
     global_toggle_cooldown_steps: int = 5  # after any toggle, block all toggles for this many steps (prevents rapid toggling that can lead to instability)
     decision_interval_steps: int = 10  # allow toggles only every N steps; NOOP always allowed
-    max_off_toggles_per_episode: int = 6
-    max_total_toggles_per_episode: int = 10
+    max_off_toggles_per_episode: int = 1
+    max_total_toggles_per_episode: int = 4
+    max_emergency_on_toggles_per_episode: int = 8
+    off_calm_steps_required: int = 20
     disable_off_actions: bool = False
-    initial_off_edges: int = 0
-    initial_off_seed: int | None = None
+    initial_off_edges: int = 3
+    initial_off_seed: int | None = 123
+    off_start_guard_decision_steps: int = 10  # block OFF actions for first N decision steps when starting all-on
+
 
 
 
     #configs for forecasting
     enable_forecasting: bool = True
-    forecast_alpha: float = 0.3
+    forecast_alpha: float = 0.6
     forecast_horizon_steps: int = 3
     demand_norm_scale: float = 0.0  # scale factor to keep demand values in a reasonable range for the forecaster
 
@@ -164,6 +179,7 @@ class GreenNetEnv(gym.Env):
         self._last_valid_toggle_actions: int = 0
         self._initial_off_requested: int = 0
         self._initial_off_applied: int = 0
+        self._episode_initial_off_edges: int = 0
         self._edge_universe_size: int = 0
         self._traffic_generator: TrafficGenerator | None = None
         self._traffic_by_step: Dict[int, List[TrafficBurst]] = {}
@@ -175,6 +191,23 @@ class GreenNetEnv(gym.Env):
         self._last_demand_forecast_norm: float = 0.0
         self._off_toggles_used: int = 0
         self._total_toggles_used: int = 0
+        self._emergency_on_toggles_used: int = 0
+        self._calm_streak: int = 0
+        self._decision_step_count: int = 0
+        self._mask_calls: int = 0
+        self._last_qos_viol_step: bool = False
+        self._dbg_cd_block_mask_val_last: int = -999
+        self._dbg_cd_block_mask_samples: int = 0
+        self._dbg_cd_block_mask_mismatches: int = 0
+        self._dbg_block_edge_cd: int = 0
+        self._dbg_block_global_cd: int = 0
+        self._dbg_block_budget: int = 0
+        self._dbg_block_util: int = 0
+        self._dbg_block_off_stress: int = 0
+        self._dbg_block_qos_off: int = 0
+        self._dbg_block_qos_on: int = 0
+
+
         # Build base topology once; action space is derived from toggleable (non-bridge) edges.
         topo_config = self._topology_config(self.config.topology_seed)
         self._base_graph = build_random_topology(topo_config)
@@ -234,10 +267,28 @@ class GreenNetEnv(gym.Env):
         self._prev_dropped_total = 0.0
         self._global_toggle_cooldown_remaining = 0
         self._last_norm_drop_total = 0.0
+        self._last_norm_drop_step = 0.0
+        self._last_qos_allow_on = False
+        self._last_qos_viol_step = False
+        self._last_max_util = 0.0
         self._last_demand_now_norm = 0.0
         self._last_demand_forecast_norm = 0.0
         self._off_toggles_used = 0
         self._total_toggles_used = 0
+        self._emergency_on_toggles_used = 0
+        self._calm_streak = 0
+        self._decision_step_count = 0
+        self._mask_calls = 0
+        self._dbg_cd_block_mask_val_last = -999
+        self._dbg_cd_block_mask_samples = 0
+        self._dbg_cd_block_mask_mismatches = 0
+        self._dbg_block_edge_cd = 0
+        self._dbg_block_global_cd = 0
+        self._dbg_block_budget = 0
+        self._dbg_block_util = 0
+        self._dbg_block_off_stress = 0
+        self._dbg_block_qos_off = 0
+        self._dbg_block_qos_on = 0
         self._printed_toggle_debug = False
         self._printed_mask_debug = False
         self._last_mask_reason_counts = {}
@@ -246,6 +297,7 @@ class GreenNetEnv(gym.Env):
         self._last_valid_toggle_actions = 0
         self._initial_off_requested = 0
         self._initial_off_applied = 0
+        self._episode_initial_off_edges = 0
         self._edge_universe_size = int(len(self._edge_universe))
 
         # ---- Traffic generator setup ----
@@ -355,9 +407,9 @@ class GreenNetEnv(gym.Env):
             )
 
         def _power_model_watts(g) -> float:
-            # Simple power model: base + per-active-edge.
+            # Stronger signal so energy savings can beat toggle cost when OFF persists.
             active_edges = sum(1 for (a, b) in g.edges() if g.edges[a, b].get("active", True))
-            return 30.0 + 30.0 * active_edges
+            return 40.0 + 200.0 * active_edges
 
         self.simulator = Simulator(
             graph,
@@ -373,6 +425,7 @@ class GreenNetEnv(gym.Env):
         # This creates available ON actions when OFF actions are disabled.
         self._initial_off_requested = int(getattr(self.config, "initial_off_edges", 0) or 0)
         self._initial_off_applied = int(self._apply_safe_initial_off_edges(seed=seed))
+        self._episode_initial_off_edges = int(self._initial_off_applied)
         # Initial OFF edges are episode setup, not agent toggles: clear per-edge cooldown
         # so repair ON actions are immediately available on decision steps.
         self._clear_all_edge_cooldowns()
@@ -496,6 +549,9 @@ class GreenNetEnv(gym.Env):
 
     def step(self, action: Any) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
         is_decision = self._is_decision_step()
+        if bool(is_decision):
+            self._decision_step_count = int(getattr(self, "_decision_step_count", 0)) + 1
+
         self._step_count += 1
         if self.debug_logs:
             k = int(getattr(self.config, "decision_interval_steps", 1) or 1)
@@ -534,6 +590,14 @@ class GreenNetEnv(gym.Env):
             toggle_blocked_off_budget,
             toggle_blocked_total_budget,
         ) = self._apply_action(action_int)
+        toggle_blocked_global_off_stress = bool(
+            getattr(self, "_last_toggle_blocked_global_off_stress", False)
+        )
+        qos_allow_on = bool(getattr(self, "_last_qos_allow_on", False))
+        emergency_on_applied = bool(getattr(self, "_last_emergency_on_applied", False))
+        dbg_cd_block_mask_val_last = int(getattr(self, "_dbg_cd_block_mask_val_last", -999))
+        dbg_cd_block_mask_samples = int(getattr(self, "_dbg_cd_block_mask_samples", 0))
+        dbg_cd_block_mask_mismatches = int(getattr(self, "_dbg_cd_block_mask_mismatches", 0))
         
         mask_total_cap_blocked = int(
             (action_int != 0)
@@ -564,6 +628,8 @@ class GreenNetEnv(gym.Env):
         toggles_applied_count = applied_count
         blocked_by_util_count = int(bool(toggle_blocked_high_util))
         blocked_by_cooldown_count = int(bool(toggle_blocked or toggle_blocked_global))
+        blocked_by_global_off_stress_count = int(bool(toggle_blocked_global_off_stress))
+        blocked_by_budget_count = int(bool(toggle_blocked_off_budget or toggle_blocked_total_budget))
         blocked_by_off_budget_count = int(bool(toggle_blocked_off_budget))
         blocked_by_total_budget_count = int(bool(toggle_blocked_total_budget))
 
@@ -639,6 +705,7 @@ class GreenNetEnv(gym.Env):
         max_util = max(util_values, default=0.0)
         min_util = min(util_values, default=0.0)
         p95_util = float(np.percentile(util_values, 95)) if util_values else 0.0
+        self._last_max_util = float(max_util)
         near_sat = sum(1 for u in util_values if u >= self.config.saturation_util_threshold)
         edge_active, edge_util = self._edge_feature_vectors()
         obs = self._build_observation(
@@ -664,6 +731,8 @@ class GreenNetEnv(gym.Env):
         # - `norm_drop_step` uses per-step deltas (good for shaping reward each step)
         norm_drop_total = float(dropped_total) / max(float(delivered_total) + float(dropped_total) + 1e-9, 1e-9)
         self._last_norm_drop_total = float(norm_drop_total)
+        self._last_norm_drop_step = float(norm_drop_step)
+        qos_target = float(getattr(self.config, "qos_target_norm_drop", 0.0))
 
         drop_component = float(delta_dropped)
         if self.config.normalize_drop:
@@ -679,8 +748,16 @@ class GreenNetEnv(gym.Env):
         qos_excess = 0.0
         qos_violation = False
         if volume >= float(self.config.qos_min_volume):
-            qos_excess = max(0.0, float(norm_drop_total) - float(self.config.qos_target_norm_drop))
+            qos_excess = max(0.0, float(norm_drop_total) - float(qos_target))
             qos_violation = qos_excess > 0.0
+        # Canonical per-step QoS-violation flag used by both penalty and ON-recovery gates.
+        self._last_qos_viol_step = bool(qos_violation)
+        self._last_qos_allow_on = bool(self._last_qos_viol_step)
+        calm_now = (not self._last_qos_viol_step) and (
+            float(getattr(self, "_last_max_util", 0.0))
+            < float(getattr(self.config, "util_block_threshold", 0.85))
+        )
+        self._calm_streak = int(getattr(self, "_calm_streak", 0) + 1) if calm_now else 0
         # Cap overshoot to prevent rare spikes from nuking reward (stabilizes training).
         qos_excess = min(qos_excess, 0.05)
         # Linear QoS penalty (less spiky than quadratic; prevents QoS term from dominating reward).
@@ -689,6 +766,23 @@ class GreenNetEnv(gym.Env):
         toggle_apply_cost = float(self.config.toggle_apply_penalty) * float(toggles_applied_count)
         toggle_on_penalty_applied = float(self.config.toggle_on_penalty_scale) if bool(toggled_on) else 0.0
         toggle_off_penalty_applied = float(self.config.toggle_off_penalty_scale) if bool(toggled_off) else 0.0
+        # In QoS-violation regime, discount ON-toggle costs to favor recovery over prolonged violations.
+        qos_toggle_discount_on = float(getattr(self.config, "qos_toggle_discount_on", 1.0))
+        discount_on = bool(getattr(self, "_last_qos_viol_step", False)) and bool(toggled_on)
+        if discount_on and qos_toggle_discount_on < 1.0:
+            toggle_cost = float(toggle_cost) * float(qos_toggle_discount_on)
+            toggle_apply_cost = float(toggle_apply_cost) * float(qos_toggle_discount_on)
+            toggle_on_penalty_applied = float(toggle_on_penalty_applied) * float(qos_toggle_discount_on)
+        calm_toggle_multiplier_off = float(getattr(self.config, "calm_toggle_multiplier_off", 1.0))
+        calm_for_off = (not bool(getattr(self, "_last_qos_viol_step", False))) and (
+            float(getattr(self, "_last_max_util", 0.0))
+            < float(getattr(self.config, "util_block_threshold", 0.85))
+        )
+        discount_off_calm = bool(calm_for_off and bool(toggled_off) and calm_toggle_multiplier_off > 1.0)
+        if discount_off_calm:
+            toggle_cost = float(toggle_cost) * float(calm_toggle_multiplier_off)
+            toggle_apply_cost = float(toggle_apply_cost) * float(calm_toggle_multiplier_off)
+            toggle_off_penalty_applied = float(toggle_off_penalty_applied) * float(calm_toggle_multiplier_off)
         reward_toggle_on = -float(toggle_on_penalty_applied)
         reward_toggle_off = -float(toggle_off_penalty_applied)
         reward_toggle = -(
@@ -700,6 +794,12 @@ class GreenNetEnv(gym.Env):
         reward = reward_energy + reward_drop + reward_qos + reward_toggle
         if action_is_noop:
             reward = float(reward) + float(self.config.noop_bonus)
+        reward_other = float(reward) - (
+            float(reward_energy)
+            + float(reward_drop)
+            + float(reward_qos)
+            + float(reward_toggle)
+        )
         terminated = False
         truncated = self._step_count >= self.config.max_steps
         if self.debug_logs and not self._printed_toggle_debug:
@@ -717,22 +817,52 @@ class GreenNetEnv(gym.Env):
             "toggle_blocked_cooldown": toggle_blocked,
             "toggle_blocked_high_util": toggle_blocked_high_util,
             "toggle_blocked_global_cooldown": toggle_blocked_global,
+            "toggle_blocked_global_off_stress": bool(toggle_blocked_global_off_stress),
             "toggle_blocked_off_budget": bool(toggle_blocked_off_budget),
             "toggle_blocked_total_budget": int(bool(toggle_blocked_total_budget)),
             "toggle_blocked_any": blocked_any,
+            "qos_allow_on": bool(qos_allow_on),
+            "dbg_cd_block_mask_val": int(dbg_cd_block_mask_val_last),
+            "dbg_cd_block_mask_val_last": int(dbg_cd_block_mask_val_last),
+            "dbg_cd_block_mask_samples": int(dbg_cd_block_mask_samples),
+            "dbg_cd_block_mask_mismatches": int(dbg_cd_block_mask_mismatches),
+            "cd_block_mask_mismatch_count": int(dbg_cd_block_mask_mismatches),
+            "attempted_toggle": int(toggles_attempted_count),
+            "toggle_allowed": int(allowed_toggle_count),
+            "toggle_blocked_cd": int(bool(toggle_blocked or toggle_blocked_global)),
+            "toggle_cost": float(toggle_cost),
+            "toggle_apply_cost": float(toggle_apply_cost),
+            "on_penalty": float(toggle_on_penalty_applied),
+            "off_penalty": float(toggle_off_penalty_applied),
+            "qos_toggle_discount_on_applied": int(bool(discount_on and qos_toggle_discount_on < 1.0)),
+            "qos_toggle_discount_on": float(qos_toggle_discount_on),
+            "calm_toggle_multiplier_off_applied": int(bool(discount_off_calm)),
+            "calm_toggle_multiplier_off": float(calm_toggle_multiplier_off),
+            "dbg_block_edge_cd": int(getattr(self, "_dbg_block_edge_cd", 0)),
+            "dbg_block_global_cd": int(getattr(self, "_dbg_block_global_cd", 0)),
+            "dbg_block_budget": int(getattr(self, "_dbg_block_budget", 0)),
+            "dbg_block_util": int(getattr(self, "_dbg_block_util", 0)),
+            "dbg_block_off_stress": int(getattr(self, "_dbg_block_off_stress", 0)),
+            "dbg_block_qos_off": int(getattr(self, "_dbg_block_qos_off", 0)),
+            "dbg_block_qos_on": int(getattr(self, "_dbg_block_qos_on", 0)),
             "toggled_on": bool(toggled_on),
             "toggled_off": bool(toggled_off),
             "blocked_by_util_count": blocked_by_util_count,
             "blocked_by_cooldown_count": blocked_by_cooldown_count,
+            "blocked_by_global_off_stress_count": blocked_by_global_off_stress_count,
+            "blocked_by_budget_count": blocked_by_budget_count,
             "blocked_by_off_budget_count": blocked_by_off_budget_count,
             "blocked_by_total_budget_count": blocked_by_total_budget_count,
             "allowed_toggle_count": allowed_toggle_count,
             "toggles_attempted_count": toggles_attempted_count,
             "toggles_applied_count": toggles_applied_count,
+            "emergency_on_applied_count": int(bool(emergency_on_applied)),
             "off_toggles_used": int(getattr(self, "_off_toggles_used", 0)),
             "off_toggles_cap": int(getattr(self.config, "max_off_toggles_per_episode", 0)),
             "total_toggles_used": int(getattr(self, "_total_toggles_used", 0)),
             "total_toggles_cap": int(getattr(self.config, "max_total_toggles_per_episode", 0)),
+            "emergency_on_toggles_used": int(getattr(self, "_emergency_on_toggles_used", 0)),
+            "emergency_on_toggles_cap": int(getattr(self.config, "max_emergency_on_toggles_per_episode", 0)),
             "on_edges_count": int(sum(1 for e in self._edge_universe if bool(self.simulator.active.get(e, False)))),
             "off_edges_count": int(sum(1 for e in self._edge_universe if not bool(self.simulator.active.get(e, False)))),
             "toggle_budget_remaining": (
@@ -756,7 +886,14 @@ class GreenNetEnv(gym.Env):
             "reward_toggle_off": reward_toggle_off,
             "toggle_on_penalty_applied": float(toggle_on_penalty_applied),
             "toggle_off_penalty_applied": float(toggle_off_penalty_applied),
+            "max_util": float(self._last_max_util),
             "total_reward": reward,
+            "r_total": float(reward),
+            "r_energy": float(reward_energy),
+            "r_drop": float(reward_drop),
+            "r_qos": float(reward_qos),
+            "r_toggle": float(reward_toggle),
+            "r_other": float(reward_other),
             "qos_excess": float(qos_excess),
             "qos_violation": bool(qos_violation),
             "action_int": action_int,
@@ -770,6 +907,7 @@ class GreenNetEnv(gym.Env):
             "valid_off_actions": int(getattr(self, "_last_valid_off_actions", 0)),
             "valid_toggle_actions": int(getattr(self, "_last_valid_toggle_actions", 0)),
             "valid_noop_actions": 1,
+            "mask_calls": int(getattr(self, "_mask_calls", 0)),
         }
         return obs, reward, terminated, truncated, info
 
@@ -794,11 +932,15 @@ class GreenNetEnv(gym.Env):
 
         Note: we do NOT try to predict connectivity reverts here (too expensive to evaluate for every action each step). Reverts remain possible.
         """
+        self._mask_calls = int(getattr(self, "_mask_calls", 0)) + 1
         if self.debug_logs and not self._printed_mask_debug:
             print("[mask-debug] get_action_mask() called")
             self._printed_mask_debug = True
         n = int(self.action_space.n)
         mask = np.ones((n,), dtype=bool)
+        decision_idx = int(getattr(self, "_decision_step_count", 0))
+        warmup_decisions = int(getattr(self.config, "off_start_guard_decision_steps", 10))
+
         reasons: Dict[str, int] = {
             "interval": 0,
             "sim_none_or_no_edges": 0,
@@ -809,8 +951,11 @@ class GreenNetEnv(gym.Env):
             "off_disabled": 0,
             "off_start_guard": 0,
             "off_cap": 0,
+            "off_all_on_calm": 0,
+            "off_calm_streak": 0,
             "demand_gate": 0,
             "qos_guard": 0,
+            "off_stress_gate": 0,
             "util_gate": 0,
             "edge_cooldown": 0,
             "total_cap": 0,
@@ -819,6 +964,7 @@ class GreenNetEnv(gym.Env):
             "on_disabled_by_invalid_index": 0,
             "on_disabled_by_edge_cooldown": 0,
             "on_disabled_by_global_cd": 0,
+            "on_disabled_by_qos_gate": 0,
             "on_disabled_by_sim_none_or_no_edges": 0,
         }
         if n <= 0:
@@ -853,18 +999,39 @@ class GreenNetEnv(gym.Env):
 
         total_cap = int(getattr(self.config, "max_total_toggles_per_episode", 0))
         total_used = int(getattr(self, "_total_toggles_used", 0))
-        if total_cap > 0 and total_used >= total_cap:
-            mask[1:] = False
-            reasons["total_cap"] = max(0, n - 1)
-            self._last_mask_reason_counts = reasons
-            self._last_valid_on_actions = 0
-            self._last_valid_off_actions = 0
-            self._last_valid_toggle_actions = 0
-            return mask
+        emerg_cap = int(getattr(self.config, "max_emergency_on_toggles_per_episode", 8))
+        emerg_used = int(getattr(self, "_emergency_on_toggles_used", 0))
         
         global_cd = int(getattr(self, "_global_toggle_cooldown_remaining", 0))
-        util_values = list(self.simulator.utilization.values()) if self.simulator else []
-        max_util = max(util_values, default=0.0)
+        nd_signal = float(getattr(self, "_last_norm_drop_step", getattr(self, "_last_norm_drop_total", 0.0)))
+        target = float(self.config.qos_target_norm_drop)
+        margin_off = float(getattr(self.config, "qos_guard_margin_off", getattr(self.config, "qos_guard_margin", 0.0)))
+        qos_viol_step = bool(getattr(self, "_last_qos_viol_step", False))
+        qos_allow_on = bool(qos_viol_step)
+        qos_block_off = bool(nd_signal > (target - margin_off))
+        last_max_util = float(getattr(self, "_last_max_util", 0.0))
+        calm_streak = int(getattr(self, "_calm_streak", 0))
+        off_calm_steps_required = int(getattr(self.config, "off_calm_steps_required", 0))
+        max_util_off_allow_threshold = float(getattr(self.config, "max_util_off_allow_threshold", 0.80))
+        # "No-first-OFF in calm all-on state":
+        # if episode started all-on and we are still all-on + calm, mask OFF actions.
+        episode_started_all_on = int(getattr(self, "_episode_initial_off_edges", 0)) == 0
+        off_edges_now = int(
+            sum(1 for e in self._edge_universe if not bool(self.simulator.active.get(e, True)))
+        )
+        all_on_and_calm = bool(
+            episode_started_all_on
+            and off_edges_now == 0
+            and (not qos_viol_step)
+            and (last_max_util < float(getattr(self.config, "util_block_threshold", 0.80)))
+        )
+        util_unblock_threshold = float(
+            getattr(
+                self.config,
+                "util_unblock_threshold",
+                getattr(self.config, "util_block_threshold", 0.80),
+            )
+        )
         for a in range(1, n):
             idx = a - 1
             if idx < 0 or idx >= len(self._edge_universe):
@@ -886,23 +1053,58 @@ class GreenNetEnv(gym.Env):
                     )
                 continue
             current_state = bool(self.simulator.active.get(key, False))
-            # Global cooldown blocks only when trying to turn an edge OFF
-            if current_state and global_cd > 0:
+            next_state = (not current_state)
+            is_turning_on = bool((not current_state) and next_state)
+            emergency_on_candidate = bool(is_turning_on and qos_viol_step)
+            emergency_cap_ok = bool(emerg_cap <= 0 or emerg_used < emerg_cap)
+            # During QoS emergency, keep OFF->ON visible even if cooldowns are active.
+            emergency_on_mask_bypass = bool(is_turning_on and qos_allow_on and emergency_cap_ok)
+            if total_cap > 0 and total_used >= total_cap and not emergency_on_candidate:
+                mask[a] = False
+                reasons["total_cap"] += 1
+                if not current_state:
+                    reasons["on_disabled_by_global_cd"] += 1
+                continue
+            if emergency_on_candidate and emerg_cap > 0 and emerg_used >= emerg_cap:
+                mask[a] = False
+                reasons["total_cap"] += 1
+                if not current_state:
+                    reasons["on_disabled_by_global_cd"] += 1
+                continue
+            # Global cooldown blocks only OFF toggles; emergency ON can bypass it.
+            if global_cd > 0 and current_state and not emergency_on_mask_bypass:
                 mask[a] = False
                 reasons["global_cd"] += 1
+                if not current_state:
+                    reasons["on_disabled_by_global_cd"] += 1
                 continue
 
             # High-util gate blocks only when trying to turn an edge OFF
             if current_state:
+                if all_on_and_calm:
+                    mask[a] = False
+                    reasons["off_all_on_calm"] += 1
+                    continue
                 # In normal all-on mode (no seeded OFF edges), keep links ON by default.
                 # This prevents rare harmful OFF toggles that make policy worse than NOOP.
-                if (
-                    int(getattr(self.config, "initial_off_edges", 0) or 0) <= 0
-                    and (not bool(getattr(self.config, "disable_off_actions", False)))
-                ):
-                    mask[a] = False
-                    reasons["off_start_guard"] += 1
-                    continue
+                # OFF start guard: when starting all-on (initial_off_edges==0),
+                # keep OFF actions masked only for the first N decision steps.
+                if int(getattr(self.config, "initial_off_edges", 0)) == 0 and decision_idx < warmup_decisions:
+                    for a in range(1, n):
+                        if not bool(mask[a]):
+                            continue
+                        idx = int(a) - 1
+                        if idx < 0 or idx >= len(self.edge_list):
+                            continue
+                        if self.simulator is None:
+                            continue
+                        u, v = self.edge_list[idx]
+                        key = self._edge_key(int(u), int(v))
+                        current_state = bool(self.simulator.active.get(key, True))
+                        # current_state==True means this toggle would turn the edge OFF
+                        if current_state:
+                            mask[a] = False
+                            reasons["off_start_guard"] = reasons.get("off_start_guard", 0) + 1
                 if bool(getattr(self.config, "disable_off_actions", False)):
                     mask[a] = False
                     reasons["off_disabled"] += 1
@@ -915,6 +1117,20 @@ class GreenNetEnv(gym.Env):
                     mask[a] = False
                     reasons["off_cap"] += 1
                     continue
+                if off_calm_steps_required > 0 and calm_streak < off_calm_steps_required:
+                    mask[a] = False
+                    reasons["off_calm_streak"] += 1
+                    continue
+                # Hard OFF safety: when QoS is violated, never allow turning edges OFF.
+                if qos_viol_step:
+                    mask[a] = False
+                    reasons["qos_guard"] += 1
+                    continue
+                # Global calm OFF gate at mask-time to avoid unsafe OFF attempts.
+                if last_max_util >= max_util_off_allow_threshold:
+                    mask[a] = False
+                    reasons["off_stress_gate"] += 1
+                    continue
                 # NEW: Demand/forecast gate — only allow OFF when demand is low.
                 dn = float(getattr(self, "_last_demand_now_norm", 0.0))
                 df = float(getattr(self, "_last_demand_forecast_norm", 0.0))
@@ -925,10 +1141,7 @@ class GreenNetEnv(gym.Env):
                     reasons["demand_gate"] += 1
                     continue
                 # QoS guard: block turning an edge OFF when QoS is near/over target.
-                last_nd = float(getattr(self, "_last_norm_drop_total", 0.0))
-                target = float(self.config.qos_target_norm_drop)
-                margin = float(getattr(self.config, "qos_guard_margin", 0.0))
-                if last_nd >= (target - margin):
+                if nd_signal > (target - margin_off):
                     mask[a] = False
                     reasons["qos_guard"] += 1
                     continue
@@ -939,9 +1152,8 @@ class GreenNetEnv(gym.Env):
                     reasons["util_gate"] += 1
                     continue
             
-            # Per-edge cooldown: for ON-only experiments, allow ON actions immediately.
-            apply_cooldown = current_state or (not bool(getattr(self.config, "disable_off_actions", False)))
-            if apply_cooldown:
+            # Per-edge cooldown blocks all normal toggles; emergency ON can bypass it.
+            if not emergency_on_mask_bypass:
                 last_toggled = self.simulator.graph.edges[edge].get(
                     "last_toggled", -self.config.toggle_cooldown_steps
                 )
@@ -1137,124 +1349,272 @@ class GreenNetEnv(gym.Env):
            global_cooldown_blocked, toggled_on, toggled_off, off_budget_blocked,
            total_budget_blocked).
         """
-        if self.simulator is None or not self._edge_universe:
-            return 0.0, False, False, False, False, False, False, False, False, False
+        toggle_cost = 0.0
+        toggle_applied = False
+        toggle_reverted = False
+        toggle_blocked = False
+        toggle_blocked_high_util = False
+        toggle_blocked_global = False
+        toggle_blocked_global_off_stress = False
+        toggled_on = False
+        toggled_off = False
+        off_budget_blocked = False
+        total_budget_blocked = False
+
+        idx = -1
+        edge: Tuple[int, int] | None = None
+        key: Tuple[int, int] | None = None
+        prev_state: bool = True
+        next_state: bool = True
+        qos_allow_on = bool(getattr(self, "_last_qos_viol_step", False))
+        emergency_on = False
+        emergency_on_applied = False
 
         try:
             action_int = int(action)
         except Exception:
             action_int = 0
 
+        action_invalid = bool(
+            action_int > 0
+            and (
+                self.simulator is None
+                or not self.edge_list
+                or (action_int - 1) < 0
+                or (action_int - 1) >= len(self.edge_list)
+            )
+        )
+
+        def _finish() -> Tuple[float, bool, bool, bool, bool, bool, bool, bool, bool, bool]:
+            self._last_toggle_blocked_global_off_stress = bool(toggle_blocked_global_off_stress)
+            self._last_qos_allow_on = bool(qos_allow_on)
+            self._last_emergency_on_applied = bool(emergency_on_applied)
+            if self.debug_logs and action_int > 0 and (not action_invalid):
+                blocked_any = bool(
+                    toggle_blocked
+                    or toggle_blocked_high_util
+                    or toggle_blocked_global
+                    or off_budget_blocked
+                    or total_budget_blocked
+                )
+                if (not blocked_any) and (not toggle_applied):
+                    print(
+                        "[toggle-debug] unexpected no-op "
+                        f"action_int={action_int} idx={idx} edge={edge} key={key} "
+                        f"prev_state={prev_state} next_state={next_state} "
+                        f"blocked={toggle_blocked} blocked_high_util={toggle_blocked_high_util} "
+                        f"blocked_global={toggle_blocked_global} blocked_global_off_stress={toggle_blocked_global_off_stress} "
+                        f"blocked_off_budget={off_budget_blocked} blocked_total_budget={total_budget_blocked}"
+                    )
+            return (
+                float(toggle_cost),
+                bool(toggle_applied),
+                bool(toggle_reverted),
+                bool(toggle_blocked),
+                bool(toggle_blocked_high_util),
+                bool(toggle_blocked_global),
+                bool(toggled_on),
+                bool(toggled_off),
+                bool(off_budget_blocked),
+                bool(total_budget_blocked),
+            )
+
+        def _record_cd_block_debug(a_int: int) -> None:
+            try:
+                m = self.get_action_mask()
+                a = int(a_int)
+                mask_val = int(bool(m[a])) if 0 <= a < len(m) else -998
+            except Exception:
+                mask_val = -997
+            self._dbg_cd_block_mask_val_last = int(mask_val)
+            self._dbg_cd_block_mask_samples = int(getattr(self, "_dbg_cd_block_mask_samples", 0)) + 1
+            if int(mask_val) == 1:
+                self._dbg_cd_block_mask_mismatches = int(getattr(self, "_dbg_cd_block_mask_mismatches", 0)) + 1
+
+        if self.simulator is None or not self.edge_list:
+            return _finish()
         if action_int <= 0:
-            return 0.0, False, False, False, False, False, False, False, False, False
+            return _finish()
 
-        idx = action_int - 1
-        if idx < 0 or idx >= len(self._edge_universe):
-            return 0.0, False, False, False, False, False, False, False, False, False
+        idx = int(action_int) - 1
+        if idx < 0 or idx >= len(self.edge_list):
+            return _finish()
 
-        edge = self._edge_universe[idx]
-        key = self._edge_key(edge[0], edge[1])
-
-        if key not in self.simulator.active:
-            return 0.0, False, False, False, False, False, False, False, False, False
-
-        current_state = bool(self.simulator.active.get(key, False))
-        toggled_on = False
-        toggled_off = False
-        off_budget_blocked = False
-        total_budget_blocked = False
-
-        # Hard safety mirror of the mask: in normal all-on mode, do not allow OFF toggles.
-        if (
-            current_state
-            and int(getattr(self.config, "initial_off_edges", 0) or 0) <= 0
-            and (not bool(getattr(self.config, "disable_off_actions", False)))
-        ):
-            return 0.0, False, False, False, False, False, False, False, False, False
+        u, v = self.edge_list[idx]
+        u = int(u)
+        v = int(v)
+        edge = (u, v)
+        key = self._edge_key(u, v)
+        prev_state = bool(self.simulator.active.get(key, True))
+        next_state = not prev_state
+        norm_drop_signal = float(getattr(self, "_last_norm_drop_step", getattr(self, "_last_norm_drop_total", 0.0)))
+        qos_target = float(getattr(self.config, "qos_target_norm_drop", 0.0))
+        qos_margin_off = float(getattr(self.config, "qos_guard_margin_off", getattr(self.config, "qos_guard_margin", 0.0)))
+        qos_block_off = bool(norm_drop_signal > (qos_target - qos_margin_off))
+        qos_viol_step = bool(getattr(self, "_last_qos_viol_step", False))
+        # Canonical ON-recovery gate: use the exact QoS-violation flag that drives reward_qos.
+        qos_allow_on = bool(qos_viol_step)
+        is_turning_on = bool((not prev_state) and next_state)
+        # Emergency ON is strictly tied to active QoS violation.
+        emergency_on = bool(is_turning_on and qos_viol_step)
 
         # Total toggle budget hard gate: treat as NOOP if exhausted.
         total_cap = int(getattr(self.config, "max_total_toggles_per_episode", 0))
         total_used = int(getattr(self, "_total_toggles_used", 0))
-        if total_cap > 0 and total_used >= total_cap:
+        if (not emergency_on) and total_cap > 0 and total_used >= total_cap:
             total_budget_blocked = True
-            return 0.0, False, False, False, False, False, False, False, False, total_budget_blocked
+            self._dbg_block_budget = int(getattr(self, "_dbg_block_budget", 0)) + 1
+            return _finish()
+        if emergency_on:
+            emerg_cap = int(getattr(self.config, "max_emergency_on_toggles_per_episode", 8))
+            emerg_used = int(getattr(self, "_emergency_on_toggles_used", 0))
+            if emerg_cap > 0 and emerg_used >= emerg_cap:
+                total_budget_blocked = True
+                toggle_blocked = True
+                toggle_cost = float(getattr(self.config, "toggle_attempt_penalty", 0.0))
+                self._dbg_block_budget = int(getattr(self, "_dbg_block_budget", 0)) + 1
+                return _finish()
 
         # OFF budget hard gate: if edge is currently ON, this action would turn it OFF.
-        if current_state:
+        if prev_state:
             cap = int(getattr(self.config, "max_off_toggles_per_episode", 0))
             used = int(getattr(self, "_off_toggles_used", 0))
             if cap > 0 and used >= cap:
                 off_budget_blocked = True
-                penalty = self.config.toggle_penalty * self.config.revert_penalty_scale
-                return penalty, False, False, False, False, False, False, False, off_budget_blocked, False
+                toggle_cost = self.config.toggle_penalty * self.config.revert_penalty_scale
+                self._dbg_block_budget = int(getattr(self, "_dbg_block_budget", 0)) + 1
+                return _finish()
 
-        # QoS guard: when norm_drop_total is near/above target, block turning edges OFF.
-        if current_state:
-            last_nd = float(getattr(self, "_last_norm_drop_total", 0.0))
-            target = float(self.config.qos_target_norm_drop)
-            margin = float(getattr(self.config, "qos_guard_margin", 0.0))
-            if last_nd >= (target - margin):
-                penalty = (
+        # QoS OFF-brake: block turning edges OFF when QoS is near/over the OFF threshold.
+        if prev_state:
+            if qos_block_off:
+                toggle_blocked = True
+                toggle_cost = (
                     self.config.toggle_penalty
                     * self.config.revert_penalty_scale
                     * float(getattr(self.config, "qos_guard_penalty_scale", 1.0))
                 )
-                return penalty, False, False, False, False, False, False, False, False, False
+                self._dbg_block_qos_off = int(getattr(self, "_dbg_block_qos_off", 0)) + 1
+                return _finish()
 
         # Global cooldown: block rapid toggles ONLY when turning an edge OFF.
         # Turning an edge ON is always allowed so the agent can recover quickly.
-        if current_state and getattr(self, "_global_toggle_cooldown_remaining", 0) > 0:
-            penalty = self.config.toggle_penalty * self.config.revert_penalty_scale
-            return penalty, False, False, False, False, True, False, False, False, False
+        if prev_state and getattr(self, "_global_toggle_cooldown_remaining", 0) > 0 and not emergency_on:
+            toggle_blocked_global = True
+            toggle_cost = self.config.toggle_penalty * self.config.revert_penalty_scale
+            _record_cd_block_debug(action_int)
+            self._dbg_block_global_cd = int(getattr(self, "_dbg_block_global_cd", 0)) + 1
+            return _finish()
+
+        # Global stress gate for OFF actions: allow ON->OFF only when the network is globally calm.
+        # IMPORTANT: apply only if this toggle would turn an edge OFF.
+        is_turning_off = bool(prev_state and (not next_state))
+        if is_turning_off:
+            episode_started_all_on = int(getattr(self, "_episode_initial_off_edges", 0)) == 0
+            off_edges_now = int(
+                sum(1 for e in self._edge_universe if not bool(self.simulator.active.get(e, True)))
+            )
+            all_on_now = bool(off_edges_now == 0)
+            calm_now = bool(
+                (not bool(getattr(self, "_last_qos_viol_step", False)))
+                and (
+                    float(getattr(self, "_last_max_util", 0.0))
+                    < float(getattr(self.config, "util_block_threshold", 0.80))
+                )
+            )
+            if episode_started_all_on and all_on_now and calm_now:
+                toggle_blocked = True
+                toggle_cost = float(getattr(self.config, "toggle_attempt_penalty", 0.0))
+                return _finish()
+
+            req_calm = int(getattr(self.config, "off_calm_steps_required", 0))
+            if req_calm > 0 and int(getattr(self, "_calm_streak", 0)) < req_calm:
+                toggle_blocked = True
+                toggle_cost = float(getattr(self.config, "toggle_attempt_penalty", 0.0))
+                return _finish()
+            max_util = float(getattr(self, "_last_max_util", 0.0))
+            thr = float(getattr(self.config, "max_util_off_allow_threshold", 0.80))
+            if max_util >= thr:
+                toggle_blocked_global_off_stress = True
+                toggle_blocked = True
+                toggle_cost = float(getattr(self.config, "toggle_attempt_penalty", 0.0))
+                self._dbg_block_off_stress = int(getattr(self, "_dbg_block_off_stress", 0)) + 1
+                return _finish()
 
         # Safety gate: block turning OFF a highly utilized edge.
         # (Turning ON an edge is always allowed.)
-        if current_state:
+        if prev_state:
             util = float(self.simulator.utilization.get(key, 0.0))
             # Block turning OFF when utilization is ABOVE the threshold.
             if util > self.config.util_block_threshold:
-                penalty = self.config.toggle_penalty * self.config.revert_penalty_scale
-                return penalty, False, False, False, True, False, False, False, False, False
+                toggle_blocked_high_util = True
+                toggle_cost = self.config.toggle_penalty * self.config.revert_penalty_scale
+                self._dbg_block_util = int(getattr(self, "_dbg_block_util", 0)) + 1
+                return _finish()
+        else:
+            # ON actions are always allowed. OFF safety gates protect QoS.
+            pass
 
         # Cooldown: prevent rapid flapping of the same edge.
-        last_toggled = self.simulator.graph.edges[edge].get("last_toggled", -self.config.toggle_cooldown_steps)
-        if (self._step_count - last_toggled) < self.config.toggle_cooldown_steps:
-            penalty = self.config.toggle_penalty * self.config.revert_penalty_scale
-            return penalty, False, False, True, False, False, False, False, False, False
+        g = self.simulator.graph
+        if g.has_edge(u, v):
+            graph_edge = (u, v)
+        elif g.has_edge(v, u):
+            graph_edge = (v, u)
+        else:
+            graph_edge = None
+        last_toggled = (
+            g.edges[graph_edge].get("last_toggled", -self.config.toggle_cooldown_steps)
+            if graph_edge is not None
+            else -self.config.toggle_cooldown_steps
+        )
+        if (self._step_count - int(last_toggled)) < int(self.config.toggle_cooldown_steps) and not emergency_on:
+            toggle_blocked = True
+            toggle_cost = self.config.toggle_penalty * self.config.revert_penalty_scale
+            _record_cd_block_debug(action_int)
+            self._dbg_block_edge_cd = int(getattr(self, "_dbg_block_edge_cd", 0)) + 1
+            return _finish()
 
-        new_state = not current_state
+        # Apply toggle to simulator state.
+        self.simulator.active[key] = next_state
 
-        # Apply toggle.
-        self.simulator.active[key] = new_state
-        if self._graph_has_edge_any(*edge):
-            self.simulator.graph.edges[edge]["active"] = new_state
-            self.simulator.graph.edges[edge]["last_toggled"] = self._step_count
+        # Sync graph attributes where edge exists.
+        prev_last_toggled = None
+        if graph_edge is not None:
+            prev_last_toggled = g.edges[graph_edge].get("last_toggled", -self.config.toggle_cooldown_steps)
+            g.edges[graph_edge]["active"] = next_state
+            g.edges[graph_edge]["last_toggled"] = int(self._step_count)
 
         # Safety: ensure graph stays connected via active edges.
         if not self._is_active_graph_connected():
-            # Revert
-            self.simulator.active[key] = current_state
-            if self._graph_has_edge_any(*edge):
-                self.simulator.graph.edges[edge]["active"] = current_state
-            penalty = self.config.toggle_penalty * self.config.revert_penalty_scale
+            self.simulator.active[key] = prev_state
+            if graph_edge is not None:
+                g.edges[graph_edge]["active"] = prev_state
+                if prev_last_toggled is not None:
+                    g.edges[graph_edge]["last_toggled"] = int(prev_last_toggled)
+            toggle_cost = self.config.toggle_penalty * self.config.revert_penalty_scale
+            toggle_reverted = True
             self._global_toggle_cooldown_remaining = int(self.config.global_toggle_cooldown_steps)
-            return penalty, False, True, False, False, False, False, False, False, False
+            return _finish()
+
+        # Successful toggle.
+        toggle_applied = True
+        toggled_off = bool(prev_state and (not next_state))
+        toggled_on = bool((not prev_state) and next_state)
 
         toggle_cost = self.config.toggle_penalty
         # Turning OFF is riskier than turning ON -> apply extra cost on OFF only.
-        if new_state is False:
+        if toggled_off:
             toggle_cost = float(toggle_cost) * float(getattr(self.config, "off_toggle_penalty_scale", 1.0))
-
-        # Start global cooldown ONLY after successfully turning an edge OFF.
-        if new_state is False:
             self._global_toggle_cooldown_remaining = int(self.config.global_toggle_cooldown_steps)
-            toggled_off = True
             self._off_toggles_used += 1
-        else:
-            toggled_on = True
 
-        self._total_toggles_used += 1
-        return toggle_cost, True, False, False, False, False, toggled_on, toggled_off, off_budget_blocked, False
+        if emergency_on and toggled_on:
+            self._emergency_on_toggles_used += 1
+            emergency_on_applied = True
+        else:
+            self._total_toggles_used += 1
+        return _finish()
 
     def _is_active_graph_connected(self) -> bool:
         if self.simulator is None:
