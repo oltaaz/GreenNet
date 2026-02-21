@@ -10,17 +10,24 @@ runs/
 results/
 
 
-# --- artifacts: track only locked (blessed) outputs ---
 artifacts/**
+
 !artifacts/locked/
 !artifacts/locked/**
 
-# ignore zip files by default...
-*.zip
-# ...but allow model zips inside locked artifacts
-!artifacts/locked/**/ppo_greennet.zip
+!artifacts/traffic_verify/
+!artifacts/traffic_verify/**
 
-# ignore macOS junk everywhere
+!artifacts/final_pretraffic/
+!artifacts/final_pretraffic/**
+
+!artifacts/sweeps/
+!artifacts/sweeps/**
+
+artifacts/locked/_runs_backup/
+
+
+
 **/.DS_Store
 __MACOSX/
 

@@ -1,5 +1,6 @@
 """Gymnasium environment wrapper for GreenNet."""
 from __future__ import annotations
+import os
 from greennet.forecasting import DemandForecastConfig, EmaDemandForecaster
 
 import math
@@ -12,6 +13,7 @@ import networkx as nx
 import numpy as np
 from gymnasium import spaces
 
+from greennet.impact_predictor import ImpactPredictor
 from greennet.routing import ShortestPathPolicy
 from greennet.simulator import Flow, Simulator
 from greennet.topology import TopologyConfig, build_random_topology
@@ -131,6 +133,16 @@ class EnvConfig:
     initial_off_seed: int | None = 123
     off_start_guard_decision_steps: int = 10  # block OFF actions for first N decision steps when starting all-on
 
+    # Optional OFF-action gating via Impact Predictor (ensemble + calibration).
+    cost_estimator_enabled: bool = False
+    cost_estimator_model_dir: str = "models/impact_predictor"
+    cost_estimator_p_qos_max: float = 0.11
+    cost_estimator_ddrop_max: float = 0.001
+    cost_estimator_tau: float = 0.11
+    cost_estimator_k: float = 1.0
+    cost_estimator_w_drop: float = 1.0
+    cost_estimator_w_energy: float = 0.2
+
 
 
 
@@ -206,6 +218,34 @@ class GreenNetEnv(gym.Env):
         self._dbg_block_off_stress: int = 0
         self._dbg_block_qos_off: int = 0
         self._dbg_block_qos_on: int = 0
+        self._last_obs: Dict[str, Any] | np.ndarray | None = None
+        self._impact_predictor: ImpactPredictor | None = None
+        self._cost_estimator_model_dir = str(self.config.cost_estimator_model_dir)
+        self._cost_estimator_enabled = bool(getattr(self.config, "cost_estimator_enabled", False))
+        env_flag = os.getenv("COST_ESTIMATOR_ENABLED", "").strip().lower()
+        if env_flag in {"1", "true", "yes", "on"}:
+            self._cost_estimator_enabled = True
+        env_model_dir = os.getenv("COST_ESTIMATOR_MODEL_DIR", "").strip()
+        if env_model_dir:
+            self._cost_estimator_model_dir = env_model_dir
+        self._cost_estimator_p_qos_max = self._read_env_float(
+            "COST_ESTIMATOR_P_QOS_MAX", float(self.config.cost_estimator_p_qos_max)
+        )
+        self._cost_estimator_ddrop_max = self._read_env_float(
+            "COST_ESTIMATOR_DDROP_MAX", float(self.config.cost_estimator_ddrop_max)
+        )
+        self._cost_estimator_tau = self._read_env_float(
+            "COST_ESTIMATOR_TAU", float(self.config.cost_estimator_tau)
+        )
+        self._cost_estimator_k = self._read_env_float(
+            "COST_ESTIMATOR_K", float(self.config.cost_estimator_k)
+        )
+        self._cost_estimator_w_drop = self._read_env_float(
+            "COST_ESTIMATOR_W_DROP", float(self.config.cost_estimator_w_drop)
+        )
+        self._cost_estimator_w_energy = self._read_env_float(
+            "COST_ESTIMATOR_W_ENERGY", float(self.config.cost_estimator_w_energy)
+        )
 
 
         # Build base topology once; action space is derived from toggleable (non-bridge) edges.
@@ -253,6 +293,7 @@ class GreenNetEnv(gym.Env):
                 "edge_util": spaces.Box(low=0.0, high=1.0, shape=(self.E,), dtype=np.float32),
             }
         )
+        self._try_load_cost_estimator()
 
     def reset(self, *, seed: int | None = None, options: Dict[str, Any] | None = None,) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         super().reset(seed=seed)
@@ -459,6 +500,7 @@ class GreenNetEnv(gym.Env):
             edge_util=edge_util,
         )
         info: Dict[str, Any] = {"metrics": None}
+        self._last_obs = obs
         return obs, info
 
     def _apply_safe_initial_off_edges(self, seed: int | None) -> int:
@@ -567,16 +609,70 @@ class GreenNetEnv(gym.Env):
 
         # Action diagnostics (helps distinguish true no-op vs invalid index).
         try:
-            action_int = int(action)
+            proposed_action_int = int(action)
         except Exception:
-            action_int = 0
+            proposed_action_int = 0
+        proposed_idx = int(proposed_action_int) - 1
+        proposed_action_is_invalid = bool(
+            proposed_action_int > 0
+            and (
+                proposed_idx < 0
+                or proposed_idx >= len(self.edge_list)
+                or self.simulator is None
+                or not self.edge_list
+            )
+        )
+        target_edge_id: int | None = None
+        target_edge_key: Tuple[int, int] | None = None
+        target_edge_was_active: int | None = None
+        target_edge_is_active: int | None = None
+        if (
+            proposed_action_int > 0
+            and (not proposed_action_is_invalid)
+            and self.simulator is not None
+            and self.edge_list
+        ):
+            target_edge_id = int(proposed_idx)
+            u0, v0 = self.edge_list[int(target_edge_id)]
+            target_edge_key = self._edge_key(int(u0), int(v0))
+            target_edge_was_active = int(bool(self.simulator.active.get(target_edge_key, False)))
+
+        action_int = int(proposed_action_int)
+        internal_noop_reason_pre: str | None = None
         # Decision interval safety net (hard guard):
         # Only allow non-NOOP actions every N steps; otherwise force NOOP.
-        if not is_decision:
+        if (not is_decision) and action_int > 0:
             action_int = 0
+            internal_noop_reason_pre = "cooldown"
         action_is_noop = action_int == self.HOLD_ACTION or action_int <= 0
         idx = action_int - 1
         action_is_invalid = (action_int > 0) and (idx < 0 or idx >= len(self.edge_list) or self.simulator is None or not self.edge_list)
+        is_off_candidate = 0
+        if proposed_action_int > 0:
+            try:
+                is_off_candidate = int(bool(self._is_off_toggle_action(int(proposed_action_int))))
+            except Exception:
+                is_off_candidate = 0
+        requested_action_int = int(action_int)
+        cost_estimator_blocked_off = False
+        cost_pred: Dict[str, float] | None = None
+        mask_reason: str | None = None
+        if action_int > 0 and not action_is_invalid and self._cost_estimator_enabled:
+            cost_estimator_blocked_off, cost_pred = self._cost_estimator_blocks_off_action(
+                self._last_obs, action_int
+            )
+            if cost_estimator_blocked_off:
+                action_int = 0
+                action_is_noop = True
+                if isinstance(cost_pred, dict):
+                    reason_value = cost_pred.get("mask_reason")
+                    if isinstance(reason_value, str) and reason_value:
+                        mask_reason = reason_value
+        if action_is_invalid and action_int > 0:
+            action_int = 0
+            action_is_noop = True
+            internal_noop_reason_pre = "invalid_action"
+        applied_action_int = int(action_int)
 
         (
             toggle_cost,
@@ -589,7 +685,30 @@ class GreenNetEnv(gym.Env):
             toggled_off,
             toggle_blocked_off_budget,
             toggle_blocked_total_budget,
-        ) = self._apply_action(action_int)
+            internal_noop_reason_hint,
+        ) = self._apply_action(applied_action_int)
+        if target_edge_key is not None and self.simulator is not None:
+            target_edge_is_active = int(bool(self.simulator.active.get(target_edge_key, False)))
+
+        applied_action_final = int(applied_action_int)
+        internal_forced_noop = 0
+        internal_noop_reason: str | None = None
+        if (
+            proposed_action_int > 0
+            and (not cost_estimator_blocked_off)
+            and ((applied_action_int <= 0) or (not bool(toggle_applied)))
+        ):
+            applied_action_final = 0
+            internal_forced_noop = 1
+            if isinstance(internal_noop_reason_pre, str) and internal_noop_reason_pre:
+                internal_noop_reason = internal_noop_reason_pre
+            elif isinstance(internal_noop_reason_hint, str) and internal_noop_reason_hint:
+                internal_noop_reason = internal_noop_reason_hint
+            else:
+                internal_noop_reason = "other"
+        if internal_noop_reason not in {"qos_guard", "cooldown", "invalid_action", "revert_logic", "other"}:
+            internal_noop_reason = "other" if internal_forced_noop else None
+
         toggle_blocked_global_off_stress = bool(
             getattr(self, "_last_toggle_blocked_global_off_stress", False)
         )
@@ -600,7 +719,7 @@ class GreenNetEnv(gym.Env):
         dbg_cd_block_mask_mismatches = int(getattr(self, "_dbg_cd_block_mask_mismatches", 0))
         
         mask_total_cap_blocked = int(
-            (action_int != 0)
+            (applied_action_int != 0)
             and (
                 int(getattr(self, "_last_mask_reason_counts", {}).get("total_cap", 0))
                 > 0
@@ -618,7 +737,7 @@ class GreenNetEnv(gym.Env):
         if blocked_any:
             toggle_cost = float(toggle_cost) + float(self.config.blocked_action_penalty)
 
-        toggles_attempted_count = int((not action_is_noop) and (not action_is_invalid))
+        toggles_attempted_count = int((applied_action_int > 0) and (not action_is_invalid))
         applied_count = int(toggle_applied) if isinstance(toggle_applied, (bool, int, np.integer)) else int(bool(toggle_applied))
         applied_count = max(0, applied_count)
         toggle_penalty_part = float(toggle_cost)
@@ -896,11 +1015,76 @@ class GreenNetEnv(gym.Env):
             "r_other": float(reward_other),
             "qos_excess": float(qos_excess),
             "qos_violation": bool(qos_violation),
-            "action_int": action_int,
+            "action_int": int(applied_action_final),
+            "action_requested_int": int(requested_action_int),
+            "proposed_action": int(proposed_action_int),
+            "applied_action": int(applied_action_final),
+            "is_off_candidate": int(is_off_candidate),
+            "impact_enabled": int(bool(self._cost_estimator_enabled and self._impact_predictor is not None)),
+            "mask_reason": str(mask_reason) if mask_reason is not None else None,
+            "internal_forced_noop": int(internal_forced_noop),
+            "internal_noop_reason": (str(internal_noop_reason) if internal_noop_reason is not None else None),
+            "target_edge_id": (int(target_edge_id) if target_edge_id is not None else None),
+            "target_edge_was_active": (
+                int(target_edge_was_active) if target_edge_was_active is not None else None
+            ),
+            "target_edge_is_active": (
+                int(target_edge_is_active) if target_edge_is_active is not None else None
+            ),
             "action_is_noop": action_is_noop,
             "noop_action_valid": 1,
             "noop_chosen": int(bool(action_is_noop)),
             "action_is_invalid": action_is_invalid,
+            "forced_noop_by_cost_estimator": int(bool(cost_estimator_blocked_off)),
+            "cost_estimator_risk": (
+                float(cost_pred.get("risk_score", 0.0)) if isinstance(cost_pred, dict) else 0.0
+            ),
+            "cost_estimator_blocked_off": bool(cost_estimator_blocked_off),
+            "pred_cost_p_qos_mean": (
+                float(cost_pred.get("p_qos_mean", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "pred_cost_p_qos_std": (
+                float(cost_pred.get("p_qos_std", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "pred_cost_delta_norm_drop_mean": (
+                float(cost_pred.get("ddrop_mean", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "pred_cost_delta_norm_drop_std": (
+                float(cost_pred.get("ddrop_std", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "pred_cost_delta_energy_kwh_mean": (
+                float(cost_pred.get("denergy_mean", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "pred_cost_delta_energy_kwh_std": (
+                float(cost_pred.get("denergy_std", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "pred_cost_p_qos_violate": (
+                float(cost_pred.get("p_qos_mean", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "pred_cost_delta_norm_drop": (
+                float(cost_pred.get("ddrop_mean", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "pred_cost_delta_energy_kwh": (
+                float(cost_pred.get("denergy_mean", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "impact_p_qos_mean": (
+                float(cost_pred.get("p_qos_mean", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "impact_p_qos_std": (
+                float(cost_pred.get("p_qos_std", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "impact_ddrop_mean": (
+                float(cost_pred.get("ddrop_mean", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "impact_ddrop_std": (
+                float(cost_pred.get("ddrop_std", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "impact_denergy_mean": (
+                float(cost_pred.get("denergy_mean", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
+            "impact_denergy_std": (
+                float(cost_pred.get("denergy_std", 0.0)) if isinstance(cost_pred, dict) else None
+            ),
             "is_decision_step": bool(is_decision),
             "mask_reason_counts": dict(getattr(self, "_last_mask_reason_counts", {})),
             "valid_on_actions": int(getattr(self, "_last_valid_on_actions", 0)),
@@ -909,6 +1093,7 @@ class GreenNetEnv(gym.Env):
             "valid_noop_actions": 1,
             "mask_calls": int(getattr(self, "_mask_calls", 0)),
         }
+        self._last_obs = obs
         return obs, reward, terminated, truncated, info
 
     def render(self) -> None:
@@ -917,6 +1102,235 @@ class GreenNetEnv(gym.Env):
     def close(self) -> None:
         return None
 
+    def _read_env_float(self, name: str, default: float) -> float:
+        raw = os.getenv(name, "").strip()
+        if not raw:
+            return float(default)
+        try:
+            out = float(raw)
+        except Exception:
+            return float(default)
+        if not np.isfinite(out):
+            return float(default)
+        return float(out)
+
+    def _try_load_cost_estimator(self) -> None:
+        self._impact_predictor = None
+        if not bool(getattr(self, "_cost_estimator_enabled", False)):
+            return
+        try:
+            self._impact_predictor = ImpactPredictor(self._cost_estimator_model_dir)
+            if self.debug_logs:
+                print(f"[impact-predictor] loaded from {self._cost_estimator_model_dir}")
+        except Exception as exc:
+            self._impact_predictor = None
+            print(
+                f"[impact-predictor] failed to load from {self._cost_estimator_model_dir}: {exc}. "
+                "Estimator guard disabled."
+            )
+            self._cost_estimator_enabled = False
+
+    def _cost_estimator_thresholds(self) -> Tuple[float, float]:
+        p_qos_max = float(getattr(self, "_cost_estimator_p_qos_max", getattr(self.config, "cost_estimator_p_qos_max", 0.11)))
+        ddrop_max = float(getattr(self, "_cost_estimator_ddrop_max", getattr(self.config, "cost_estimator_ddrop_max", 0.001)))
+        return p_qos_max, ddrop_max
+
+    def _cost_estimator_risk_params(self) -> Tuple[float, float, float, float]:
+        k = float(getattr(self, "_cost_estimator_k", getattr(self.config, "cost_estimator_k", 1.0)))
+        w_drop = float(getattr(self, "_cost_estimator_w_drop", getattr(self.config, "cost_estimator_w_drop", 1.0)))
+        w_energy = float(getattr(self, "_cost_estimator_w_energy", getattr(self.config, "cost_estimator_w_energy", 0.2)))
+        tau = float(getattr(self, "_cost_estimator_tau", getattr(self.config, "cost_estimator_tau", 0.11)))
+        return k, w_drop, w_energy, tau
+
+    def _obs_scalar(self, obs: Any, key: str, default: float = 0.0) -> float:
+        if isinstance(obs, dict) and key in obs:
+            arr = np.asarray(obs.get(key, [default]), dtype=np.float32).reshape(-1)
+            if arr.size > 0:
+                return float(arr[0])
+        return float(default)
+
+    def get_cost_estimator_graph_state(
+        self, obs: Any | None = None
+    ) -> Tuple[List[str], np.ndarray, List[str], np.ndarray]:
+        if obs is None:
+            obs = self._last_obs
+
+        denom_steps = max(1, int(getattr(self.config, "max_steps", 1)))
+        time_ratio = float(self._obs_scalar(obs, "time", min(1.0, float(self._step_count) / float(denom_steps))))
+        avg_util = float(self._obs_scalar(obs, "avg_util", 0.0))
+        active_ratio = float(self._obs_scalar(obs, "active_ratio", self._active_ratio()))
+        max_util = float(self._obs_scalar(obs, "max_util", float(getattr(self, "_last_max_util", 0.0))))
+        min_util = float(self._obs_scalar(obs, "min_util", 0.0))
+        p95_util = float(self._obs_scalar(obs, "p95_util", 0.0))
+        demand_now = float(self._obs_scalar(obs, "demand_now", float(getattr(self, "_last_demand_now_norm", 0.0))))
+        demand_forecast = float(
+            self._obs_scalar(obs, "demand_forecast", float(getattr(self, "_last_demand_forecast_norm", 0.0)))
+        )
+        dropped_prev = float(self._obs_scalar(obs, "dropped_prev", float(getattr(self, "_prev_dropped", 0.0))))
+        num_active_edges = float(self._obs_scalar(obs, "num_active_edges", float(self._active_edges_count())))
+        near_saturated_edges = float(self._obs_scalar(obs, "near_saturated_edges", 0.0))
+        norm_drop_step = float(getattr(self, "_last_norm_drop_step", 0.0))
+        norm_drop_total = float(getattr(self, "_last_norm_drop_total", 0.0))
+        qos_violation_step = 1.0 if bool(getattr(self, "_last_qos_viol_step", False)) else 0.0
+        global_cd_rem = float(getattr(self, "_global_toggle_cooldown_remaining", 0))
+        global_cd_norm = global_cd_rem / float(max(1, int(getattr(self.config, "global_toggle_cooldown_steps", 1))))
+        decision_step_norm = float(getattr(self, "_decision_step_count", 0)) / float(denom_steps)
+
+        global_feature_names = [
+            "time",
+            "avg_util",
+            "active_ratio",
+            "max_util",
+            "min_util",
+            "p95_util",
+            "demand_now",
+            "demand_forecast",
+            "dropped_prev",
+            "num_active_edges",
+            "near_saturated_edges",
+            "norm_drop_step",
+            "norm_drop_total",
+            "qos_violation_step",
+            "global_cooldown_norm",
+            "decision_step_norm",
+        ]
+        xg = np.asarray(
+            [
+                time_ratio,
+                avg_util,
+                active_ratio,
+                max_util,
+                min_util,
+                p95_util,
+                demand_now,
+                demand_forecast,
+                dropped_prev,
+                num_active_edges,
+                near_saturated_edges,
+                norm_drop_step,
+                norm_drop_total,
+                qos_violation_step,
+                global_cd_norm,
+                decision_step_norm,
+            ],
+            dtype=np.float32,
+        )
+
+        edge_feature_names = [
+            "edge_active",
+            "edge_utilization",
+            "edge_capacity",
+            "edge_latency",
+        ]
+        xe = np.zeros((int(len(self._edge_universe)), len(edge_feature_names)), dtype=np.float32)
+        if self.simulator is None:
+            return global_feature_names, xg, edge_feature_names, xe
+
+        g = self.simulator.graph
+        base_cap = float(getattr(self.config, "base_capacity", 1.0))
+        base_lat = float(getattr(self.config, "base_latency_ms", 1.0))
+        for i, (u, v) in enumerate(self._edge_universe):
+            key = self._edge_key(int(u), int(v))
+            active = 1.0 if bool(self.simulator.active.get(key, False)) else 0.0
+            util = float(np.clip(float(self.simulator.utilization.get(key, 0.0)), 0.0, 1.0))
+            cap = float(self.simulator.capacity.get(key, base_cap))
+            lat = base_lat
+            if g.has_edge(u, v):
+                lat = float(g.edges[u, v].get("latency_ms", base_lat))
+            elif g.has_edge(v, u):
+                lat = float(g.edges[v, u].get("latency_ms", base_lat))
+
+            xe[i, 0] = float(active)
+            xe[i, 1] = float(util)
+            xe[i, 2] = float(cap)
+            xe[i, 3] = float(lat)
+        return global_feature_names, xg, edge_feature_names, xe
+
+    def _is_off_toggle_action(self, action_int: int) -> bool:
+        if self.simulator is None:
+            return False
+        if int(action_int) <= 0:
+            return False
+        idx = int(action_int) - 1
+        if idx < 0 or idx >= len(self.edge_list):
+            return False
+        u, v = self.edge_list[idx]
+        key = self._edge_key(int(u), int(v))
+        return bool(self.simulator.active.get(key, False))
+
+    def _predict_cost(
+        self,
+        obs: Any,
+        action_int: int,
+        *,
+        precomputed_state: Tuple[np.ndarray, np.ndarray] | None = None,
+    ) -> Dict[str, float] | None:
+        if self._impact_predictor is None:
+            return None
+        try:
+            if precomputed_state is None:
+                _, xg, _, xe = self.get_cost_estimator_graph_state(obs)
+            else:
+                xg, xe = precomputed_state
+            action_edge_id = int(action_int) - 1
+            k, w_drop, w_energy, _tau = self._cost_estimator_risk_params()
+            pred = self._impact_predictor.predict_from_state(
+                xg,
+                xe,
+                action_edge_id,
+                k=float(k),
+                w_drop=float(w_drop),
+                w_energy=float(w_energy),
+            )
+            return {str(k0): float(v0) for k0, v0 in pred.items()}
+        except Exception as exc:
+            if self.debug_logs:
+                print(f"[impact-predictor] predict failed: {exc}")
+            return None
+
+    def _cost_estimator_blocks_off_action(
+        self,
+        obs: Any,
+        action_int: int,
+        *,
+        precomputed_state: Tuple[np.ndarray, np.ndarray] | None = None,
+    ) -> Tuple[bool, Dict[str, float] | None]:
+        if not bool(getattr(self, "_cost_estimator_enabled", False)):
+            return False, None
+        if not bool(self._is_off_toggle_action(int(action_int))):
+            return False, None
+        if self._impact_predictor is None:
+            return False, None
+
+        p_qos_max, ddrop_max = self._cost_estimator_thresholds()
+        pred = self._predict_cost(
+            obs,
+            int(action_int),
+            precomputed_state=precomputed_state,
+        )
+        if pred is None:
+            return False, None
+        k, _w_drop, _w_energy, risk_tau = self._cost_estimator_risk_params()
+        p_upper = float(pred.get("p_qos_mean", 0.0) + float(k) * pred.get("p_qos_std", 0.0))
+        ddrop_upper = float(pred.get("ddrop_mean", 0.0) + float(k) * pred.get("ddrop_std", 0.0))
+        risk_score = float(pred.get("risk_score", 0.0))
+        qos_bound = bool(p_upper > float(p_qos_max))
+        drop_bound = bool(ddrop_upper > float(ddrop_max))
+        risk_bound = bool(risk_score > float(risk_tau))
+        should_block = bool(qos_bound or drop_bound or risk_bound)
+        block_reason: str | None = None
+        if should_block:
+            if qos_bound:
+                block_reason = "qos_bound"
+            elif drop_bound:
+                block_reason = "drop_bound"
+            else:
+                block_reason = "risk_tau"
+        pred["p_qos_upper"] = float(p_upper)
+        pred["ddrop_upper"] = float(ddrop_upper)
+        pred["risk_tau"] = float(risk_tau)
+        pred["mask_reason"] = block_reason if block_reason is not None else ""
+        return should_block, pred
 
 
     def get_action_mask(self) -> np.ndarray:
@@ -957,6 +1371,7 @@ class GreenNetEnv(gym.Env):
             "qos_guard": 0,
             "off_stress_gate": 0,
             "util_gate": 0,
+            "cost_estimator": 0,
             "edge_cooldown": 0,
             "total_cap": 0,
             "on_disabled_by_interval": 0,
@@ -1032,6 +1447,13 @@ class GreenNetEnv(gym.Env):
                 getattr(self.config, "util_block_threshold", 0.80),
             )
         )
+        precomputed_impact_state: Tuple[np.ndarray, np.ndarray] | None = None
+        if bool(getattr(self, "_cost_estimator_enabled", False)) and self._impact_predictor is not None:
+            try:
+                _, xg_impact, _, xe_impact = self.get_cost_estimator_graph_state(self._last_obs)
+                precomputed_impact_state = (xg_impact, xe_impact)
+            except Exception:
+                precomputed_impact_state = None
         for a in range(1, n):
             idx = a - 1
             if idx < 0 or idx >= len(self._edge_universe):
@@ -1163,6 +1585,16 @@ class GreenNetEnv(gym.Env):
                     if not current_state:
                         reasons["on_disabled_by_edge_cooldown"] += 1
                     continue
+            if bool(self._is_off_toggle_action(a)) and bool(getattr(self, "_cost_estimator_enabled", False)):
+                should_block, _ = self._cost_estimator_blocks_off_action(
+                    self._last_obs,
+                    a,
+                    precomputed_state=precomputed_impact_state,
+                )
+                if should_block:
+                    mask[a] = False
+                    reasons["cost_estimator"] += 1
+                    continue
             mask[a] = True
         valid_on = 0
         valid_off = 0
@@ -1172,10 +1604,7 @@ class GreenNetEnv(gym.Env):
             idx = a - 1
             if idx < 0 or idx >= len(self._edge_universe):
                 continue
-            edge = self._edge_universe[idx]
-            key = self._edge_key(edge[0], edge[1])
-            current_state = bool(self.simulator.active.get(key, False))
-            if current_state:
+            if bool(self._is_off_toggle_action(a)):
                 valid_off += 1
             else:
                 valid_on += 1
@@ -1341,13 +1770,15 @@ class GreenNetEnv(gym.Env):
             return True
         return False
 
-    def _apply_action(self, action: Any) -> Tuple[float, bool, bool, bool, bool, bool, bool, bool, bool, bool]:
+    def _apply_action(
+        self, action: Any
+    ) -> Tuple[float, bool, bool, bool, bool, bool, bool, bool, bool, bool, str | None]:
         """Toggle an edge if requested.
 
         Returns:
           (toggle_cost, applied, reverted, cooldown_blocked, high_util_blocked,
            global_cooldown_blocked, toggled_on, toggled_off, off_budget_blocked,
-           total_budget_blocked).
+           total_budget_blocked, internal_noop_reason_hint).
         """
         toggle_cost = 0.0
         toggle_applied = False
@@ -1369,6 +1800,7 @@ class GreenNetEnv(gym.Env):
         qos_allow_on = bool(getattr(self, "_last_qos_viol_step", False))
         emergency_on = False
         emergency_on_applied = False
+        internal_noop_reason_hint: str | None = None
 
         try:
             action_int = int(action)
@@ -1385,7 +1817,7 @@ class GreenNetEnv(gym.Env):
             )
         )
 
-        def _finish() -> Tuple[float, bool, bool, bool, bool, bool, bool, bool, bool, bool]:
+        def _finish() -> Tuple[float, bool, bool, bool, bool, bool, bool, bool, bool, bool, str | None]:
             self._last_toggle_blocked_global_off_stress = bool(toggle_blocked_global_off_stress)
             self._last_qos_allow_on = bool(qos_allow_on)
             self._last_emergency_on_applied = bool(emergency_on_applied)
@@ -1417,6 +1849,7 @@ class GreenNetEnv(gym.Env):
                 bool(toggled_off),
                 bool(off_budget_blocked),
                 bool(total_budget_blocked),
+                internal_noop_reason_hint,
             )
 
         def _record_cd_block_debug(a_int: int) -> None:
@@ -1432,12 +1865,15 @@ class GreenNetEnv(gym.Env):
                 self._dbg_cd_block_mask_mismatches = int(getattr(self, "_dbg_cd_block_mask_mismatches", 0)) + 1
 
         if self.simulator is None or not self.edge_list:
+            if action_int > 0:
+                internal_noop_reason_hint = "invalid_action"
             return _finish()
         if action_int <= 0:
             return _finish()
 
         idx = int(action_int) - 1
         if idx < 0 or idx >= len(self.edge_list):
+            internal_noop_reason_hint = "invalid_action"
             return _finish()
 
         u, v = self.edge_list[idx]
@@ -1464,6 +1900,7 @@ class GreenNetEnv(gym.Env):
         if (not emergency_on) and total_cap > 0 and total_used >= total_cap:
             total_budget_blocked = True
             self._dbg_block_budget = int(getattr(self, "_dbg_block_budget", 0)) + 1
+            internal_noop_reason_hint = "other"
             return _finish()
         if emergency_on:
             emerg_cap = int(getattr(self.config, "max_emergency_on_toggles_per_episode", 8))
@@ -1473,6 +1910,7 @@ class GreenNetEnv(gym.Env):
                 toggle_blocked = True
                 toggle_cost = float(getattr(self.config, "toggle_attempt_penalty", 0.0))
                 self._dbg_block_budget = int(getattr(self, "_dbg_block_budget", 0)) + 1
+                internal_noop_reason_hint = "other"
                 return _finish()
 
         # OFF budget hard gate: if edge is currently ON, this action would turn it OFF.
@@ -1483,6 +1921,7 @@ class GreenNetEnv(gym.Env):
                 off_budget_blocked = True
                 toggle_cost = self.config.toggle_penalty * self.config.revert_penalty_scale
                 self._dbg_block_budget = int(getattr(self, "_dbg_block_budget", 0)) + 1
+                internal_noop_reason_hint = "other"
                 return _finish()
 
         # QoS OFF-brake: block turning edges OFF when QoS is near/over the OFF threshold.
@@ -1495,6 +1934,7 @@ class GreenNetEnv(gym.Env):
                     * float(getattr(self.config, "qos_guard_penalty_scale", 1.0))
                 )
                 self._dbg_block_qos_off = int(getattr(self, "_dbg_block_qos_off", 0)) + 1
+                internal_noop_reason_hint = "qos_guard"
                 return _finish()
 
         # Global cooldown: block rapid toggles ONLY when turning an edge OFF.
@@ -1504,6 +1944,7 @@ class GreenNetEnv(gym.Env):
             toggle_cost = self.config.toggle_penalty * self.config.revert_penalty_scale
             _record_cd_block_debug(action_int)
             self._dbg_block_global_cd = int(getattr(self, "_dbg_block_global_cd", 0)) + 1
+            internal_noop_reason_hint = "cooldown"
             return _finish()
 
         # Global stress gate for OFF actions: allow ON->OFF only when the network is globally calm.
@@ -1525,12 +1966,14 @@ class GreenNetEnv(gym.Env):
             if episode_started_all_on and all_on_now and calm_now:
                 toggle_blocked = True
                 toggle_cost = float(getattr(self.config, "toggle_attempt_penalty", 0.0))
+                internal_noop_reason_hint = "other"
                 return _finish()
 
             req_calm = int(getattr(self.config, "off_calm_steps_required", 0))
             if req_calm > 0 and int(getattr(self, "_calm_streak", 0)) < req_calm:
                 toggle_blocked = True
                 toggle_cost = float(getattr(self.config, "toggle_attempt_penalty", 0.0))
+                internal_noop_reason_hint = "other"
                 return _finish()
             max_util = float(getattr(self, "_last_max_util", 0.0))
             thr = float(getattr(self.config, "max_util_off_allow_threshold", 0.80))
@@ -1539,6 +1982,7 @@ class GreenNetEnv(gym.Env):
                 toggle_blocked = True
                 toggle_cost = float(getattr(self.config, "toggle_attempt_penalty", 0.0))
                 self._dbg_block_off_stress = int(getattr(self, "_dbg_block_off_stress", 0)) + 1
+                internal_noop_reason_hint = "qos_guard"
                 return _finish()
 
         # Safety gate: block turning OFF a highly utilized edge.
@@ -1550,6 +1994,7 @@ class GreenNetEnv(gym.Env):
                 toggle_blocked_high_util = True
                 toggle_cost = self.config.toggle_penalty * self.config.revert_penalty_scale
                 self._dbg_block_util = int(getattr(self, "_dbg_block_util", 0)) + 1
+                internal_noop_reason_hint = "qos_guard"
                 return _finish()
         else:
             # ON actions are always allowed. OFF safety gates protect QoS.
@@ -1573,6 +2018,7 @@ class GreenNetEnv(gym.Env):
             toggle_cost = self.config.toggle_penalty * self.config.revert_penalty_scale
             _record_cd_block_debug(action_int)
             self._dbg_block_edge_cd = int(getattr(self, "_dbg_block_edge_cd", 0)) + 1
+            internal_noop_reason_hint = "cooldown"
             return _finish()
 
         # Apply toggle to simulator state.
@@ -1595,6 +2041,7 @@ class GreenNetEnv(gym.Env):
             toggle_cost = self.config.toggle_penalty * self.config.revert_penalty_scale
             toggle_reverted = True
             self._global_toggle_cooldown_remaining = int(self.config.global_toggle_cooldown_steps)
+            internal_noop_reason_hint = "revert_logic"
             return _finish()
 
         # Successful toggle.
@@ -1614,6 +2061,7 @@ class GreenNetEnv(gym.Env):
             emergency_on_applied = True
         else:
             self._total_toggles_used += 1
+        internal_noop_reason_hint = None
         return _finish()
 
     def _is_active_graph_connected(self) -> bool:
