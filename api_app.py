@@ -334,27 +334,43 @@ def _git_hash() -> str:
         return "unknown"
 
 
-@app.get("/api/health")
-def health() -> Dict[str, str]:
-    return {"status": "ok"}
+def _parse_iso_timestamp(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
 
 
-@app.get("/api/version")
-def version() -> Dict[str, str]:
-    return {"version": _git_hash()}
+def _run_sort_key(record: Dict[str, Any]) -> Tuple[int, float, int, float, str, str]:
+    ts = _parse_iso_timestamp(record.get("timestamp_utc"))
+    started = _parse_iso_timestamp(record.get("started_at"))
+    ts_epoch = ts.timestamp() if ts else float("-inf")
+    started_epoch = started.timestamp() if started else float("-inf")
+    return (
+        1 if ts else 0,
+        ts_epoch,
+        1 if started else 0,
+        started_epoch,
+        str(record.get("run_id") or ""),
+        str(record.get("source") or ""),
+    )
 
 
-@app.get("/api/runs")
-def list_runs(
-    base: BaseChoice = Query("both"),
-    tag: Optional[str] = Query(None),
-    policy: Optional[str] = Query(None),
-    scenario: Optional[str] = Query(None),
-    seed: Optional[int] = Query(None),
-    topology_seed: Optional[int] = Query(None),
-    deterministic: Optional[bool] = Query(None),
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
+def _list_runs_payload(
+    base: BaseChoice,
+    tag: Optional[str],
+    policy: Optional[str],
+    scenario: Optional[str],
+    seed: Optional[int],
+    topology_seed: Optional[int],
+    deterministic: Optional[bool],
+    limit: int,
+    offset: int,
 ) -> Dict[str, Any]:
     runs: List[Dict[str, Any]] = []
     for source, run_dir in _scan_run_dirs(base=base):
@@ -379,18 +395,86 @@ def list_runs(
         if deterministic is not None and record.get("deterministic") is not deterministic:
             continue
 
+        # Keep response shape stable for UI consumers.
+        record["run_id"] = record.get("run_id") or run_dir.name
+        record["source"] = record.get("source") or source
+        has_payload = record.get("has") if isinstance(record.get("has"), dict) else {}
+        record["has"] = {
+            "per_step": bool(has_payload.get("per_step")),
+            "summary": bool(has_payload.get("summary")),
+            "meta": bool(has_payload.get("meta")),
+            "env_config": bool(has_payload.get("env_config")),
+        }
+        highlights_payload = record.get("highlights") if isinstance(record.get("highlights"), dict) else {}
+        record["highlights"] = {field: highlights_payload.get(field) for field in HIGHLIGHT_FIELDS}
         runs.append(record)
 
-    runs.sort(
-        key=lambda r: (
-            str(r.get("timestamp_utc") or r.get("started_at") or r["run_id"]),
-            r["run_id"],
-            r["source"],
-        ),
-        reverse=True,
-    )
+    # Deterministic newest-first ordering:
+    # 1) run_meta.timestamp_utc, 2) parsed started_at, 3) run folder name desc.
+    runs.sort(key=_run_sort_key, reverse=True)
     total = len(runs)
     return {"total": total, "items": runs[offset : offset + limit]}
+
+
+@app.get("/api/health")
+def health() -> Dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/api/version")
+def version() -> Dict[str, str]:
+    return {"version": _git_hash()}
+
+
+@app.get("/api/runs")
+def list_runs(
+    base: BaseChoice = Query("both"),
+    tag: Optional[str] = Query(None),
+    policy: Optional[str] = Query(None),
+    scenario: Optional[str] = Query(None),
+    seed: Optional[int] = Query(None),
+    topology_seed: Optional[int] = Query(None),
+    deterministic: Optional[bool] = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> Dict[str, Any]:
+    return _list_runs_payload(
+        base=base,
+        tag=tag,
+        policy=policy,
+        scenario=scenario,
+        seed=seed,
+        topology_seed=topology_seed,
+        deterministic=deterministic,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/api/runs_flat")
+def list_runs_flat(
+    base: BaseChoice = Query("both"),
+    tag: Optional[str] = Query(None),
+    policy: Optional[str] = Query(None),
+    scenario: Optional[str] = Query(None),
+    seed: Optional[int] = Query(None),
+    topology_seed: Optional[int] = Query(None),
+    deterministic: Optional[bool] = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> List[Dict[str, Any]]:
+    payload = _list_runs_payload(
+        base=base,
+        tag=tag,
+        policy=policy,
+        scenario=scenario,
+        seed=seed,
+        topology_seed=topology_seed,
+        deterministic=deterministic,
+        limit=limit,
+        offset=offset,
+    )
+    return payload["items"]
 
 
 @app.get("/api/runs/{run_id}/meta")

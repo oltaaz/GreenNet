@@ -94,11 +94,13 @@ uvicorn api_app:app --reload --port 8000
 Example calls:
 
 ```bash
-curl "http://localhost:8000/api/runs?limit=5"
+curl "http://localhost:8000/api/runs?limit=3"
+curl "http://localhost:8000/api/runs_flat?limit=3"
 curl "http://localhost:8000/api/runs/<run_id>/summary"
 curl "http://localhost:8000/api/aggregate?tag=matrix_v4&group_by=policy,scenario"
 ```
 
 Notes:
 - CORS allows Vite dev origins `http://localhost:5173` and `http://127.0.0.1:5173`.
+- `/api/runs_flat` is a compatibility endpoint for older/quick UIs expecting a plain array (same objects as `/api/runs.items`).
 - `/api/aggregate` computes `*_std` using population standard deviation (`statistics.pstdev`).
