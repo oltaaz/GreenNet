@@ -324,6 +324,23 @@ def find_latest_model() -> Path:
     return candidates[-1]
 
 
+def print_model_artifact_info(model_path: Path) -> None:
+    """Print absolute path + lightweight file metadata for eval sanity checks."""
+    resolved = Path(model_path).expanduser().resolve()
+    try:
+        stat = resolved.stat()
+    except FileNotFoundError:
+        print(f"[model] file not found: {resolved}")
+        return
+
+    size_mb = float(stat.st_size) / (1024.0 * 1024.0)
+    mtime_utc = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+    print(
+        f"[model] path={resolved} size_bytes={int(stat.st_size)} "
+        f"size_mb={size_mb:.3f} mtime_utc={mtime_utc}"
+    )
+
+
 def parse_seed_list(seed_text: str) -> list[int]:
     """Parse comma-separated integers like '0,1,2,3,4'."""
     parts = [p.strip() for p in seed_text.split(",") if p.strip()]
@@ -434,6 +451,7 @@ def eval_policy(
     deterministic: bool,
     debug_energy: bool = False,
     policy_mode: str = "model",
+    eval_max_on_edges: int | None = None,
 ) -> Dict[str, float]:
     """Evaluate a policy and print aggregate stats."""
     base_env = GreenNetEnv(config=replace(env_config, debug_logs=False))
@@ -524,6 +542,7 @@ def eval_policy(
     ep_valid_on_first20_decision_steps_mean: list[float] = []
     ep_fraction_decision_steps_any_on_valid: list[float] = []
     ep_noop_chosen_on_decision_steps_mean: list[float] = []
+    ep_controller_blocked_on_budget: list[int] = []
     ep_pending_toggle_harm_mean: list[float] = []
     ep_toggle_harm_max_dd_mean: list[float] = []
     ep_toggle_harm_max_dq_mean: list[float] = []
@@ -534,6 +553,11 @@ def eval_policy(
     ep_off_edges_all_decision_steps_mean: list[float] = []
     ep_decision_step_when_off_zero: list[float] = []
     on_reason_totals: dict[str, int] = {}
+    max_on_edges_budget = (
+        max(0, int(eval_max_on_edges))
+        if eval_max_on_edges is not None
+        else None
+    )
 
     for ep in range(episodes):
         obs, info = env.reset(seed=seed + ep)
@@ -605,6 +629,7 @@ def eval_policy(
         dbg_block_off_stress_last = 0
         dbg_block_qos_off_last = 0
         dbg_block_qos_on_last = 0
+        controller_blocked_on_budget = 0
         pending_toggle_harm_vals: list[float] = []
         toggle_harm_max_dd_vals: list[float] = []
         toggle_harm_max_dq_vals: list[float] = []
@@ -681,6 +706,35 @@ def eval_policy(
                     action = int(action)
                 except Exception:
                     action = int(action[0])
+
+            if max_on_edges_budget is not None:
+                action_int = int(action)
+                if action_int > 0:
+                    inner_env = env.unwrapped if hasattr(env, "unwrapped") else None
+                    if inner_env is not None and hasattr(inner_env, "edge_list") and hasattr(inner_env, "simulator"):
+                        sim = getattr(inner_env, "simulator", None)
+                        edge_list = getattr(inner_env, "edge_list", [])
+                        idx = action_int - 1
+                        if sim is not None and 0 <= idx < len(edge_list):
+                            active = getattr(sim, "active", None)
+                            if isinstance(active, dict):
+                                edge = edge_list[idx]
+                                key = inner_env._edge_key(edge[0], edge[1])  # type: ignore[attr-defined]
+                                current_state = bool(active.get(key, True))
+                                on_edges_now: int | None = None
+                                edge_universe = getattr(inner_env, "_edge_universe", None)
+                                if isinstance(edge_universe, (list, tuple)):
+                                    try:
+                                        on_edges_now = int(
+                                            sum(1 for e in edge_universe if bool(active.get(e, False)))
+                                        )
+                                    except Exception:
+                                        on_edges_now = None
+                                if on_edges_now is None:
+                                    on_edges_now = int(sum(1 for is_on in active.values() if bool(is_on)))
+                                if (not current_state) and on_edges_now >= max_on_edges_budget:
+                                    action = 0
+                                    controller_blocked_on_budget += 1
 
             obs, r, terminated, truncated, info = env.step(action)
             steps += 1
@@ -861,6 +915,7 @@ def eval_policy(
         ep_off_toggles_used.append(off_toggles_used_last)
         ep_blocked_total_budget.append(blocked_total_budget)
         ep_total_toggles_used.append(total_toggles_used_last)
+        ep_controller_blocked_on_budget.append(controller_blocked_on_budget)
         ep_valid_actions_per_step.append(float(np.mean(valid_counts)) if valid_counts else 0.0)
         ep_decision_steps_count.append(int(decision_steps))
         ep_valid_actions_on_decision_steps.append(
@@ -1100,6 +1155,11 @@ def eval_policy(
         f"total budget    used mean={float(np.mean(ep_total_toggles_used)):.2f} "
         f"blocked mean={float(np.mean(ep_blocked_total_budget)):.2f}"
     )
+    if max_on_edges_budget is not None:
+        print(
+            f"on-edge budget  max_on_edges={max_on_edges_budget} "
+            f"blocked_on_actions_mean={float(np.mean(ep_controller_blocked_on_budget)):.2f}"
+        )
     print(
         "toggle gates   "
         f"attempted={ta_m:.2f} ({ta_r_m:.4f}/step) "
@@ -1264,6 +1324,7 @@ def eval_policy(
         "toggle_blocked_off_budget_mean": float(np.mean(ep_blocked_off_budget)),
         "total_toggles_used_mean": float(np.mean(ep_total_toggles_used)),
         "toggle_blocked_total_budget_mean": float(np.mean(ep_blocked_total_budget)),
+        "controller_blocked_on_budget_mean": float(np.mean(ep_controller_blocked_on_budget)),
         "mean_valid_actions_per_step": float(np.mean(ep_valid_actions_per_step)),
         "mean_decision_steps_count": float(np.mean(ep_decision_steps_count)),
         "mean_valid_actions_on_decision_steps": float(np.mean(ep_valid_actions_on_decision_steps)),
@@ -1758,6 +1819,12 @@ def main() -> None:
         help="Override energy_weight during --eval for all evaluated policies.",
     )
     parser.add_argument(
+        "--eval-max-on-edges",
+        type=int,
+        default=None,
+        help="Inference-time controller: block ON actions when active on-edges already reach this budget during --eval.",
+    )
+    parser.add_argument(
         "--eval-normal-no-toggles",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -2107,6 +2174,7 @@ def main() -> None:
     if args.eval:
         model_path = args.model or find_latest_model()
         print(f"Evaluating model: {model_path}")
+        print_model_artifact_info(Path(model_path))
 
         model_run_dir = Path(model_path).parent
         env_config = load_env_config_from_run(model_run_dir, verbose=True)
@@ -2146,7 +2214,8 @@ def main() -> None:
             f"traffic_scenario={getattr(env_config, 'traffic_scenario', None)} "
             f"toggle_on_penalty_scale={float(getattr(env_config, 'toggle_on_penalty_scale', 0.0)):.6f} "
             f"toggle_off_penalty_scale={float(getattr(env_config, 'toggle_off_penalty_scale', 0.0)):.6f} "
-            f"energy_weight={float(getattr(env_config, 'energy_weight', 0.0)):.6f}"
+            f"energy_weight={float(getattr(env_config, 'energy_weight', 0.0)):.6f} "
+            f"eval_max_on_edges={args.eval_max_on_edges}"
         )
         eval_initial_off_edges = int(getattr(env_config, "initial_off_edges", 0))
         eval_max_total_toggles = int(getattr(env_config, "max_total_toggles_per_episode", 0))
@@ -2189,6 +2258,7 @@ def main() -> None:
             deterministic=True,
             debug_energy=args.debug_eval_energy,
             policy_mode="model",
+            eval_max_on_edges=args.eval_max_on_edges,
         )
         trained_stoch = eval_policy(
             model,
@@ -2199,6 +2269,7 @@ def main() -> None:
             deterministic=False,
             debug_energy=args.debug_eval_energy,
             policy_mode="model",
+            eval_max_on_edges=args.eval_max_on_edges,
         )
         random_masked_stoch = eval_policy(
             model,
@@ -2209,6 +2280,7 @@ def main() -> None:
             deterministic=False,
             debug_energy=args.debug_eval_energy,
             policy_mode="random_masked",
+            eval_max_on_edges=args.eval_max_on_edges,
         )
         noop_det = eval_policy(
             None,
@@ -2219,6 +2291,7 @@ def main() -> None:
             deterministic=True,
             debug_energy=args.debug_eval_energy,
             policy_mode="noop",
+            eval_max_on_edges=args.eval_max_on_edges,
         )
 
         def _better_with_tolerance(

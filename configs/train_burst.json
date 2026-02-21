@@ -22,7 +22,7 @@
     "traffic_scenario_intensity": 1.0,
     "traffic_scenario_duration": 1.0,
     "traffic_scenario_frequency": 1.0,
-    "energy_weight": 1200.0,
+    "energy_weight": 2400.0,
     "drop_penalty_lambda": 8.0,
     "normalize_drop": true,
     "qos_target_norm_drop": 0.072,
