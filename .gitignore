@@ -33,3 +33,8 @@ __MACOSX/
 
 *.joblib
 experiments/prune_log_*.txt
+
+# Local generated outputs
+artifacts/locked/
+artifacts/sweeps/
+models/
