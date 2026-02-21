@@ -16,6 +16,8 @@ dependencies = [
   "pandas>=2.0",
   "plotly>=5.0",
   "streamlit>=1.30",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
 ]
 
 [tool.setuptools.packages.find]

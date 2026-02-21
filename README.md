@@ -82,3 +82,23 @@ normal     extreme   1   ...
 burst      extreme   1   ...
 hotspot    extreme   1   ...
 ```
+
+## Metrics API
+
+Run the backend API:
+
+```bash
+uvicorn api_app:app --reload --port 8000
+```
+
+Example calls:
+
+```bash
+curl "http://localhost:8000/api/runs?limit=5"
+curl "http://localhost:8000/api/runs/<run_id>/summary"
+curl "http://localhost:8000/api/aggregate?tag=matrix_v4&group_by=policy,scenario"
+```
+
+Notes:
+- CORS allows Vite dev origins `http://localhost:5173` and `http://127.0.0.1:5173`.
+- `/api/aggregate` computes `*_std` using population standard deviation (`statistics.pstdev`).
