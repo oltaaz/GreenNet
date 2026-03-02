@@ -2,6 +2,28 @@
 
 Greennet training is continuous, so we keep curated runs as thesis evidence while pruning bulk artifacts. The goal is to preserve configs, logs, and robustness outputs for traceability while safely removing large model files or tiny throwaway runs.
 
+## Locked scenario artifacts
+Use scenario-specific locked folders for reproducibility:
+
+- `artifacts/locked/normal/<RUN_ID>/`
+- `artifacts/locked/burst/<RUN_ID>/`
+- `artifacts/locked/hotspot/<RUN_ID>/`
+
+Each locked folder should include:
+
+- `ppo_greennet.zip`
+- `env_config.json`
+- `train_config.json`
+- `eval_*.txt` logs (e.g. off0/off2/off4 matrix outputs)
+- optional robustness CSV/plots
+
+Helper commands:
+
+```bash
+scripts/lock_run.sh --scenario normal --run-id <RUN_ID>
+scripts/eval_matrix.sh --model runs/<RUN_ID>/ppo_greennet.zip --lock-scenario normal --episodes 10
+```
+
 ## Generate training history
 Create an evidence summary across all runs:
 

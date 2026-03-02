@@ -1,0 +1,4 @@
+scenario,off_level,PASS,Δenergy,Δdropped,Δreward,on_edges_mean,toggles_applied_mean,blocked_on_actions_mean,cap_used,seeds,episodes,log_file
+hotspot,off0,PASS,+0.000000,+0.000,+0.000,18.00,0.00,0.00,16,10-19,100,artifacts/traffic_verify/20260220_matrix/full_off0_hotspot_cap16_s10-19_e100.log
+hotspot,off2,PASS,-0.000984,+0.010,-1.009,15.98,3.55,50.33,16,10-19,100,artifacts/traffic_verify/20260220_matrix/full_off2_hotspot_cap16_s10-19_e100.log
+hotspot,off4,PASS,+0.109038,-20.308,+13.259,15.96,3.87,35.01,16,10-19,100,artifacts/traffic_verify/20260220_matrix/full_off4_hotspot_cap16_s10-19_e100.log
