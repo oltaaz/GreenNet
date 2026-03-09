@@ -72,14 +72,14 @@ function pickEdges(edges: RenderEdge[], count: number, seedKey: string): RenderE
   return results;
 }
 
-function packetCountFromDelta(delta: number, fallback: number, minCount: number, maxCount: number): number {
-  if (!Number.isFinite(delta)) {
+function packetCountFromValue(value: number, fallback: number, minCount: number, maxCount: number): number {
+  if (!Number.isFinite(value)) {
     return fallback;
   }
-  if (delta <= 0) {
+  if (value <= 0) {
     return fallback;
   }
-  return Math.max(minCount, Math.min(maxCount, Math.round(delta / 3)));
+  return Math.max(minCount, Math.min(maxCount, Math.round(value / 3)));
 }
 
 export default function SimulatorCanvas({
@@ -275,8 +275,8 @@ export default function SimulatorCanvas({
       const activeEdges = edges.filter((edge) => edge.on);
       const inactiveEdges = edges.filter((edge) => !edge.on);
 
-      const deliveredDelta = Math.max(0, step.metrics.delivered - previous.metrics.delivered);
-      const droppedDelta = Math.max(0, step.metrics.dropped - previous.metrics.dropped);
+      const deliveredStep = Math.max(0, step.metrics.delivered);
+      const droppedStep = Math.max(0, step.metrics.dropped);
 
       const packets: RenderPacket[] = [];
 
@@ -296,7 +296,10 @@ export default function SimulatorCanvas({
 
           packets.push({
             edge,
-            progress: typeof packet.progress === "number" ? packet.progress : (phase + index * 0.03) % 1,
+            progress:
+              typeof packet.progress === "number"
+                ? (packet.progress + phase * (kind === "dropped" ? 0.52 : kind === "rerouted" ? 0.8 : 0.92)) % 1
+                : (phase + index * 0.03) % 1,
             kind,
             reverse: index % 2 === 0,
             size: kind === "delivered" ? 2.4 : 2.1,
@@ -305,11 +308,11 @@ export default function SimulatorCanvas({
       } else {
         const deliveredEdges = pickEdges(
           activeEdges.length > 0 ? activeEdges : edges,
-          packetCountFromDelta(deliveredDelta, Math.max(3, Math.round(activeEdges.length * 0.45)), 3, 28),
+          packetCountFromValue(deliveredStep, Math.max(3, Math.round(activeEdges.length * 0.45)), 3, 28),
           `${step.t}-ok`,
         );
 
-        const droppedCount = packetCountFromDelta(droppedDelta, 0, 0, 14);
+        const droppedCount = packetCountFromValue(droppedStep, 0, 0, 14);
         const reroutedCount =
           inactiveEdges.length > 0 && activeEdges.length > 0 ? Math.min(droppedCount, Math.ceil(droppedCount * 0.55)) : 0;
         const hardDropCount = droppedCount - reroutedCount;
@@ -449,7 +452,7 @@ export default function SimulatorCanvas({
         hudY + 62,
       );
       context.fillText(
-        `Delivered +${deliveredDelta.toFixed(0)} | Dropped +${droppedDelta.toFixed(0)} | Carbon ${step.metrics.carbon_g.toFixed(2)} g`,
+        `Delivered ${deliveredStep.toFixed(0)} | Dropped ${droppedStep.toFixed(0)} | Carbon ${step.metrics.carbon_g.toFixed(2)} g`,
         hudX + 10,
         hudY + 82,
       );
@@ -468,7 +471,7 @@ export default function SimulatorCanvas({
 
       context.fillStyle = "rgba(179,205,235,0.95)";
       context.font = "11px Inter, system-ui";
-      context.fillText("Link Power", width - 72, meterY + meterH + 16);
+      context.fillText("Link Activity", width - 76, meterY + meterH + 16);
 
       context.fillStyle = "rgba(4,16,33,0.68)";
       context.beginPath();

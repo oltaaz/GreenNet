@@ -1,10 +1,10 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import ChartCard from "../components/ChartCard";
 import { ErrorNotice, InfoNotice, LoadingNotice } from "../components/StatusState";
-import { getRunPerStep, listRuns, startRun } from "../lib/api";
-import { chartRows, compareSummary, fmt, formatPolicyLabel, latestRunByPolicy, normalizePerStep } from "../lib/data";
+import { getRunPerStep, getRunSummary, listRuns, startRun } from "../lib/api";
+import { chartRows, compareSummary, fmt, formatPolicyLabel, inferPolicy, normalizePerStep } from "../lib/data";
 import { isDemoRunId } from "../lib/demo";
-import type { PerStepRow, RunSummary } from "../lib/types";
+import type { PerStepRow, RunOverallSummary, RunSummary } from "../lib/types";
 
 const policyColors: Record<string, string> = {
   baseline: "#5dc8ff",
@@ -21,6 +21,7 @@ export default function ComparePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [rowsByPolicy, setRowsByPolicy] = useState<Record<string, PerStepRow[]>>({});
+  const [summariesByPolicy, setSummariesByPolicy] = useState<Record<string, RunOverallSummary | null>>({});
 
   const demoMode = runs.length > 0 && runs.every((run) => isDemoRunId(run.run_id));
 
@@ -49,7 +50,12 @@ export default function ComparePage() {
       const started = await startRun({ policy, scenario, seed, steps });
       return started.run_id;
     } catch {
-      const fallbackRun = latestRunByPolicy(runs, policy);
+      const fallbackRun = runs.find(
+        (run) =>
+          inferPolicy(run) === policy &&
+          (run.scenario ?? "").toLowerCase() === scenario.toLowerCase() &&
+          run.seed === seed,
+      );
       return fallbackRun?.run_id ?? null;
     }
   }
@@ -63,15 +69,16 @@ export default function ComparePage() {
         POLICY_LIST.map(async (policy) => {
           const runId = await resolveRunId(policy);
           if (!runId) {
-            return [policy, [] as PerStepRow[]] as const;
+            throw new Error(`No ${formatPolicyLabel(policy)} run is available for scenario=${scenario}, seed=${seed}`);
           }
 
-          const rows = normalizePerStep(await getRunPerStep(runId));
-          return [policy, rows] as const;
+          const [rowsRaw, summary] = await Promise.all([getRunPerStep(runId), getRunSummary(runId)]);
+          return [policy, { rows: normalizePerStep(rowsRaw), summary }] as const;
         }),
       );
 
-      setRowsByPolicy(Object.fromEntries(entries));
+      setRowsByPolicy(Object.fromEntries(entries.map(([policy, value]) => [policy, value.rows])));
+      setSummariesByPolicy(Object.fromEntries(entries.map(([policy, value]) => [policy, value.summary])));
     } catch (apiError) {
       setError(apiError instanceof Error ? apiError.message : "Comparison run failed");
     } finally {
@@ -83,9 +90,9 @@ export default function ComparePage() {
     () =>
       POLICY_LIST.map((policy) => ({
         policy,
-        summary: compareSummary(rowsByPolicy[policy] ?? []),
+        summary: compareSummary(rowsByPolicy[policy] ?? [], summariesByPolicy[policy]),
       })),
-    [rowsByPolicy],
+    [rowsByPolicy, summariesByPolicy],
   );
 
   const mergedData = useMemo(() => {
@@ -159,22 +166,24 @@ export default function ComparePage() {
             <thead>
               <tr>
                 <th>Policy</th>
-                <th>energy_kwh</th>
-                <th>carbon_g</th>
-                <th>avg_delay_ms</th>
-                <th>dropped</th>
-                <th>delivered</th>
-                <th>active_ratio (%)</th>
-                <th>reward</th>
+                <th>energy_kwh_total</th>
+                <th>carbon_g_total</th>
+                <th>path_latency_ms_mean</th>
+                <th>packets_sent_total</th>
+                <th>dropped_total</th>
+                <th>delivered_total</th>
+                <th>active_ratio_mean (%)</th>
+                <th>reward_total</th>
               </tr>
             </thead>
             <tbody>
               {summaries.map(({ policy, summary }) => (
                 <tr key={policy}>
                   <td>{formatPolicyLabel(policy)}</td>
-                  <td>{fmt(summary.energy_kwh)}</td>
+                  <td>{fmt(summary.energy_kwh, 3)}</td>
                   <td>{fmt(summary.carbon_g)}</td>
                   <td>{fmt(summary.avg_delay_ms)}</td>
+                  <td>{fmt(summary.packets_sent)}</td>
                   <td>{fmt(summary.dropped)}</td>
                   <td>{fmt(summary.delivered)}</td>
                   <td>{fmt(summary.active_ratio, 1)}</td>
@@ -188,8 +197,8 @@ export default function ComparePage() {
 
       <section className="compare-charts">
         <ChartCard
-          title="Energy Overlay"
-          subtitle="kWh"
+          title="Step Energy Overlay"
+          subtitle="kWh per step"
           data={mergedData}
           lines={POLICY_LIST.map((policy) => ({
             dataKey: `${policy}_energy`,
@@ -199,7 +208,7 @@ export default function ComparePage() {
         />
 
         <ChartCard
-          title="Drop Rate Overlay"
+          title="Dropped Packets Overlay"
           subtitle="packets"
           data={mergedData}
           lines={POLICY_LIST.map((policy) => ({

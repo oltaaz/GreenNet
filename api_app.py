@@ -1,16 +1,25 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import re
 import subprocess
+import sys
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from statistics import mean, pstdev
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+import networkx as nx
+
+from greennet.env import GreenNetEnv
+from greennet.utils.config import load_env_config_from_run
 
 app = FastAPI(title="GreenNet Metrics API")
 
@@ -24,16 +33,19 @@ if (REPO_ROOT / "runs").exists() is False and (REPO_ROOT / "results").exists() i
     REPO_ROOT = THIS_FILE_DIR.parent
 RESULTS_DIR = REPO_ROOT / "results"
 RUNS_DIR = REPO_ROOT / "runs"
+LOCKED_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "locked"
 
 BaseChoice = Literal["results", "runs", "both"]
 GROUP_BY_FIELDS = {"policy", "scenario", "tag", "topology_seed", "deterministic"}
 KEY_FILES = ["per_step.csv", "summary.json", "run_meta.json", "env_config.json"]
+OFFICIAL_LOCKED_SCENARIOS = ("normal", "burst", "hotspot")
 HIGHLIGHT_FIELDS = [
     "reward_total_mean",
     "energy_kwh_total_mean",
     "dropped_total_mean",
     "toggles_total_mean",
 ]
+PACKET_EVENT_LIMIT = 40
 INT_COLUMNS = {
     "t",
     "step",
@@ -77,13 +89,30 @@ FLOAT_COLUMNS = {
     "qos_excess",
 }
 RUN_PREFIX_RE = re.compile(r"^(?P<stamp>\d{8}_\d{6})")
+RESULTS_SAVED_RE = re.compile(r"^\[run_experiment\] results saved to (?P<path>.+)$", re.MULTILINE)
+DASHBOARD_RUN_TAG = "dashboard"
+LOCKED_SUMMARY_RE = re.compile(
+    r"^\[summary:[^\]]+\] trained\(det\) vs noop: better=(?P<better>YES|NO) "
+    r"Δreward=(?P<delta_reward>[-+0-9.]+) "
+    r"Δenergy=(?P<delta_energy>[-+0-9.]+) "
+    r"Δdropped=(?P<delta_dropped>[-+0-9.]+) "
+    r"\((?P<reason>.+)\)$"
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1):\d+$",
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class StartRunRequest(BaseModel):
+    policy: str = Field(min_length=1)
+    scenario: str = Field(min_length=1)
+    seed: int
+    steps: int = Field(ge=1, le=5000)
 
 
 def _to_int(value: Any) -> Optional[int]:
@@ -130,6 +159,810 @@ def load_json(path: Path) -> Optional[Dict[str, Any]]:
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _edge_id(source: Any, target: Any) -> str:
+    source_id = str(source)
+    target_id = str(target)
+    return f"{source_id}__{target_id}" if source_id < target_id else f"{target_id}__{source_id}"
+
+
+def _node_id(node: Any) -> str:
+    try:
+        return str(int(node))
+    except (TypeError, ValueError):
+        return str(node)
+
+
+def _normalize_layout(layout: Dict[Any, Any]) -> Dict[str, Tuple[float, float]]:
+    if not layout:
+        return {}
+
+    xs = [float(point[0]) for point in layout.values()]
+    ys = [float(point[1]) for point in layout.values()]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    span_x = max(max_x - min_x, 1e-9)
+    span_y = max(max_y - min_y, 1e-9)
+
+    normalized: Dict[str, Tuple[float, float]] = {}
+    for node, point in layout.items():
+        x = 0.1 + 0.8 * ((float(point[0]) - min_x) / span_x)
+        y = 0.12 + 0.76 * ((float(point[1]) - min_y) / span_y)
+        normalized[_node_id(node)] = (x, y)
+    return normalized
+
+
+def _off_level_rank(value: Any) -> int:
+    match = re.match(r"^off(?P<count>\d+)$", str(value or "").strip().lower())
+    if not match:
+        return -1
+    return int(match.group("count"))
+
+
+def _read_text_if_exists(path: Path) -> Optional[str]:
+    if not path.exists():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _read_locked_note(bundle_dir: Path) -> Optional[str]:
+    text = _read_text_if_exists(bundle_dir / "notes.md")
+    if not text:
+        return None
+
+    lines: List[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("- "):
+            line = line[2:].strip()
+        lines.append(line)
+    return " ".join(lines) if lines else None
+
+
+@lru_cache(maxsize=16)
+def _read_locked_eval_rows(bundle_dir_str: str, filename: str) -> Tuple[Dict[str, Any], ...]:
+    bundle_dir = Path(bundle_dir_str)
+    csv_path = bundle_dir / filename
+    if not csv_path.exists():
+        return tuple()
+
+    rows: List[Dict[str, Any]] = []
+    with csv_path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            rows.append(
+                {
+                    "scenario": str(row.get("scenario") or "").strip().lower(),
+                    "off_level": str(row.get("off_level") or "").strip().lower(),
+                    "pass": str(row.get("PASS") or "").strip().upper() == "PASS",
+                    "delta_energy_kwh": _to_float(row.get("Δenergy")),
+                    "delta_dropped": _to_float(row.get("Δdropped")),
+                    "delta_reward": _to_float(row.get("Δreward")),
+                    "on_edges_mean": _to_float(row.get("on_edges_mean")),
+                    "toggles_applied_mean": _to_float(row.get("toggles_applied_mean")),
+                    "blocked_on_actions_mean": _to_float(row.get("blocked_on_actions_mean")),
+                    "cap_used": (str(row.get("cap_used") or "").strip() or None),
+                    "seeds": (str(row.get("seeds") or "").strip() or None),
+                    "episodes": _to_int(row.get("episodes")),
+                    "log_file": (str(row.get("log_file") or "").strip() or None),
+                }
+            )
+    return tuple(rows)
+
+
+def _select_locked_summary_row(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not rows:
+        return None
+
+    ranked = sorted(
+        rows,
+        key=lambda row: (
+            0 if bool(row.get("pass")) else 1,
+            -_off_level_rank(row.get("off_level")),
+            str(row.get("off_level") or ""),
+        ),
+    )
+    return ranked[0]
+
+
+@lru_cache(maxsize=16)
+def _read_locked_log_stats(log_path_str: str) -> Dict[str, Any]:
+    log_path = Path(log_path_str)
+    text = _read_text_if_exists(log_path)
+    if not text:
+        return {}
+
+    stat_patterns = {
+        "reward_mean": re.compile(r"^episode_reward:\s+mean=([-+0-9.]+)\s+std="),
+        "energy_kwh_mean": re.compile(r"^energy_kwh:\s+mean=([-+0-9.]+)\s+std="),
+        "dropped_mean": re.compile(r"^dropped:\s+mean=([-+0-9.]+)\s+std="),
+        "delivered_mean": re.compile(r"^delivered:\s+mean=([-+0-9.]+)\s+std="),
+        "toggles_applied_mean": re.compile(r"^toggles applied mean=([-+0-9.]+)\s+reverted mean="),
+        "blocked_on_actions_mean": re.compile(
+            r"^on-edge budget\s+max_on_edges=\d+\s+blocked_on_actions_mean=([-+0-9.]+)"
+        ),
+        "on_edges_mean": re.compile(r"^edge state\s+on_edges_mean=([-+0-9.]+)\s+off_edges_mean="),
+    }
+
+    stats: Dict[str, Any] = {"trained_det": {}, "noop_det": {}}
+    section: Optional[str] = None
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("=== Evaluation: trained (det,"):
+            section = "trained_det"
+            continue
+        if line.startswith("=== Evaluation: always_noop (det,"):
+            section = "noop_det"
+            continue
+        if line.startswith("=== Evaluation: "):
+            section = None
+            continue
+
+        if stats.get("delta_summary") is None:
+            summary_match = LOCKED_SUMMARY_RE.match(line)
+            if summary_match:
+                stats["delta_summary"] = {
+                    "better": summary_match.group("better") == "YES",
+                    "reason": summary_match.group("reason"),
+                    "delta_reward": _to_float(summary_match.group("delta_reward")),
+                    "delta_energy_kwh": _to_float(summary_match.group("delta_energy")),
+                    "delta_dropped": _to_float(summary_match.group("delta_dropped")),
+                }
+
+        if section not in {"trained_det", "noop_det"}:
+            continue
+
+        bucket = stats[section]
+        for key, pattern in stat_patterns.items():
+            match = pattern.match(line)
+            if match:
+                bucket[key] = float(match.group(1))
+
+    for key in ("trained_det", "noop_det"):
+        bucket = stats.get(key)
+        if not isinstance(bucket, dict) or not bucket:
+            continue
+
+        delivered_mean = _to_float(bucket.get("delivered_mean")) or 0.0
+        dropped_mean = _to_float(bucket.get("dropped_mean")) or 0.0
+        sent_mean = delivered_mean + dropped_mean
+        bucket["sent_mean"] = sent_mean
+        bucket["drop_rate"] = (dropped_mean / sent_mean) if sent_mean > 0 else 0.0
+
+    return stats
+
+
+def _resolve_locked_log_path(bundle_dir: Path, log_file: Optional[str]) -> Optional[Path]:
+    if not log_file:
+        return None
+
+    candidate = bundle_dir / Path(log_file).name
+    if candidate.exists():
+        return candidate
+
+    repo_candidate = REPO_ROOT / log_file
+    if repo_candidate.exists():
+        return repo_candidate
+
+    return None
+
+
+@lru_cache(maxsize=8)
+def _official_locked_result_for_scenario(scenario: str) -> Optional[Dict[str, Any]]:
+    scenario_key = scenario.strip().lower()
+    if scenario_key not in OFFICIAL_LOCKED_SCENARIOS:
+        return None
+
+    scenario_dir = LOCKED_ARTIFACTS_DIR / scenario_key
+    if not scenario_dir.exists():
+        return None
+
+    bundle_dirs = sorted(path for path in scenario_dir.iterdir() if path.is_dir())
+    if not bundle_dirs:
+        return None
+
+    bundle_dir = bundle_dirs[-1]
+    eval_rows = list(_read_locked_eval_rows(str(bundle_dir), "eval_summary.csv"))
+    selected_row = _select_locked_summary_row(eval_rows)
+
+    log_path = _resolve_locked_log_path(bundle_dir, None if selected_row is None else selected_row.get("log_file"))
+    log_stats = _read_locked_log_stats(str(log_path)) if log_path is not None else {}
+
+    return {
+        "scenario": scenario_key,
+        "bundle_id": bundle_dir.name,
+        "bundle_path": str(bundle_dir.relative_to(REPO_ROOT)),
+        "pass_all": all(bool(row.get("pass")) for row in eval_rows) if eval_rows else None,
+        "summary": selected_row,
+        "eval_rows": eval_rows,
+        "trained_det": log_stats.get("trained_det"),
+        "noop_det": log_stats.get("noop_det"),
+        "delta_summary": log_stats.get("delta_summary"),
+        "notes": _read_locked_note(bundle_dir),
+    }
+
+
+@lru_cache(maxsize=64)
+def _read_all_per_step_rows(run_dir_str: str) -> Tuple[Dict[str, Any], ...]:
+    run_dir = Path(run_dir_str)
+    csv_path = run_dir / "per_step.csv"
+    if not csv_path.exists():
+        return tuple()
+
+    rows: List[Dict[str, Any]] = []
+    with csv_path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            rows.append({k: _coerce_per_step_value(k, v) for k, v in row.items()})
+    return tuple(rows)
+
+
+def _mean_or_zero(values: List[float]) -> float:
+    return float(mean(values)) if values else 0.0
+
+
+def _std_or_zero(values: List[float]) -> float:
+    return float(pstdev(values)) if len(values) > 1 else 0.0
+
+
+def _row_float(row: Dict[str, Any], key: str) -> float:
+    return float(_to_float(row.get(key)) or 0.0)
+
+
+@lru_cache(maxsize=64)
+def _recompute_summary_from_per_step(run_dir_str: str) -> Optional[Dict[str, Any]]:
+    raw_rows = list(_read_all_per_step_rows(run_dir_str))
+    if not raw_rows:
+        return None
+
+    episodes: Dict[int, List[Dict[str, Any]]] = {}
+    for row in raw_rows:
+        episode = _to_int(row.get("episode"))
+        episodes.setdefault(episode if episode is not None else 0, []).append(row)
+
+    episode_summaries: List[Dict[str, Any]] = []
+    for episode, rows in sorted(episodes.items(), key=lambda item: item[0]):
+        avg_path_latency_values = [
+            float(value)
+            for value in (_to_float(row.get("avg_path_latency_ms")) for row in rows)
+            if value is not None
+        ]
+
+        episode_summaries.append(
+            {
+                "episode": int(episode),
+                "steps": int(len(rows)),
+                "reward_total": float(sum(_row_float(row, "reward") for row in rows)),
+                "delivered_total": float(sum(_row_float(row, "delivered") for row in rows)),
+                "dropped_total": float(sum(_row_float(row, "dropped") for row in rows)),
+                "energy_kwh_total": float(sum(_row_float(row, "energy_kwh") for row in rows)),
+                "carbon_g_total": float(sum(_row_float(row, "carbon_g") for row in rows)),
+                "avg_utilization_mean": _mean_or_zero([_row_float(row, "avg_utilization") for row in rows]),
+                "active_ratio_mean": _mean_or_zero([_row_float(row, "active_ratio") for row in rows]),
+                "avg_delay_ms_mean": _mean_or_zero([_row_float(row, "avg_delay_ms") for row in rows]),
+                "avg_path_latency_ms_mean": (
+                    _mean_or_zero(avg_path_latency_values) if avg_path_latency_values else None
+                ),
+                "toggles_applied_total": int(sum(1 for row in rows if _to_bool(row.get("toggle_applied")) is True)),
+                "toggles_reverted_total": int(sum(1 for row in rows if _to_bool(row.get("toggle_reverted")) is True)),
+            }
+        )
+        episode_summaries[-1]["toggles_total"] = (
+            int(episode_summaries[-1]["toggles_applied_total"]) + int(episode_summaries[-1]["toggles_reverted_total"])
+        )
+
+    overall: Dict[str, Any] = {
+        "episodes": len(episode_summaries),
+        "reward_total_mean": _mean_or_zero([float(item["reward_total"]) for item in episode_summaries]),
+        "reward_total_std": _std_or_zero([float(item["reward_total"]) for item in episode_summaries]),
+        "delivered_total_mean": _mean_or_zero([float(item["delivered_total"]) for item in episode_summaries]),
+        "delivered_total_std": _std_or_zero([float(item["delivered_total"]) for item in episode_summaries]),
+        "dropped_total_mean": _mean_or_zero([float(item["dropped_total"]) for item in episode_summaries]),
+        "dropped_total_std": _std_or_zero([float(item["dropped_total"]) for item in episode_summaries]),
+        "energy_kwh_total_mean": _mean_or_zero([float(item["energy_kwh_total"]) for item in episode_summaries]),
+        "energy_kwh_total_std": _std_or_zero([float(item["energy_kwh_total"]) for item in episode_summaries]),
+        "carbon_g_total_mean": _mean_or_zero([float(item["carbon_g_total"]) for item in episode_summaries]),
+        "carbon_g_total_std": _std_or_zero([float(item["carbon_g_total"]) for item in episode_summaries]),
+        "steps_mean": _mean_or_zero([float(item["steps"]) for item in episode_summaries]),
+        "steps_std": _std_or_zero([float(item["steps"]) for item in episode_summaries]),
+        "avg_utilization_mean": _mean_or_zero([float(item["avg_utilization_mean"]) for item in episode_summaries]),
+        "active_ratio_mean": _mean_or_zero([float(item["active_ratio_mean"]) for item in episode_summaries]),
+        "avg_delay_ms_mean": _mean_or_zero([float(item["avg_delay_ms_mean"]) for item in episode_summaries]),
+        "toggles_total_mean": _mean_or_zero([float(item["toggles_total"]) for item in episode_summaries]),
+        "toggles_total_std": _std_or_zero([float(item["toggles_total"]) for item in episode_summaries]),
+        "toggles_applied_mean": _mean_or_zero([float(item["toggles_applied_total"]) for item in episode_summaries]),
+        "toggles_applied_std": _std_or_zero([float(item["toggles_applied_total"]) for item in episode_summaries]),
+        "toggles_reverted_mean": _mean_or_zero([float(item["toggles_reverted_total"]) for item in episode_summaries]),
+        "toggles_reverted_std": _std_or_zero([float(item["toggles_reverted_total"]) for item in episode_summaries]),
+    }
+
+    avg_path_latency_episode_values = [
+        float(item["avg_path_latency_ms_mean"])
+        for item in episode_summaries
+        if item.get("avg_path_latency_ms_mean") is not None
+    ]
+    if avg_path_latency_episode_values:
+        overall["avg_path_latency_ms_mean"] = _mean_or_zero(avg_path_latency_episode_values)
+        overall["avg_path_latency_ms_std"] = _std_or_zero(avg_path_latency_episode_values)
+
+    return {"episodes": episode_summaries, "overall": overall}
+
+
+def _summary_payload_for_run(run_dir: Path) -> Dict[str, Any]:
+    summary_path = run_dir / "summary.json"
+    stored = load_json(summary_path) or {}
+    recomputed = _recompute_summary_from_per_step(str(run_dir))
+    if recomputed is None:
+        return stored
+
+    payload = dict(stored)
+    stored_overall = payload.get("overall") if isinstance(payload.get("overall"), dict) else {}
+    payload["overall"] = {**stored_overall, **recomputed["overall"]}
+    payload["episodes"] = recomputed["episodes"]
+    return payload
+
+
+@lru_cache(maxsize=64)
+def _build_topology_bundle(run_dir_str: str) -> Dict[str, Any]:
+    run_dir = Path(run_dir_str)
+    cfg = load_env_config_from_run(run_dir, verbose=False)
+    parsed = parse_run_dir_name(run_dir.name)
+    meta = load_json(run_dir / "run_meta.json") or {}
+
+    topology_seed = _to_int(meta.get("topology_seed"))
+    if topology_seed is None:
+        topology_seed = _to_int(parsed.get("topology_seed"))
+    if topology_seed is None:
+        topology_seed = _to_int(getattr(cfg, "topology_seed", None))
+    if topology_seed is None:
+        topology_seed = 0
+
+    reset_seed = _to_int(meta.get("seed"))
+    if reset_seed is None:
+        reset_seed = _to_int(parsed.get("seed"))
+    if reset_seed is None:
+        reset_seed = int(topology_seed)
+
+    if hasattr(cfg, "topology_seed"):
+        cfg.topology_seed = int(topology_seed)
+
+    env = GreenNetEnv(config=cfg)
+    try:
+        env.reset(seed=int(reset_seed))
+        graph = env.simulator.graph if env.simulator is not None else getattr(env, "_base_graph", None)
+        if graph is None:
+            raise RuntimeError(f"Could not build topology for run: {run_dir.name}")
+
+        raw_layout = nx.spring_layout(graph, seed=int(topology_seed)) if graph.number_of_nodes() > 0 else {}
+        layout = _normalize_layout(raw_layout)
+
+        nodes: List[Dict[str, Any]] = []
+        for node in graph.nodes():
+            node_id = _node_id(node)
+            x, y = layout.get(node_id, (0.5, 0.5))
+            nodes.append({"id": node_id, "label": node_id, "x": x, "y": y})
+
+        edges: List[Dict[str, Any]] = []
+        initial_links: Dict[str, bool] = {}
+        for source, target in graph.edges():
+            source_id = _node_id(source)
+            target_id = _node_id(target)
+            edge_key = _edge_id(source_id, target_id)
+            edges.append({"id": edge_key, "source": source_id, "target": target_id})
+            initial_links[edge_key] = bool(graph.edges[source, target].get("active", True))
+
+        action_edges = [(_node_id(source), _node_id(target)) for (source, target) in getattr(env, "edge_list", [])]
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "initial_links": initial_links,
+            "action_edges": action_edges,
+        }
+    finally:
+        env.close()
+
+
+def _stable_ratio(value: str) -> float:
+    digest = hashlib.sha1(value.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") / float(1 << 64)
+
+
+def _first_episode_rows(raw_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    first_episode = next((row.get("episode") for row in raw_rows if row.get("episode") is not None), None)
+    if first_episode is None:
+        return raw_rows
+    return [row for row in raw_rows if row.get("episode") == first_episode]
+
+
+def _resolve_replay_seed(run_dir: Path, episode_rows: List[Dict[str, Any]], cfg: Any) -> int:
+    meta = load_json(run_dir / "run_meta.json") or {}
+    parsed = parse_run_dir_name(run_dir.name)
+    episode_seed = _to_int(episode_rows[0].get("episode_seed")) if episode_rows else None
+    if episode_seed is not None:
+        return int(episode_seed)
+
+    for candidate in (meta.get("eval_seed"), meta.get("seed"), parsed.get("seed"), getattr(cfg, "topology_seed", None)):
+        parsed_candidate = _to_int(candidate)
+        if parsed_candidate is not None:
+            return int(parsed_candidate)
+    return 0
+
+
+def _resolve_replay_traffic_seed(run_dir: Path, episode_rows: List[Dict[str, Any]], cfg: Any) -> Optional[int]:
+    meta = load_json(run_dir / "run_meta.json") or {}
+    episode_idx = _to_int(episode_rows[0].get("episode")) if episode_rows else None
+    if episode_idx is None:
+        episode_idx = 0
+
+    for candidate in (meta.get("traffic_seed_base"), meta.get("traffic_seed"), getattr(cfg, "traffic_seed", None)):
+        parsed_candidate = _to_int(candidate)
+        if parsed_candidate is not None:
+            return int(parsed_candidate) + int(episode_idx)
+    return None
+
+
+def _links_on_from_env(env: GreenNetEnv) -> Dict[str, bool]:
+    if env.simulator is None:
+        return {}
+
+    links: Dict[str, bool] = {}
+    for source, target in env.simulator.graph.edges():
+        edge_key = env.simulator._edge_key(int(source), int(target))
+        links[_edge_id(_node_id(source), _node_id(target))] = bool(env.simulator.active.get(edge_key, True))
+    return links
+
+
+def _distribute_budget(weights: List[float], budget: int) -> List[int]:
+    counts = [0] * len(weights)
+    if budget <= 0 or not weights:
+        return counts
+
+    cleaned = [max(0.0, float(weight)) for weight in weights]
+    total = sum(cleaned)
+    if total <= 0.0:
+        return counts
+
+    exact = [(budget * weight / total) if weight > 0.0 else 0.0 for weight in cleaned]
+    positive_indices = [index for index, weight in enumerate(cleaned) if weight > 0.0]
+
+    for index in positive_indices:
+        counts[index] = int(exact[index])
+
+    if budget >= len(positive_indices):
+        for index in positive_indices:
+            if counts[index] == 0:
+                counts[index] = 1
+
+    used = sum(counts)
+    if used > budget:
+        trim_order = sorted(positive_indices, key=lambda index: (exact[index] - counts[index], counts[index]))
+        for index in trim_order:
+            while used > budget and counts[index] > 1:
+                counts[index] -= 1
+                used -= 1
+        if used > budget:
+            for index in trim_order:
+                while used > budget and counts[index] > 0:
+                    counts[index] -= 1
+                    used -= 1
+    elif used < budget and positive_indices:
+        add_order = sorted(positive_indices, key=lambda index: exact[index] - counts[index], reverse=True)
+        pointer = 0
+        while used < budget:
+            index = add_order[pointer % len(add_order)]
+            counts[index] += 1
+            used += 1
+            pointer += 1
+
+    return counts
+
+
+def _fallback_edge_key(env: GreenNetEnv, source: int, target: int) -> Optional[Tuple[int, int]]:
+    if env.simulator is None:
+        return None
+
+    graph = env.simulator.graph
+    for node in (source, target):
+        if graph.has_node(node):
+            neighbors = sorted(graph.neighbors(node))
+            if neighbors:
+                return env.simulator._edge_key(int(node), int(neighbors[0]))
+
+    first_edge = next(iter(graph.edges()), None)
+    if first_edge is None:
+        return None
+    return env.simulator._edge_key(int(first_edge[0]), int(first_edge[1]))
+
+
+def _packet_event(edge_key: Tuple[int, int], *, packet_id: str, status: str, progress_key: str) -> Dict[str, Any]:
+    source_id = _node_id(edge_key[0])
+    target_id = _node_id(edge_key[1])
+    return {
+        "packet_id": packet_id,
+        "edge_id": _edge_id(source_id, target_id),
+        "source": source_id,
+        "target": target_id,
+        "progress": 0.08 + 0.84 * _stable_ratio(progress_key),
+        "status": status,
+    }
+
+
+def _packet_events_from_env_step(env: GreenNetEnv, info: Dict[str, Any], step_t: int) -> List[Dict[str, Any]]:
+    simulator = env.simulator
+    if simulator is None:
+        return []
+
+    raw_flows = info.get("flows") or ()
+    flows = [simulator._normalize_flow(flow) for flow in raw_flows]
+    if not flows:
+        return []
+
+    routing_graph = simulator._active_routing_graph()
+    desired_by_edge: Dict[Tuple[int, int], float] = {}
+    allocations: List[Dict[str, Any]] = []
+    unrouted: List[Dict[str, Any]] = []
+
+    for flow_index, flow in enumerate(flows):
+        source = int(getattr(flow, "source"))
+        destination = int(getattr(flow, "destination"))
+        demand = max(0.0, float(getattr(flow, "demand", 0.0)))
+        if source == destination or demand <= 0.0:
+            continue
+
+        paths, weights = simulator._resolve_paths(source, destination, routing_graph)
+        if not paths:
+            unrouted.append(
+                {
+                    "flow_index": flow_index,
+                    "source": source,
+                    "destination": destination,
+                    "demand": demand,
+                }
+            )
+            continue
+
+        for path_index, (path, weight) in enumerate(zip(paths, weights)):
+            desired = demand * max(0.0, float(weight))
+            edge_keys = simulator._path_edges(path)
+            if desired <= 0.0 or not edge_keys:
+                continue
+
+            allocations.append(
+                {
+                    "flow_index": flow_index,
+                    "path_index": path_index,
+                    "source": source,
+                    "destination": destination,
+                    "desired": desired,
+                    "edge_keys": edge_keys,
+                }
+            )
+            for edge_key in edge_keys:
+                desired_by_edge[edge_key] = desired_by_edge.get(edge_key, 0.0) + desired
+
+    edge_scale: Dict[Tuple[int, int], float] = {}
+    for edge_key, desired in desired_by_edge.items():
+        if not simulator.active.get(edge_key, True):
+            edge_scale[edge_key] = 0.0
+            continue
+        capacity = float(simulator.capacity.get(edge_key, 0.0))
+        if capacity <= 0.0:
+            edge_scale[edge_key] = 0.0
+            continue
+        edge_scale[edge_key] = min(1.0, capacity / desired) if desired > 0.0 else 1.0
+
+    for allocation in allocations:
+        scales = [edge_scale.get(edge_key, 0.0) for edge_key in allocation["edge_keys"]]
+        scale = min(scales) if scales else 0.0
+        delivered = allocation["desired"] * scale
+        dropped = max(0.0, allocation["desired"] - delivered)
+        bottlenecks = [
+            edge_key
+            for edge_key in allocation["edge_keys"]
+            if abs(edge_scale.get(edge_key, 0.0) - scale) <= 1e-9
+        ] or [allocation["edge_keys"][-1]]
+        allocation["delivered"] = delivered
+        allocation["dropped"] = dropped
+        allocation["bottlenecks"] = bottlenecks
+
+    delivered_total = sum(float(item.get("delivered", 0.0)) for item in allocations)
+    dropped_total = sum(float(item.get("dropped", 0.0)) for item in allocations) + sum(
+        float(item.get("demand", 0.0)) for item in unrouted
+    )
+    total_sent = delivered_total + dropped_total
+    if total_sent <= 0.0:
+        return []
+
+    budget = max(6, min(PACKET_EVENT_LIMIT, int(round(total_sent))))
+    delivered_budget = int(round(budget * (delivered_total / total_sent))) if delivered_total > 0 else 0
+    delivered_budget = min(delivered_budget, budget)
+    dropped_budget = budget - delivered_budget
+
+    delivered_counts = _distribute_budget(
+        [float(item.get("delivered", 0.0)) * max(1, len(item.get("edge_keys", []))) for item in allocations],
+        delivered_budget,
+    )
+    dropped_counts = _distribute_budget(
+        [float(item.get("dropped", 0.0)) for item in allocations] + [float(item.get("demand", 0.0)) for item in unrouted],
+        dropped_budget,
+    )
+
+    events: List[Dict[str, Any]] = []
+    for allocation_index, allocation in enumerate(allocations):
+        count = delivered_counts[allocation_index] if allocation_index < len(delivered_counts) else 0
+        edge_keys = allocation.get("edge_keys") or []
+        if count <= 0 or not edge_keys:
+            continue
+        for sample_index in range(count):
+            segment_index = sample_index % len(edge_keys)
+            edge_key = edge_keys[segment_index]
+            status = "delivered" if segment_index == len(edge_keys) - 1 else "in_transit"
+            packet_id = (
+                f"step-{step_t}-flow-{allocation['flow_index']}-path-{allocation['path_index']}"
+                f"-seg-{segment_index}-ok-{sample_index}"
+            )
+            events.append(
+                _packet_event(
+                    edge_key,
+                    packet_id=packet_id,
+                    status=status,
+                    progress_key=packet_id,
+                )
+            )
+
+    dropped_offset = len(allocations)
+    for allocation_index, allocation in enumerate(allocations):
+        count_index = allocation_index
+        count = dropped_counts[count_index] if count_index < len(dropped_counts) else 0
+        bottlenecks = allocation.get("bottlenecks") or allocation.get("edge_keys") or []
+        if count <= 0 or not bottlenecks:
+            continue
+        for sample_index in range(count):
+            edge_key = bottlenecks[sample_index % len(bottlenecks)]
+            packet_id = (
+                f"step-{step_t}-flow-{allocation['flow_index']}-path-{allocation['path_index']}"
+                f"-drop-{sample_index}"
+            )
+            events.append(
+                _packet_event(
+                    edge_key,
+                    packet_id=packet_id,
+                    status="dropped",
+                    progress_key=packet_id,
+                )
+            )
+
+    for unrouted_index, item in enumerate(unrouted):
+        count_index = dropped_offset + unrouted_index
+        count = dropped_counts[count_index] if count_index < len(dropped_counts) else 0
+        if count <= 0:
+            continue
+        edge_key = _fallback_edge_key(env, int(item["source"]), int(item["destination"]))
+        if edge_key is None:
+            continue
+        for sample_index in range(count):
+            packet_id = f"step-{step_t}-flow-{item['flow_index']}-noroute-{sample_index}"
+            events.append(
+                _packet_event(
+                    edge_key,
+                    packet_id=packet_id,
+                    status="dropped",
+                    progress_key=packet_id,
+                )
+            )
+
+    return events[:PACKET_EVENT_LIMIT]
+
+
+def _build_step_payload_fallback(run_dir_str: str, episode_rows: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], ...]:
+    topology = _build_topology_bundle(run_dir_str)
+    current_links = dict(topology["initial_links"])
+    action_edges = list(topology["action_edges"])
+
+    steps: List[Dict[str, Any]] = []
+    for index, row in enumerate(episode_rows):
+        metrics = dict(row)
+        action = _to_int(metrics.get("action"))
+        toggle_applied = _to_bool(metrics.get("toggle_applied")) is True
+        if toggle_applied and action is not None:
+            action_index = action - 1
+            if 0 <= action_index < len(action_edges):
+                source_id, target_id = action_edges[action_index]
+                edge_key = _edge_id(source_id, target_id)
+                current_links[edge_key] = not bool(current_links.get(edge_key, True))
+
+        t = _to_int(metrics.get("t"))
+        if t is None:
+            t = _to_int(metrics.get("step"))
+        if t is None:
+            t = index
+
+        steps.append(
+            {
+                "t": int(t),
+                "metrics": metrics,
+                "links_on": dict(current_links),
+                "packet_events": [],
+            }
+        )
+
+    return tuple(steps)
+
+
+@lru_cache(maxsize=64)
+def _build_step_payload(run_dir_str: str) -> Tuple[Dict[str, Any], ...]:
+    raw_rows = list(_read_all_per_step_rows(run_dir_str))
+    if not raw_rows:
+        return tuple()
+
+    episode_rows = _first_episode_rows(raw_rows)
+    run_dir = Path(run_dir_str)
+    cfg = load_env_config_from_run(run_dir, verbose=False)
+
+    replay_seed = _resolve_replay_seed(run_dir, episode_rows, cfg)
+    replay_traffic_seed = _resolve_replay_traffic_seed(run_dir, episode_rows, cfg)
+    if replay_traffic_seed is not None and hasattr(cfg, "traffic_seed"):
+        cfg.traffic_seed = int(replay_traffic_seed)
+
+    env = GreenNetEnv(config=cfg)
+    try:
+        env.reset(seed=int(replay_seed))
+        total_edges = max(1, int(env.simulator.graph.number_of_edges()) if env.simulator is not None else 0)
+
+        steps: List[Dict[str, Any]] = []
+        for index, row in enumerate(episode_rows):
+            metrics = dict(row)
+            action = _to_int(metrics.get("action")) or 0
+            _, _, terminated, truncated, info = env.step(int(action))
+
+            links_on = _links_on_from_env(env)
+            on_count = sum(1 for is_on in links_on.values() if is_on)
+            metrics["active_ratio"] = float(on_count / total_edges)
+
+            t = _to_int(metrics.get("t"))
+            if t is None:
+                t = _to_int(metrics.get("step"))
+            if t is None:
+                t = index + 1
+
+            steps.append(
+                {
+                    "t": int(t),
+                    "metrics": metrics,
+                    "links_on": links_on,
+                    "packet_events": _packet_events_from_env_step(env, info, int(t)),
+                }
+            )
+
+            if terminated or truncated:
+                break
+
+        return tuple(steps)
+    except Exception:
+        return _build_step_payload_fallback(run_dir_str, episode_rows)
+    finally:
+        env.close()
+
+
+def _step_for_timestep(steps: Tuple[Dict[str, Any], ...], step: int) -> Optional[Dict[str, Any]]:
+    if not steps:
+        return None
+
+    exact = next((item for item in steps if _to_int(item.get("t")) == int(step)), None)
+    if exact is not None:
+        return exact
+
+    prior = [item for item in steps if (_to_int(item.get("t")) or 0) <= int(step)]
+    if prior:
+        return prior[-1]
+    return steps[0]
 
 
 def parse_run_dir_name(name: str) -> Dict[str, Any]:
@@ -258,6 +1091,12 @@ def _find_run_dir(run_id: str, base: BaseChoice = "both") -> Optional[Tuple[str,
 
 
 def _resolve_run_dir_or_404(run_id: str, base: BaseChoice) -> Tuple[str, Path]:
+    if run_id == "latest":
+        runs = _scan_run_dirs(base=base)
+        if not runs:
+            raise HTTPException(status_code=404, detail="No runs available")
+        return runs[0]
+
     resolved = _find_run_dir(run_id, base=base)
     if not resolved:
         raise HTTPException(status_code=404, detail=f"Unknown run_id: {run_id}")
@@ -495,7 +1334,10 @@ def run_summary(
     base: BaseChoice = Query("both"),
     mode: Literal["full", "overall"] = Query("full"),
 ) -> Dict[str, Any]:
-    _, payload = _load_run_json_or_error(run_id, "summary.json", base=base)
+    _, run_dir = _resolve_run_dir_or_404(run_id, base=base)
+    payload = _summary_payload_for_run(run_dir)
+    if not payload:
+        raise HTTPException(status_code=404, detail=f"summary.json not found for run_id: {run_id}")
     if mode == "overall":
         overall = payload.get("overall")
         if not isinstance(overall, dict):
@@ -523,25 +1365,129 @@ def run_per_step(
     offset: int = Query(0, ge=0),
 ) -> List[Dict[str, Any]]:
     _, run_dir = _resolve_run_dir_or_404(run_id, base=base)
-
-    csv_path = run_dir / "per_step.csv"
-    if not csv_path.exists():
+    rows = list(_read_all_per_step_rows(str(run_dir)))
+    if not rows:
         raise HTTPException(status_code=404, detail=f"per_step.csv not found for run_id: {run_id}")
+    if limit is None:
+        return rows[offset:]
+    return rows[offset : offset + limit]
 
-    rows: List[Dict[str, Any]] = []
-    with csv_path.open("r", newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for idx, row in enumerate(reader):
-            if idx < offset:
-                continue
 
-            parsed = {k: _coerce_per_step_value(k, v) for k, v in row.items()}
-            rows.append(parsed)
+@app.post("/api/runs/start")
+def start_run(payload: StartRunRequest) -> Dict[str, Any]:
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-            if limit is not None and len(rows) >= limit:
-                break
+    cmd = [
+        sys.executable,
+        str(REPO_ROOT / "run_experiment.py"),
+        "--policy",
+        payload.policy.strip().lower(),
+        "--scenario",
+        payload.scenario.strip().lower(),
+        "--seed",
+        str(int(payload.seed)),
+        "--steps",
+        str(int(payload.steps)),
+        "--episodes",
+        "1",
+        "--out-dir",
+        str(RESULTS_DIR),
+        "--tag",
+        DASHBOARD_RUN_TAG,
+    ]
 
-    return rows
+    try:
+        completed = subprocess.run(
+            cmd,
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail=f"Run timed out after {int(exc.timeout or 600)}s") from exc
+
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "run_experiment.py failed").strip()
+        raise HTTPException(status_code=500, detail=detail[-2000:])
+
+    stdout = completed.stdout or ""
+    match = RESULTS_SAVED_RE.search(stdout)
+    if match:
+        output_dir = Path(match.group("path").strip())
+    else:
+        candidates = [path for path in RESULTS_DIR.iterdir() if path.is_dir()]
+        if not candidates:
+            raise HTTPException(status_code=500, detail="Run completed but no output directory was found")
+        output_dir = max(candidates, key=lambda path: path.stat().st_mtime)
+
+    return {"run_id": output_dir.name}
+
+
+@app.get("/api/runs/{run_id}/topology")
+def run_topology(run_id: str, base: BaseChoice = Query("both")) -> Dict[str, Any]:
+    source, run_dir = _resolve_run_dir_or_404(run_id, base=base)
+    bundle = _build_topology_bundle(str(run_dir))
+    return {
+        "run_id": run_dir.name,
+        "source": source,
+        "nodes": bundle["nodes"],
+        "edges": bundle["edges"],
+    }
+
+
+@app.get("/api/runs/{run_id}/steps")
+@app.get("/api/runs/{run_id}/timeline")
+def run_steps(run_id: str, base: BaseChoice = Query("both")) -> List[Dict[str, Any]]:
+    _, run_dir = _resolve_run_dir_or_404(run_id, base=base)
+    steps = list(_build_step_payload(str(run_dir)))
+    if not steps:
+        raise HTTPException(status_code=404, detail=f"No step timeline available for run_id: {run_id}")
+    return steps
+
+
+@app.get("/api/runs/{run_id}/link_state")
+@app.get("/api/runs/{run_id}/links")
+def run_link_state(run_id: str, step: int = Query(0, ge=0), base: BaseChoice = Query("both")) -> Dict[str, Any]:
+    _, run_dir = _resolve_run_dir_or_404(run_id, base=base)
+    steps = _build_step_payload(str(run_dir))
+    payload = _step_for_timestep(steps, step)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"No link state available for run_id: {run_id}")
+    return {
+        "run_id": run_dir.name,
+        "step": payload["t"],
+        "links_on": payload["links_on"],
+    }
+
+
+@app.get("/api/runs/{run_id}/packet_events")
+def run_packet_events(run_id: str, base: BaseChoice = Query("both"), step: int = Query(0, ge=0)) -> Dict[str, Any]:
+    _, run_dir = _resolve_run_dir_or_404(run_id, base=base)
+    steps = _build_step_payload(str(run_dir))
+    payload = _step_for_timestep(steps, step)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"No packet events available for run_id: {run_id}")
+    return {"run_id": run_dir.name, "step": payload["t"], "events": payload.get("packet_events", [])}
+
+
+@app.get("/api/official_results")
+def official_results(scenario: Optional[str] = Query(None)) -> Dict[str, Any]:
+    if scenario is None:
+        scenarios = list(OFFICIAL_LOCKED_SCENARIOS)
+    else:
+        scenarios = [item.strip().lower() for item in scenario.split(",") if item.strip()]
+        invalid = [item for item in scenarios if item not in OFFICIAL_LOCKED_SCENARIOS]
+        if invalid:
+            raise HTTPException(status_code=400, detail=f"Unsupported scenario filter: {', '.join(invalid)}")
+
+    items: List[Dict[str, Any]] = []
+    for name in scenarios:
+        payload = _official_locked_result_for_scenario(name)
+        if payload is not None:
+            items.append(payload)
+
+    return {"total": len(items), "items": items}
 
 
 @app.get("/api/aggregate")

@@ -205,7 +205,9 @@ function configToSummary(config: DemoRunConfig): RunSummary {
     started_at: config.started_at ?? null,
     policy: config.policy,
     scenario: config.scenario,
+    seed: config.seed,
     topology_seed: config.seed,
+    max_steps: config.steps,
   };
 }
 

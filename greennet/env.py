@@ -301,11 +301,11 @@ class GreenNetEnv(gym.Env):
 
         self._step_count = 0
         self._prev_dropped = 0.0
-        # Track cumulative metrics (some Simulator implementations return cumulative totals).
-        # We compute per-step deltas for reward so we don't double-count cumulative values.
+        # The current simulator emits per-step metrics. Track our own episode totals here.
         self._prev_energy_kwh_total = 0.0
         self._prev_delivered_total = 0.0
         self._prev_dropped_total = 0.0
+        self._prev_carbon_g_total = 0.0
         self._global_toggle_cooldown_remaining = 0
         self._last_norm_drop_total = 0.0
         self._last_norm_drop_step = 0.0
@@ -769,51 +769,28 @@ class GreenNetEnv(gym.Env):
 
         metrics = self.simulator.step(flows)
 
-        # ---- Convert simulator metrics into per-step deltas (robust to cumulative vs per-step APIs) ----
-        # Some Simulator implementations expose cumulative totals (episode-to-date). If we use those
-        # directly in the reward each step, we double-count and the episode reward blows up.
-        energy_total = float(metrics.energy_kwh)
-        delivered_total = float(metrics.delivered)
-        dropped_total = float(metrics.dropped)
+        # ---- Convert simulator outputs into per-step deltas and episode totals ----
+        # Simulator.step() returns step-local metrics, so accumulate totals here.
+        delta_energy = float(max(0.0, float(metrics.energy_kwh)))
+        delta_delivered = float(max(0.0, float(metrics.delivered)))
+        delta_dropped = float(max(0.0, float(metrics.dropped)))
+        delta_carbon = float(max(0.0, float(getattr(metrics, "carbon_g", 0.0))))
 
         prev_e = float(getattr(self, "_prev_energy_kwh_total", 0.0))
         prev_del = float(getattr(self, "_prev_delivered_total", 0.0))
         prev_drop = float(getattr(self, "_prev_dropped_total", 0.0))
+        prev_carbon = float(getattr(self, "_prev_carbon_g_total", 0.0))
 
-        # Default: treat metrics as cumulative totals.
-        delta_energy = energy_total - prev_e
-        delta_delivered = delivered_total - prev_del
-        delta_dropped = dropped_total - prev_drop
-
-        # Detect per-step vs cumulative reporting.
-        # Default assumption is cumulative totals, but some Simulator implementations report per-step
-        # values (especially for energy). In that case, treating them as cumulative makes deltas go to
-        # ~0 after step 1 (because prev == current).
-        eps = 1e-12
-
-        # ENERGY: if energy_total stays roughly constant across steps (delta ~ 0) while energy_total > 0,
-        # interpret it as a per-step value and accumulate our own episode-to-date total.
-        if prev_e > 0.0 and energy_total > 0.0 and delta_energy <= eps:
-            delta_energy = energy_total
-            energy_total = prev_e + delta_energy
-
-        # DELIVERED/DROPPED: if deltas are negative (beyond tiny numerical noise), treat totals as per-step.
-        if delta_delivered < -eps:
-            delta_delivered = delivered_total
-            delivered_total = prev_del + delta_delivered
-        if delta_dropped < -eps:
-            delta_dropped = dropped_total
-            dropped_total = prev_drop + delta_dropped
-
-        # Clamp tiny negatives caused by float noise.
-        delta_energy = float(max(0.0, delta_energy))
-        delta_delivered = float(max(0.0, delta_delivered))
-        delta_dropped = float(max(0.0, delta_dropped))
+        energy_total = prev_e + delta_energy
+        delivered_total = prev_del + delta_delivered
+        dropped_total = prev_drop + delta_dropped
+        carbon_total = prev_carbon + delta_carbon
 
         # Persist totals for next step.
         self._prev_energy_kwh_total = float(energy_total)
         self._prev_delivered_total = float(delivered_total)
         self._prev_dropped_total = float(dropped_total)
+        self._prev_carbon_g_total = float(carbon_total)
 
         # Per-step normalized drop ratio.
         norm_drop_step = delta_dropped / max(delta_delivered + delta_dropped + 1e-9, 1e-9)
@@ -997,6 +974,7 @@ class GreenNetEnv(gym.Env):
             "delta_energy_kwh": float(delta_energy),
             "delta_delivered": float(delta_delivered),
             "delta_dropped": float(delta_dropped),
+            "delta_carbon_g": float(delta_carbon),
             "norm_drop_step": float(norm_drop_step),
             "norm_drop": float(norm_drop_total),
             "reward_qos": reward_qos,

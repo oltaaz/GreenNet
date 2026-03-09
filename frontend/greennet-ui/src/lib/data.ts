@@ -1,7 +1,9 @@
 ﻿import type {
   KpiMetric,
   LinkStateMap,
+  OfficialLockedResult,
   PerStepRow,
+  RunOverallSummary,
   RunSummary,
   StepMetrics,
   StepState,
@@ -50,6 +52,8 @@ export function toMetrics(row: PerStepRow): StepMetrics {
     energy_kwh: toNumber(row.energy_kwh, 0),
     carbon_g: toNumber(row.carbon_g, 0),
     avg_delay_ms: toNumber(row.avg_delay_ms, 0),
+    avg_path_latency_ms: toNumber(row.avg_path_latency_ms, 0),
+    congestion_delay_ms: toNumber(row.congestion_delay_ms, 0),
     dropped: toNumber(row.dropped, 0),
     delivered: toNumber(row.delivered, 0),
     active_ratio: toNumber(row.active_ratio, 1),
@@ -64,11 +68,13 @@ export function normalizePerStep(rows: PerStepRow[]): PerStepRow[] {
       return {
         ...row,
         t: tValue,
-        energy_kwh: toNumber(row.energy_kwh, 0),
-        carbon_g: toNumber(row.carbon_g, 0),
+        energy_kwh: toNumber(row.delta_energy_kwh ?? row.energy_kwh, 0),
+        carbon_g: toNumber(row.delta_carbon_g ?? row.carbon_g, 0),
         avg_delay_ms: toNumber(row.avg_delay_ms, 0),
-        dropped: toNumber(row.dropped, 0),
-        delivered: toNumber(row.delivered, 0),
+        avg_path_latency_ms: toNumber(row.avg_path_latency_ms, 0),
+        congestion_delay_ms: toNumber(row.congestion_delay_ms, 0),
+        dropped: toNumber(row.delta_dropped ?? row.dropped, 0),
+        delivered: toNumber(row.delta_delivered ?? row.delivered, 0),
         active_ratio: toNumber(row.active_ratio, 1),
         reward: toNumber(row.reward, 0),
       };
@@ -83,19 +89,71 @@ export function latestRow(rows: PerStepRow[]): PerStepRow | null {
   return rows[rows.length - 1];
 }
 
-export function kpiFromRows(rows: PerStepRow[]): KpiMetric[] {
-  const last = latestRow(rows);
-  if (!last) {
+function average(values: number[]): number {
+  return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+}
+
+function sumMetric(rows: PerStepRow[], primaryKey: string, fallbackKey?: keyof PerStepRow): number {
+  const hasPrimary = rows.some((row) => row[primaryKey] != null);
+  return rows.reduce((sum, row) => {
+    const value = hasPrimary
+      ? row[primaryKey]
+      : fallbackKey == null
+        ? 0
+        : row[fallbackKey];
+    return sum + toNumber(value, 0);
+  }, 0);
+}
+
+export function deriveOverallFromRows(rows: PerStepRow[]): RunOverallSummary | null {
+  if (!rows.length) {
+    return null;
+  }
+
+  const avgDelayValues = rows.map((row) => toNumber(row.avg_delay_ms, 0));
+  const avgPathLatencyValues = rows.map((row) =>
+    row.avg_path_latency_ms == null ? toNumber(row.avg_delay_ms, 0) : toNumber(row.avg_path_latency_ms, 0),
+  );
+
+  return {
+    reward_total_mean: rows.reduce((sum, row) => sum + toNumber(row.reward, 0), 0),
+    delivered_total_mean: sumMetric(rows, "delta_delivered", "delivered"),
+    dropped_total_mean: sumMetric(rows, "delta_dropped", "dropped"),
+    energy_kwh_total_mean: sumMetric(rows, "delta_energy_kwh", "energy_kwh"),
+    carbon_g_total_mean: sumMetric(rows, "delta_carbon_g", "carbon_g"),
+    avg_utilization_mean: 0,
+    active_ratio_mean: average(rows.map((row) => toNumber(row.active_ratio, 1))),
+    avg_delay_ms_mean: average(avgDelayValues),
+    avg_path_latency_ms_mean: average(avgPathLatencyValues),
+    steps_mean: rows.length,
+  };
+}
+
+export function kpiFromOverall(summary: RunOverallSummary | null): KpiMetric[] {
+  if (!summary) {
     return [];
   }
 
+  const steps = Math.max(1, toNumber(summary.steps_mean, 1));
+  const delivered = toNumber(summary.delivered_total_mean, 0);
+  const dropped = toNumber(summary.dropped_total_mean, 0);
+  const totalPacketsSent =
+    delivered + dropped;
+  const dropRate = totalPacketsSent > 0 ? (dropped / totalPacketsSent) * 100 : 0;
+
   return [
-    { label: "Energy Usage", value: toNumber(last.energy_kwh, 0), unit: "kWh" },
-    { label: "Carbon Emissions", value: toNumber(last.carbon_g, 0), unit: "g CO2" },
-    { label: "Avg Delay", value: toNumber(last.avg_delay_ms, 0), unit: "ms" },
-    { label: "Drop Rate", value: toNumber(last.dropped, 0), unit: "pkts" },
-    { label: "Active Links Ratio", value: toNumber(last.active_ratio, 0) * 100, unit: "%" },
-    { label: "Delivered", value: toNumber(last.delivered, 0), unit: "pkts" },
+    { label: "Energy Usage", value: toNumber(summary.energy_kwh_total_mean, 0), unit: "kWh" },
+    { label: "Carbon Emissions", value: toNumber(summary.carbon_g_total_mean, 0), unit: "g CO2" },
+    {
+      label: "Path Latency",
+      value: toNumber(summary.avg_path_latency_ms_mean ?? summary.avg_delay_ms_mean, 0),
+      unit: "ms",
+    },
+    { label: "Packets / Step", value: totalPacketsSent / steps, unit: "pkts" },
+    { label: "Dropped / Step", value: dropped / steps, unit: "pkts" },
+    { label: "Drop Rate", value: dropRate, unit: "%" },
+    { label: "Active Links Ratio", value: toNumber(summary.active_ratio_mean, 0) * 100, unit: "%" },
+    { label: "Run Length", value: steps, unit: "steps" },
   ];
 }
 
@@ -104,6 +162,8 @@ export function chartRows(rows: PerStepRow[]): Array<Record<string, number>> {
     t: toNumber(row.t, 0),
     energy_kwh: toNumber(row.energy_kwh, 0),
     avg_delay_ms: toNumber(row.avg_delay_ms, 0),
+    avg_path_latency_ms: toNumber(row.avg_path_latency_ms, 0),
+    congestion_delay_ms: toNumber(row.congestion_delay_ms, 0),
     dropped: toNumber(row.dropped, 0),
     active_ratio: toNumber(row.active_ratio, 1) * 100,
     delivered: toNumber(row.delivered, 0),
@@ -246,19 +306,40 @@ export function timelineFromRows(rows: PerStepRow[], topology: TopologyData): St
   });
 }
 
-export function compareSummary(rows: PerStepRow[]): Record<string, number> {
-  const last = latestRow(rows);
-  const rewardTotal = rows.reduce((sum, row) => sum + toNumber(row.reward, 0), 0);
+export function compareSummary(rows: PerStepRow[], overall?: RunOverallSummary | null): Record<string, number> {
+  const summary = overall ?? deriveOverallFromRows(rows);
+  const delivered = toNumber(summary?.delivered_total_mean, 0);
+  const dropped = toNumber(summary?.dropped_total_mean, 0);
 
   return {
-    energy_kwh: toNumber(last?.energy_kwh, 0),
-    carbon_g: toNumber(last?.carbon_g, 0),
-    avg_delay_ms: toNumber(last?.avg_delay_ms, 0),
-    dropped: toNumber(last?.dropped, 0),
-    delivered: toNumber(last?.delivered, 0),
-    active_ratio: toNumber(last?.active_ratio, 1) * 100,
-    reward: rewardTotal,
+    energy_kwh: toNumber(summary?.energy_kwh_total_mean, 0),
+    carbon_g: toNumber(summary?.carbon_g_total_mean, 0),
+    avg_delay_ms: toNumber(summary?.avg_path_latency_ms_mean ?? summary?.avg_delay_ms_mean, 0),
+    congestion_delay_ms: 0,
+    packets_sent: delivered + dropped,
+    dropped,
+    delivered,
+    active_ratio: toNumber(summary?.active_ratio_mean, 0) * 100,
+    reward: toNumber(summary?.reward_total_mean, 0),
   };
+}
+
+export function officialLockedScenarioMetrics(result: OfficialLockedResult): KpiMetric[] {
+  const trained = result.trained_det;
+  const delta = result.summary ?? result.delta_summary;
+
+  if (!trained) {
+    return [];
+  }
+
+  return [
+    { label: "Delivered (mean)", value: toNumber(trained.delivered_mean, 0), unit: "pkts" },
+    { label: "Dropped (mean)", value: toNumber(trained.dropped_mean, 0), unit: "pkts" },
+    { label: "Drop Rate", value: toNumber(trained.drop_rate, 0) * 100, unit: "%" },
+    { label: "Energy (mean)", value: toNumber(trained.energy_kwh_mean, 0), unit: "kWh" },
+    { label: "Drop Delta vs No-Op", value: toNumber(delta?.delta_dropped, 0), unit: "pkts" },
+    { label: "Energy Delta vs No-Op", value: toNumber(delta?.delta_energy_kwh, 0), unit: "kWh" },
+  ];
 }
 
 export function fmt(value: number, digits = 2): string {

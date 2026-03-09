@@ -6,7 +6,7 @@ import csv
 import json
 import random
 import sys
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import fmean, pstdev
@@ -16,7 +16,7 @@ import numpy as np
 
 from baselines import action_sleep_if_idle
 from greennet.env import EnvConfig, GreenNetEnv
-from greennet.utils.config import save_env_config
+from greennet.utils.config import load_env_config_from_run, save_env_config
 
 try:
     from sb3_contrib import MaskablePPO  # type: ignore
@@ -214,15 +214,25 @@ def seed_everything(seed: int) -> None:
         return
 
 
-def build_env_config(scenario: str, max_steps: int | None) -> EnvConfig:
-    cfg = EnvConfig()
+def _resolve_reference_run_dir(model_path: Path | None, runs_dir: Path) -> Path | None:
+    if model_path is not None and model_path.exists():
+        return model_path.parent if model_path.is_file() else model_path
+    try:
+        return find_latest_model(runs_dir).parent
+    except FileNotFoundError:
+        return None
+
+
+def build_env_config(scenario: str, max_steps: int | None, base_config: EnvConfig | None = None) -> EnvConfig:
+    cfg = replace(base_config) if base_config is not None else EnvConfig()
     if hasattr(cfg, "traffic_seed"):
         cfg.traffic_seed = None
 
     scenario_key = scenario.strip().lower()
     if scenario_key in ("normal", "diurnal", "normal/diurnal", "normal diurnal"):
         cfg.traffic_model = "stochastic"
-        cfg.traffic_scenario = "normal"
+        # Keep "normal" aligned with the model's saved training environment when available.
+        cfg.traffic_scenario = None if base_config is not None else "normal"
     elif scenario_key == "burst":
         cfg.traffic_model = "stochastic"
         cfg.traffic_scenario = "burst"
@@ -437,6 +447,7 @@ def summarize_episodes(episode_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "avg_utilization_mean": _mean([float(r["avg_utilization_mean"]) for r in episode_rows]),
         "active_ratio_mean": _mean([float(r["active_ratio_mean"]) for r in episode_rows]),
         "avg_delay_ms_mean": _mean([float(r["avg_delay_ms_mean"]) for r in episode_rows]),
+        "avg_path_latency_ms_mean": _mean([float(r.get("avg_path_latency_ms_mean", 0.0)) for r in episode_rows]),
     }
     if "toggles_total" in totals:
         overall.update(
@@ -493,8 +504,8 @@ def run_episode(
     avg_util_sum = 0.0
     active_ratio_sum = 0.0
     avg_delay_sum = 0.0
+    avg_path_latency_sum = 0.0
     steps = 0
-    carbon_prev = 0.0
     toggles_applied = 0
     toggles_reverted = 0
     toggles_attempted = 0
@@ -506,13 +517,7 @@ def run_episode(
     for step_idx in range(1, int(env.config.max_steps) + 1):
         action = action_fn(obs, info, env)
         obs, reward, terminated, truncated, info = env.step(action)
-
-        carbon_now = float(getattr(info.get("metrics"), "carbon_g", 0.0))
-        delta_carbon = carbon_now - carbon_prev
-        if delta_carbon < -1e-9:
-            delta_carbon = 0.0
-        carbon_prev = carbon_now
-        info["delta_carbon_g"] = float(delta_carbon)
+        delta_carbon = float(info.get("delta_carbon_g", getattr(info.get("metrics"), "carbon_g", 0.0)))
 
         writer.writerow(
             build_step_row(
@@ -541,6 +546,7 @@ def run_episode(
         avg_util_sum += float(getattr(info.get("metrics"), "avg_utilization", 0.0))
         active_ratio_sum += float(obs["active_ratio"][0])
         avg_delay_sum += float(getattr(info.get("metrics"), "avg_delay_ms", 0.0))
+        avg_path_latency_sum += float(getattr(info.get("metrics"), "avg_path_latency_ms", 0.0))
         toggles_applied += int(bool(info.get("toggle_applied")))
         toggles_reverted += int(bool(info.get("toggle_reverted")))
         toggles_attempted += int(info.get("toggles_attempted_count", 0))
@@ -565,6 +571,7 @@ def run_episode(
         "avg_utilization_mean": float(avg_util_sum / denom),
         "active_ratio_mean": float(active_ratio_sum / denom),
         "avg_delay_ms_mean": float(avg_delay_sum / denom),
+        "avg_path_latency_ms_mean": float(avg_path_latency_sum / denom),
         "toggles_applied_total": int(toggles_applied),
         "toggles_reverted_total": int(toggles_reverted),
         "toggles_total": int(toggles_applied + toggles_reverted),
@@ -654,7 +661,12 @@ def main() -> None:
 
     seed_everything(int(eval_seed))
 
-    env_config = build_env_config(scenario, max_steps)
+    reference_run_dir = _resolve_reference_run_dir(model_path, runs_dir)
+    reference_env_config = (
+        load_env_config_from_run(reference_run_dir, verbose=False) if reference_run_dir is not None else None
+    )
+
+    env_config = build_env_config(scenario, max_steps, reference_env_config)
     for key, value in env_overrides.items():
         setattr(env_config, key, value)
 

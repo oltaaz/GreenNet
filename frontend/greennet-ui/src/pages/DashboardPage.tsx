@@ -1,30 +1,60 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import ChartCard from "../components/ChartCard";
 import KpiCard from "../components/KpiCard";
+import OfficialResultCard from "../components/OfficialResultCard";
 import RunControls from "../components/RunControls";
 import { ErrorNotice, InfoNotice, LoadingNotice } from "../components/StatusState";
 import TopologyPanel from "../components/TopologyPanel";
-import { getLinkState, getRunPerStep, getTopology, listRuns, startRun } from "../lib/api";
+import {
+  getLinkState,
+  getOfficialLockedResults,
+  getRunPerStep,
+  getRunSummary,
+  getTopology,
+  listRuns,
+  startRun,
+} from "../lib/api";
 import { isDemoRunId } from "../lib/demo";
 import {
   chartRows,
   fallbackTopology,
   fmt,
   inferPolicy,
-  kpiFromRows,
+  kpiFromOverall,
   latestRunByPolicy,
   linkStateFromRatio,
   normalizePerStep,
+  officialLockedScenarioMetrics,
   toMetrics,
 } from "../lib/data";
-import type { LinkStateMap, PerStepRow, RunSummary, TopologyData } from "../lib/types";
+import type {
+  LinkStateMap,
+  OfficialLockedResult,
+  PerStepRow,
+  RunOverallSummary,
+  RunSummary,
+  TopologyData,
+} from "../lib/types";
 
 type PolicySeries = Record<string, PerStepRow[]>;
+
+function upsertRun(runs: RunSummary[], nextRun: RunSummary): RunSummary[] {
+  const existing = runs.findIndex((run) => run.run_id === nextRun.run_id);
+  if (existing === 0) {
+    return runs;
+  }
+  if (existing > 0) {
+    return [nextRun, ...runs.filter((run) => run.run_id !== nextRun.run_id)];
+  }
+  return [nextRun, ...runs];
+}
 
 export default function DashboardPage() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string>("");
   const [rows, setRows] = useState<PerStepRow[]>([]);
+  const [overallSummary, setOverallSummary] = useState<RunOverallSummary | null>(null);
+  const [officialResults, setOfficialResults] = useState<OfficialLockedResult[]>([]);
   const [topology, setTopology] = useState<TopologyData>(fallbackTopology("dashboard"));
   const [policySeries, setPolicySeries] = useState<PolicySeries>({});
   const [linkState, setLinkState] = useState<LinkStateMap | null>(null);
@@ -36,8 +66,8 @@ export default function DashboardPage() {
 
   const [policy, setPolicy] = useState("ppo");
   const [scenario, setScenario] = useState("normal");
-  const [seed, setSeed] = useState(42);
-  const [steps, setSteps] = useState(300);
+  const [seed, setSeed] = useState("");
+  const [steps, setSteps] = useState("");
   const [topologyStepIndex, setTopologyStepIndex] = useState(0);
 
   useEffect(() => {
@@ -75,11 +105,24 @@ export default function DashboardPage() {
     return () => {
       alive = false;
     };
-  }, [selectedRunId]);
+  }, []);
+
+  useEffect(() => {
+    const selectedRun = runs.find((run) => run.run_id === selectedRunId);
+    if (!selectedRun) {
+      return;
+    }
+
+    setPolicy(selectedRun.policy ? String(selectedRun.policy).toLowerCase() : inferPolicy(selectedRun));
+    setScenario(selectedRun.scenario ? String(selectedRun.scenario).toLowerCase() : "normal");
+    setSeed(selectedRun.seed != null ? String(selectedRun.seed) : selectedRun.topology_seed != null ? String(selectedRun.topology_seed) : "");
+    setSteps(selectedRun.max_steps != null ? String(selectedRun.max_steps) : "");
+  }, [runs, selectedRunId]);
 
   useEffect(() => {
     if (!selectedRunId) {
       setRows([]);
+      setOverallSummary(null);
       setTopology(fallbackTopology("dashboard-empty"));
       return;
     }
@@ -91,19 +134,25 @@ export default function DashboardPage() {
       setError("");
 
       try {
-        const [stepRows, topo] = await Promise.all([getRunPerStep(selectedRunId), getTopology(selectedRunId)]);
+        const [stepRows, topo, summary] = await Promise.all([
+          getRunPerStep(selectedRunId),
+          getTopology(selectedRunId),
+          getRunSummary(selectedRunId),
+        ]);
         if (!alive) {
           return;
         }
 
         const normalized = normalizePerStep(stepRows);
         setRows(normalized);
+        setOverallSummary(summary);
         setTopology(topo ?? fallbackTopology(selectedRunId));
         setTopologyStepIndex(Math.max(0, normalized.length - 1));
       } catch (apiError) {
         if (alive) {
           setError(apiError instanceof Error ? apiError.message : "Failed to load run data");
           setRows([]);
+          setOverallSummary(null);
           setTopology(fallbackTopology(selectedRunId));
         }
       } finally {
@@ -119,6 +168,28 @@ export default function DashboardPage() {
       alive = false;
     };
   }, [selectedRunId]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadOfficialResults() {
+      try {
+        const items = await getOfficialLockedResults(["burst", "hotspot"]);
+        if (alive) {
+          setOfficialResults(items);
+        }
+      } catch {
+        if (alive) {
+          setOfficialResults([]);
+        }
+      }
+    }
+
+    void loadOfficialResults();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -210,7 +281,16 @@ export default function DashboardPage() {
     return linkStateFromRatio(topology.edges, previousRow.active_ratio ?? 1, previousRow.t);
   }, [previousRow, topology.edges]);
 
-  const kpis = useMemo(() => kpiFromRows(rows), [rows]);
+  const selectedRun = runs.find((run) => run.run_id === selectedRunId);
+  const demoMode = selectedRun ? isDemoRunId(selectedRun.run_id) : false;
+  const activeOfficialScenario = (selectedRun?.scenario ?? "").toLowerCase();
+  const highlightedOfficialResult =
+    officialResults.find((item) => item.scenario === activeOfficialScenario) ?? null;
+
+  const kpis = useMemo(
+    () => (highlightedOfficialResult ? officialLockedScenarioMetrics(highlightedOfficialResult) : kpiFromOverall(overallSummary)),
+    [highlightedOfficialResult, overallSummary],
+  );
   const timeData = useMemo(() => chartRows(rows), [rows]);
 
   const energyData = useMemo(() => {
@@ -234,14 +314,31 @@ export default function DashboardPage() {
   }, [policySeries, timeData]);
 
   async function handleRun(): Promise<void> {
+    const seedValue = seed === "" ? Number.NaN : Number(seed);
+    const stepsValue = steps === "" ? Number.NaN : Number(steps);
+
+    if (!Number.isFinite(seedValue) || !Number.isFinite(stepsValue)) {
+      setError("Enter both seed and steps before starting a run");
+      return;
+    }
+
     setRunning(true);
     setError("");
 
     try {
-      const started = await startRun({ policy, scenario, seed, steps });
-      setSelectedRunId(started.run_id);
+      const started = await startRun({ policy, scenario, seed: seedValue, steps: stepsValue });
       const refreshed = await listRuns();
-      setRuns(refreshed);
+      const startedRun: RunSummary = {
+        run_id: started.run_id,
+        policy,
+        scenario,
+        seed: seedValue,
+        max_steps: stepsValue,
+        tag: "dashboard",
+      };
+
+      setRuns(upsertRun(refreshed, startedRun));
+      setSelectedRunId(started.run_id);
     } catch (apiError) {
       setError(apiError instanceof Error ? apiError.message : "Unable to start run on backend");
     } finally {
@@ -250,15 +347,19 @@ export default function DashboardPage() {
   }
 
   function handleReset(): void {
-    setPolicy("ppo");
-    setScenario("normal");
-    setSeed(42);
-    setSteps(300);
+    const selectedRun = runs.find((run) => run.run_id === selectedRunId);
+    setPolicy(selectedRun?.policy ? String(selectedRun.policy).toLowerCase() : "ppo");
+    setScenario(selectedRun?.scenario ? String(selectedRun.scenario).toLowerCase() : "normal");
+    setSeed(
+      selectedRun?.seed != null
+        ? String(selectedRun.seed)
+        : selectedRun?.topology_seed != null
+          ? String(selectedRun.topology_seed)
+          : "",
+    );
+    setSteps(selectedRun?.max_steps != null ? String(selectedRun.max_steps) : "");
     setTopologyStepIndex(Math.max(0, rows.length - 1));
   }
-
-  const selectedRun = runs.find((run) => run.run_id === selectedRunId);
-  const demoMode = selectedRun ? isDemoRunId(selectedRun.run_id) : false;
 
   return (
     <div className="page dashboard-page">
@@ -284,6 +385,12 @@ export default function DashboardPage() {
           description="Backend data is unavailable or empty. Showing generated simulation data so the dashboard remains fully interactive."
         />
       ) : null}
+      {highlightedOfficialResult ? (
+        <InfoNotice
+          title="Official Locked Summary Available"
+          description={`Burst and hotspot now include official locked acceptance summaries. The highlighted official card below matches the current ${highlightedOfficialResult.scenario} scenario, while the charts and topology playback remain live-run views.`}
+        />
+      ) : null}
 
       {kpis.length > 0 ? (
         <section className="kpi-grid">
@@ -292,14 +399,32 @@ export default function DashboardPage() {
           ))}
         </section>
       ) : null}
+      {officialResults.length > 0 ? (
+        <section className="official-results-section">
+          <div className="card-heading">
+            <p>Official Locked Results</p>
+            <h3>Burst and hotspot acceptance bundles</h3>
+          </div>
+
+          <div className="official-results-grid">
+            {officialResults.map((result) => (
+              <OfficialResultCard
+                key={`${result.scenario}-${result.bundle_id}`}
+                result={result}
+                active={result.scenario === activeOfficialScenario}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="dashboard-grid">
         <div className="left-stack">
           {loadingData ? <LoadingNotice title="Loading run metrics" description="Reading per-step data." /> : null}
 
           <ChartCard
-            title="Energy Consumption Over Time"
-            subtitle="kWh"
+            title="Step Energy Over Time"
+            subtitle="kWh per step"
             data={energyData.length > 0 ? energyData : timeData}
             lines={[
               { dataKey: "selected", label: "Selected Run", color: "#55ffaa" },
@@ -309,14 +434,14 @@ export default function DashboardPage() {
           />
 
           <ChartCard
-            title="Delay Over Time"
-            subtitle="ms"
+            title="Path Latency Over Time"
+            subtitle="base routing latency in ms"
             data={timeData}
-            lines={[{ dataKey: "avg_delay_ms", label: "Avg Delay", color: "#66d2ff" }]}
+            lines={[{ dataKey: "avg_path_latency_ms", label: "Path Latency", color: "#66d2ff" }]}
           />
 
           <ChartCard
-            title="Packet Drop Rate Over Time"
+            title="Dropped Packets Per Step"
             subtitle="packets"
             data={timeData}
             lines={[{ dataKey: "dropped", label: "Dropped", color: "#ff7f96" }]}

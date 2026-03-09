@@ -77,7 +77,7 @@ export default function TopologyPanel({
   metrics,
   previousMetrics,
   title = "Network Topology",
-  subtitle = "Packets flow in real time. Switching links trigger reroutes or drops.",
+  subtitle = "Simulated packet flow and real link-state playback. Switching links can trigger reroutes or drops.",
 }: TopologyPanelProps) {
   const [phase, setPhase] = useState(0);
 
@@ -143,15 +143,15 @@ export default function TopologyPanel({
       return output;
     }
 
-    const deliveredDelta = Math.max(0, (metrics?.delivered ?? 0) - (previousMetrics?.delivered ?? 0));
-    const droppedDelta = Math.max(0, (metrics?.dropped ?? 0) - (previousMetrics?.dropped ?? 0));
+    const deliveredStep = Math.max(0, metrics?.delivered ?? 0);
+    const droppedStep = Math.max(0, metrics?.dropped ?? 0);
 
     const deliveredCount = clampInt(
-      deliveredDelta > 0 ? deliveredDelta / 3 : Math.max(2, activeEdges.length * 0.6),
+      deliveredStep > 0 ? deliveredStep / 3 : Math.max(2, activeEdges.length * 0.6),
       2,
       20,
     );
-    const droppedCount = clampInt(droppedDelta / 2, 0, 12);
+    const droppedCount = clampInt(droppedStep / 2, 0, 12);
 
     const reroutedCount =
       droppedCount > 0 && inactiveEdges.length > 0 && activeEdges.length > 0
@@ -254,7 +254,7 @@ export default function TopologyPanel({
           </small>
         </article>
         <article>
-          <span>Link Power (est.)</span>
+          <span>Link Power (visual est.)</span>
           <strong>{estimatedPower.toFixed(1)} W</strong>
         </article>
       </div>

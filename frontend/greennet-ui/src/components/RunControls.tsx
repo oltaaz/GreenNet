@@ -3,19 +3,27 @@
 type RunControlsProps = {
   policy: string;
   scenario: string;
-  seed: number;
-  steps: number;
+  seed: string;
+  steps: string;
   loading?: boolean;
   runId?: string;
   runs?: RunSummary[];
   onPolicyChange: (value: string) => void;
   onScenarioChange: (value: string) => void;
-  onSeedChange: (value: number) => void;
-  onStepsChange: (value: number) => void;
+  onSeedChange: (value: string) => void;
+  onStepsChange: (value: string) => void;
   onRun: () => void;
   onReset: () => void;
   onRunSelect?: (runId: string) => void;
 };
+
+function sanitizeIntegerInput(value: string): string {
+  const digitsOnly = value.replace(/\D/g, "");
+  if (!digitsOnly) {
+    return "";
+  }
+  return String(Number(digitsOnly));
+}
 
 export default function RunControls({
   policy,
@@ -33,6 +41,40 @@ export default function RunControls({
   onReset,
   onRunSelect,
 }: RunControlsProps) {
+  const parsedSteps = steps === "" ? Number.NaN : Number(steps);
+  const showLongRunWarning = Number.isFinite(parsedSteps) && parsedSteps >= 4000;
+  const canRun =
+    seed !== "" &&
+    steps !== "" &&
+    Number.isFinite(parsedSteps) &&
+    parsedSteps >= 1 &&
+    parsedSteps <= 5000;
+
+  function handleSeedInputChange(value: string): void {
+    onSeedChange(sanitizeIntegerInput(value));
+  }
+
+  function handleSeedBlur(): void {
+    if (seed === "") {
+      return;
+    }
+    onSeedChange(String(Math.max(0, Number(seed))));
+  }
+
+  function handleStepsInputChange(value: string): void {
+    const next = sanitizeIntegerInput(value);
+    onStepsChange(next);
+  }
+
+  function handleStepsBlur(): void {
+    if (steps === "") {
+      return;
+    }
+
+    const normalized = String(Math.min(5000, Math.max(1, Number(steps))));
+    onStepsChange(normalized);
+  }
+
   return (
     <section className="glass-card control-card">
       <div className="card-heading">
@@ -75,26 +117,37 @@ export default function RunControls({
         <label>
           Seed
           <input
-            type="number"
-            min={0}
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             value={seed}
-            onChange={(event) => onSeedChange(Number(event.target.value))}
+            onChange={(event) => handleSeedInputChange(event.target.value)}
+            onBlur={handleSeedBlur}
           />
         </label>
 
         <label>
           Steps
           <input
-            type="number"
-            min={1}
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             value={steps}
-            onChange={(event) => onStepsChange(Number(event.target.value))}
+            onChange={(event) => handleStepsInputChange(event.target.value)}
+            onBlur={handleStepsBlur}
           />
         </label>
       </div>
 
+      {showLongRunWarning ? (
+        <div className="control-warning" role="status" aria-live="polite">
+          <strong>High step count selected</strong>
+          <p>Runs near the current 5000-step limit can take a bit longer to finish in the live dashboard.</p>
+        </div>
+      ) : null}
+
       <div className="button-row">
-        <button className="btn-primary" onClick={onRun} disabled={loading}>
+        <button className="btn-primary" onClick={onRun} disabled={loading || !canRun}>
           {loading ? "Running..." : "Run Simulation"}
         </button>
         <button className="btn-muted" onClick={onReset}>

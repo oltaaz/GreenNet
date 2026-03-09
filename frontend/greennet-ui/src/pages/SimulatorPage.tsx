@@ -14,6 +14,17 @@ import {
 import { isDemoRunId } from "../lib/demo";
 import type { RunSummary, StepState, TopologyData } from "../lib/types";
 
+function upsertRun(runs: RunSummary[], nextRun: RunSummary): RunSummary[] {
+  const existing = runs.findIndex((run) => run.run_id === nextRun.run_id);
+  if (existing === 0) {
+    return runs;
+  }
+  if (existing > 0) {
+    return [nextRun, ...runs.filter((run) => run.run_id !== nextRun.run_id)];
+  }
+  return [nextRun, ...runs];
+}
+
 export default function SimulatorPage() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [policy, setPolicy] = useState("ppo");
@@ -53,11 +64,14 @@ export default function SimulatorPage() {
   }, []);
 
   useEffect(() => {
+    if (selectedRunId && runs.some((run) => run.run_id === selectedRunId)) {
+      return;
+    }
     const candidate = latestRunByPolicy(runs, policy) ?? runs[0] ?? null;
     if (candidate?.run_id) {
       setSelectedRunId(candidate.run_id);
     }
-  }, [policy, runs]);
+  }, [policy, runs, selectedRunId]);
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -128,9 +142,17 @@ export default function SimulatorPage() {
 
     try {
       const started = await startRun({ policy, scenario: "normal", seed: 42, steps: 300 });
-      setSelectedRunId(started.run_id);
       const refreshed = await listRuns();
-      setRuns(refreshed);
+      setRuns(
+        upsertRun(refreshed, {
+          run_id: started.run_id,
+          policy,
+          scenario: "normal",
+          seed: 42,
+          tag: "dashboard",
+        }),
+      );
+      setSelectedRunId(started.run_id);
     } catch (apiError) {
       setError(apiError instanceof Error ? apiError.message : "Could not start run from simulator");
     } finally {
@@ -141,6 +163,8 @@ export default function SimulatorPage() {
   const maxStep = Math.max(0, timeline.length - 1);
   const step = timeline[currentStep] ?? timeline[maxStep] ?? null;
   const previousStep = timeline[Math.max(0, currentStep - 1)] ?? step;
+  const displayedStep = step?.t ?? currentStep;
+  const displayedMaxStep = timeline[maxStep]?.t ?? maxStep;
 
   const derivedPolicy = useMemo(() => {
     const run = runs.find((item) => item.run_id === selectedRunId);
@@ -198,7 +222,7 @@ export default function SimulatorPage() {
       <section className="page-title-row">
         <div>
           <p className="page-eyebrow">Packet Simulator</p>
-          <h1>Real-time topology playback with packet movement and link power states</h1>
+          <h1>Topology playback with simulated packet flow and real link states</h1>
         </div>
       </section>
 
@@ -272,7 +296,7 @@ export default function SimulatorPage() {
           </label>
 
           <label>
-            Timeline (step {currentStep}/{maxStep})
+            Timeline (step {displayedStep}/{displayedMaxStep})
             <input
               type="range"
               min={0}
@@ -294,20 +318,24 @@ export default function SimulatorPage() {
 
           <section className="stats-grid-mini">
             <article>
-              <span>Delivered</span>
+              <span>Sent (step)</span>
+              <strong>{fmt((step?.metrics.delivered ?? 0) + (step?.metrics.dropped ?? 0), 0)}</strong>
+            </article>
+            <article>
+              <span>Delivered (step)</span>
               <strong>{fmt(step?.metrics.delivered ?? 0, 0)}</strong>
             </article>
             <article>
-              <span>Dropped</span>
+              <span>Dropped (step)</span>
               <strong>{fmt(step?.metrics.dropped ?? 0, 0)}</strong>
             </article>
             <article>
-              <span>Avg Delay (ms)</span>
+              <span>Path Latency (ms)</span>
               <strong>{fmt(step?.metrics.avg_delay_ms ?? 0)}</strong>
             </article>
             <article>
               <span>Energy (kWh)</span>
-              <strong>{fmt(step?.metrics.energy_kwh ?? 0)}</strong>
+              <strong>{fmt(step?.metrics.energy_kwh ?? 0, 3)}</strong>
             </article>
             <article>
               <span>Active Ratio (%)</span>

@@ -28,8 +28,8 @@
         <article className="glass-card info-card">
           <h3>Core Metrics</h3>
           <p>
-            Energy (kWh), carbon (g CO2), delay (ms), delivered, dropped, active ratio, and reward are reported at each
-            step and summarized at run-level in comparison tables.
+            Energy (kWh), carbon (g CO2), path latency (ms), delivered, dropped, active ratio, and reward are reported
+            at each step and summarized at run-level in comparison tables.
           </p>
         </article>
 

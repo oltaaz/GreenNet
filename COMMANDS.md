@@ -251,6 +251,56 @@ streamlit run app.py
 
 ---------------------------------------------------------------------------------------------------------------------------------------
 
+## 11) Frontend + Backend Integration
+
+Start the backend API:
+
+cd ~/Desktop/GreenNet/
+source ml-env/.venv/bin/activate
+uvicorn api_app:app --host 127.0.0.1 --port 8000
+
+Start the frontend in a new terminal:
+
+cd ~/Desktop/GreenNet/frontend/greennet-ui
+npm run dev -- --host 127.0.0.1 --port 5173
+
+Build the frontend:
+
+cd ~/Desktop/GreenNet/frontend/greennet-ui
+npm run build
+
+Backend health check:
+
+curl http://127.0.0.1:8000/api/health
+
+List runs:
+
+curl "http://127.0.0.1:8000/api/runs?limit=3"
+
+Get topology for a run:
+
+curl "http://127.0.0.1:8000/api/runs/<RUN_ID>/topology"
+
+Get step timeline for a run:
+
+curl "http://127.0.0.1:8000/api/runs/<RUN_ID>/steps"
+
+Get link state at a specific step:
+
+curl "http://127.0.0.1:8000/api/runs/<RUN_ID>/link_state?step=10"
+
+Start a new run from the backend:
+
+curl -X POST "http://127.0.0.1:8000/api/runs/start" \
+  -H "Content-Type: application/json" \
+  -d '{"policy":"baseline","scenario":"normal","seed":123,"steps":20}'
+
+Frontend URL:
+
+http://127.0.0.1:5173/
+
+---------------------------------------------------------------------------------------------------------------------------------------
+
 ## Notes
 
 - Run commands from the project root unless stated otherwise.
