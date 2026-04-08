@@ -1,7 +1,6 @@
 ﻿import type {
   FinalEvaluationReport,
   FinalEvaluationSummaryRow,
-  FinalEvaluationThresholds,
   KpiMetric,
   LinkStateMap,
   OfficialLockedResult,
@@ -27,6 +26,13 @@ export function edgeId(source: string, target: string): string {
   return source < target ? `${source}__${target}` : `${target}__${source}`;
 }
 
+function capitalize(value: string): string {
+  if (!value) {
+    return "";
+  }
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 function toNumber(value: unknown, fallback = 0): number {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -38,86 +44,6 @@ function toNumber(value: unknown, fallback = 0): number {
     }
   }
   return fallback;
-}
-
-type QosAcceptanceSource = {
-  qos_acceptance_status?: string;
-  qos_acceptability_status?: string;
-  qos_status?: string;
-  qos_acceptance_missing?: string;
-  qos_acceptability_missing?: string;
-  qos_missing?: string;
-  qos_thresholds?: Partial<FinalEvaluationThresholds>;
-  qos_acceptance_thresholds?: Partial<FinalEvaluationThresholds>;
-  qos_acceptability_thresholds?: Partial<FinalEvaluationThresholds>;
-  hypothesis_thresholds?: Partial<FinalEvaluationThresholds>;
-};
-
-type StabilitySource = {
-  stability_status?: string;
-  stability_missing?: string;
-};
-
-function firstNonEmptyString(...values: Array<string | null | undefined>): string {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim() !== "") {
-      return value;
-    }
-  }
-  return "";
-}
-
-export function selectQosAcceptanceStatus(source: QosAcceptanceSource | null | undefined): string {
-  if (!source) {
-    return "";
-  }
-
-  return firstNonEmptyString(
-    source.qos_acceptance_status,
-    source.qos_acceptability_status,
-    source.qos_status,
-  );
-}
-
-export function selectQosAcceptanceMissing(source: QosAcceptanceSource | null | undefined): string {
-  if (!source) {
-    return "";
-  }
-
-  return firstNonEmptyString(
-    source.qos_acceptance_missing,
-    source.qos_acceptability_missing,
-    source.qos_missing,
-  );
-}
-
-export function selectQosAcceptanceThresholds(
-  source: QosAcceptanceSource | null | undefined,
-): Partial<FinalEvaluationThresholds> | undefined {
-  if (!source) {
-    return undefined;
-  }
-
-  return (
-    source.qos_thresholds ??
-    source.qos_acceptance_thresholds ??
-    source.qos_acceptability_thresholds ??
-    source.hypothesis_thresholds
-  );
-}
-
-export function selectStabilityStatus(source: StabilitySource | null | undefined): string {
-  if (!source) {
-    return "";
-  }
-  return firstNonEmptyString(source.stability_status);
-}
-
-export function selectStabilityMissing(source: StabilitySource | null | undefined): string {
-  if (!source) {
-    return "";
-  }
-  return firstNonEmptyString(source.stability_missing);
 }
 
 function seeded(seed: number): () => number {
@@ -300,101 +226,7 @@ export function latestRunByPolicy(runs: RunSummary[], policy: string): RunSummar
   if (!filtered.length) {
     return null;
   }
-
-  const scenarioRank = (scenario: string | null | undefined): number => {
-    switch ((scenario ?? "").toLowerCase()) {
-      case "normal":
-        return 0;
-      case "hotspot":
-        return 1;
-      case "burst":
-        return 2;
-      case "diurnal":
-        return 3;
-      case "flash_crowd":
-        return 4;
-      case "custom":
-        return 5;
-      default:
-        return 6;
-    }
-  };
-
-  return [...filtered].sort((left, right) => {
-    const leftOfficial = left.tag === "official_acceptance_v1" || left.matrix_id === "official_acceptance_v1";
-    const rightOfficial = right.tag === "official_acceptance_v1" || right.matrix_id === "official_acceptance_v1";
-    if (leftOfficial !== rightOfficial) {
-      return leftOfficial ? -1 : 1;
-    }
-
-    const scenarioDelta = scenarioRank(left.scenario) - scenarioRank(right.scenario);
-    if (scenarioDelta !== 0) {
-      return scenarioDelta;
-    }
-
-    const leftStarted = Date.parse(left.started_at ?? "") || 0;
-    const rightStarted = Date.parse(right.started_at ?? "") || 0;
-    return rightStarted - leftStarted;
-  })[0];
-}
-
-function runScenarioRank(run: RunSummary): number {
-  switch ((run.scenario ?? "").trim().toLowerCase()) {
-    case "normal":
-      return 0;
-    case "hotspot":
-      return 1;
-    case "burst":
-      return 2;
-    case "diurnal":
-      return 3;
-    case "flash_crowd":
-      return 4;
-    case "custom":
-      return 5;
-    default:
-      return 6;
-  }
-}
-
-function runPriorityScore(run: RunSummary): number {
-  let score = 0;
-  if (run.tag === "official_acceptance_v1" || run.matrix_id === "official_acceptance_v1") {
-    score += 100;
-  }
-  if ((run.source ?? "").trim().toLowerCase() === "results") {
-    score += 10;
-  }
-  score -= runScenarioRank(run);
-  return score;
-}
-
-export function isCanonicalOfficialRun(run: RunSummary): boolean {
-  return run.tag === "official_acceptance_v1" || run.matrix_id === "official_acceptance_v1";
-}
-
-export function selectTopRuns(runs: RunSummary[], limit = 20): RunSummary[] {
-  const ranked = [...runs]
-    .sort((left, right) => {
-      const scoreDelta = runPriorityScore(right) - runPriorityScore(left);
-      if (scoreDelta !== 0) {
-        return scoreDelta;
-      }
-
-      const leftStarted = Date.parse(left.started_at ?? "") || 0;
-      const rightStarted = Date.parse(right.started_at ?? "") || 0;
-      return rightStarted - leftStarted;
-    });
-
-  const official = ranked.filter(isCanonicalOfficialRun);
-  const other = ranked.filter((run) => !isCanonicalOfficialRun(run));
-
-  if (official.length >= limit) {
-    return official.slice(0, limit);
-  }
-
-  const otherBudget = official.length > 0 ? Math.min(4, limit - official.length) : limit;
-  return [...official.slice(0, limit), ...other.slice(0, otherBudget)].slice(0, limit);
+  return filtered[0];
 }
 
 function radialLayout(nodeCount: number): Array<{ x: number; y: number }> {
@@ -539,8 +371,8 @@ export function officialLockedScenarioMetrics(result: OfficialLockedResult): Kpi
     { label: "Dropped Traffic", value: toNumber(trained.dropped_mean, 0), unit: "pkts", digits: 0 },
     { label: "Drop Rate", value: toNumber(trained.drop_rate, 0) * 100, unit: "%", digits: 1 },
     { label: "Total Energy", value: toNumber(trained.energy_kwh_mean, 0), unit: "kWh", digits: 3 },
-    { label: "Dropped vs Traditional", value: toNumber(delta?.delta_dropped, 0), unit: "pkts", digits: 0 },
-    { label: "Energy vs Traditional", value: toNumber(delta?.delta_energy_kwh, 0), unit: "kWh", digits: 3 },
+    { label: "Dropped vs All-On", value: toNumber(delta?.delta_dropped, 0), unit: "pkts", digits: 0 },
+    { label: "Energy vs All-On", value: toNumber(delta?.delta_energy_kwh, 0), unit: "kWh", digits: 3 },
   ];
 }
 
@@ -551,36 +383,38 @@ export function fmt(value: number, digits = 2): string {
 export function formatPolicyLabel(policy: string): string {
   const normalized = normalizePolicy(policy);
   if (normalized === "ppo") {
-    return "PPO-Based Hybrid (AI)";
+    return "PPO";
   }
   if (normalized === "all_on") {
-    return "Traditional (All-On)";
+    return "All-On";
   }
   if (normalized === "heuristic") {
-    return "Energy-Aware Heuristic";
+    return "Heuristic";
   }
   return policy;
 }
 
 export function formatRunOptionLabel(run: RunSummary): string {
-  const parts = [isCanonicalOfficialRun(run) ? "Official" : "Other", formatPolicyLabel(inferPolicy(run))];
+  const parts = [formatPolicyLabel(inferPolicy(run))];
   const scenario = typeof run.scenario === "string" ? run.scenario.trim().toLowerCase() : "";
   const seed = run.seed ?? run.topology_seed;
   const tag = typeof run.tag === "string" ? run.tag.trim() : "";
-  const matrixId = typeof run.matrix_id === "string" ? run.matrix_id.trim() : "";
+  const source = typeof run.source === "string" ? run.source.trim().toLowerCase() : "";
 
   if (scenario) {
-    parts.push(formatScenarioLabel(scenario));
+    parts.push(capitalize(scenario));
   }
   if (seed != null) {
     parts.push(`seed ${seed}`);
   }
-  if (!isCanonicalOfficialRun(run) && tag && tag !== "dashboard") {
-    parts.push(tag);
+  if (tag) {
+    parts.push(`tag ${tag}`);
   }
-  if (!isCanonicalOfficialRun(run) && matrixId && matrixId !== "official_acceptance_v1") {
-    parts.push(matrixId);
+  if (source) {
+    parts.push(source);
   }
+
+  parts.push(run.run_id);
   return parts.join(" | ");
 }
 
@@ -606,50 +440,18 @@ export function formatStatusLabel(value: string): string {
   if (!value) {
     return "Unknown";
   }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "ai_policy") {
-    return "AI Policy";
-  }
-  if (normalized === "traditional_baseline") {
-    return "Traditional Baseline";
-  }
-  if (normalized === "heuristic_baseline" || normalized === "energy_aware_heuristic") {
-    return "Heuristic Baseline";
-  }
-  if (normalized === "non_ai_baseline") {
-    return "Non-AI Baseline";
-  }
   return titleCaseFromSlug(value);
 }
 
 export function statusTone(value: string): "success" | "warning" | "danger" | "neutral" {
   const normalized = value.trim().toLowerCase();
-  if (
-    normalized === "achieved" ||
-    normalized === "acceptable" ||
-    normalized === "accepted" ||
-    normalized === "pass" ||
-    normalized === "passed" ||
-    normalized === "approved" ||
-    normalized === "met" ||
-    normalized === "stable"
-  ) {
+  if (normalized === "achieved" || normalized === "acceptable" || normalized === "pass") {
     return "success";
   }
-  if (normalized === "insufficient_data" || normalized === "check" || normalized === "pending" || normalized === "unknown") {
+  if (normalized === "insufficient_data" || normalized === "check") {
     return "warning";
   }
-  if (
-    normalized === "not_achieved" ||
-    normalized === "missing" ||
-    normalized === "fail" ||
-    normalized === "failed" ||
-    normalized === "rejected" ||
-    normalized === "violated" ||
-    normalized === "violation" ||
-    normalized === "breach" ||
-    normalized === "unstable"
-  ) {
+  if (normalized === "not_achieved" || normalized === "missing" || normalized === "fail") {
     return "danger";
   }
   return "neutral";

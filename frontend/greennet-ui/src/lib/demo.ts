@@ -13,7 +13,14 @@ type DemoRunConfig = {
 const DEMO_KEY = "greennet_demo_runs_v1";
 
 function normalizeDemoPolicy(policy: string): string {
-  return normalizePolicy(policy);
+  const raw = policy.trim().toLowerCase();
+  if (raw === "baseline") {
+    return "all_on";
+  }
+  if (raw === "noop") {
+    return "heuristic";
+  }
+  return normalizePolicy(raw);
 }
 
 function seeded(seed: number): () => number {
@@ -212,8 +219,6 @@ function configToSummary(config: DemoRunConfig): RunSummary {
     seed: config.seed,
     topology_seed: config.seed,
     max_steps: config.steps,
-    source: "demo",
-    tag: "demo",
   };
 }
 

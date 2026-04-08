@@ -1,9 +1,9 @@
-"""Controller baselines for GreenNet.
+"""Traditional controller baselines for GreenNet.
 
 Runs three policies on the same seeded environment:
-  A) Official traditional baseline controller: always-on (no toggles)
-  B) Energy-aware heuristic baseline: utilization-threshold controller
-  C) AI policy (if a PPO model path is provided)
+  A) Always-on (no toggles)
+  B) Utilization-threshold controller (toggle off low-util edges, toggle on if congested)
+  C) RL policy (if a PPO model path is provided)
 """
 from __future__ import annotations
 
@@ -15,10 +15,6 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 
 from greennet.env import EnvConfig, GreenNetEnv
-from greennet.policy_taxonomy import (
-    canonical_controller_policy_name,
-    controller_policy_class,
-)
 
 try:
     from stable_baselines3 import PPO
@@ -27,6 +23,26 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 ActionFn = Callable[[Dict[str, Any], Dict[str, Any], GreenNetEnv], int]
+
+
+def canonical_controller_policy_name(policy: str | None) -> str:
+    key = str(policy or "").strip().lower()
+    if key in {"noop", "all_on"}:
+        return "all_on"
+    if key in {"baseline", "heuristic"}:
+        return "utilization_threshold"
+    if key == "ppo":
+        return "ppo"
+    return key or "unknown"
+
+
+def controller_policy_class(policy: str | None) -> str:
+    canonical = canonical_controller_policy_name(policy)
+    if canonical in {"all_on", "utilization_threshold"}:
+        return "traditional_baseline"
+    if canonical == "ppo":
+        return "ai_enhanced"
+    return "other"
 
 
 def action_always_on(_: Dict[str, Any], __: Dict[str, Any], ___: GreenNetEnv) -> int:

@@ -56,22 +56,16 @@ class StepMetrics:
     avg_delay_ms: float = 0.0
     avg_path_latency_ms: float = 0.0
     energy_kwh: float = 0.0
-    energy_steady_kwh: float = 0.0
-    energy_transition_kwh: float = 0.0
     carbon_g: float = 0.0
-    carbon_intensity_g_per_kwh: float = 0.0
     power_total_watts: float = 0.0
     power_fixed_watts: float = 0.0
     power_variable_watts: float = 0.0
-    power_transition_watts_equiv: float = 0.0
     power_device_watts: float = 0.0
     power_link_watts: float = 0.0
     active_devices: int = 0
     inactive_devices: int = 0
     active_links: int = 0
     inactive_links: int = 0
-    transition_on_count: int = 0
-    transition_off_count: int = 0
 
 
 class Simulator:
@@ -241,21 +235,16 @@ class Simulator:
         avg_delay = avg_delay_ms / 1000.0
 
         energy_kwh = 0.0
-        energy_steady_kwh = 0.0
         carbon_g = 0.0
-        carbon_intensity_g_per_kwh = 0.0
         power_total_watts = 0.0
         power_fixed_watts = 0.0
         power_variable_watts = 0.0
-        power_transition_watts_equiv = 0.0
         power_device_watts = 0.0
         power_link_watts = 0.0
         active_devices = 0
         inactive_devices = 0
         active_links = 0
         inactive_links = 0
-        transition_on_count = 0
-        transition_off_count = 0
         if self.power_model_watts is not None:
             power_result = self.power_model_watts(self.graph)
             if isinstance(power_result, PowerSnapshot):
@@ -271,10 +260,9 @@ class Simulator:
             else:
                 power_total_watts = _safe_float(power_result, 0.0)
             energy_kwh = max(0.0, power_total_watts) * (self.dt_seconds / 3600.0) / 1000.0
-            energy_steady_kwh = float(energy_kwh)
             if self.carbon_intensity_g_per_kwh is not None:
-                carbon_intensity_g_per_kwh = _safe_float(self.carbon_intensity_g_per_kwh(self.t), 0.0)
-                carbon_g = max(0.0, energy_kwh * carbon_intensity_g_per_kwh)
+                intensity = _safe_float(self.carbon_intensity_g_per_kwh(self.t), 0.0)
+                carbon_g = max(0.0, energy_kwh * intensity)
 
         self.t += self.dt_seconds
         return StepMetrics(
@@ -285,22 +273,16 @@ class Simulator:
             avg_delay_ms=avg_delay_ms,
             avg_path_latency_ms=avg_path_latency_ms,
             energy_kwh=energy_kwh,
-            energy_steady_kwh=energy_steady_kwh,
-            energy_transition_kwh=0.0,
             carbon_g=carbon_g,
-            carbon_intensity_g_per_kwh=carbon_intensity_g_per_kwh,
             power_total_watts=power_total_watts,
             power_fixed_watts=power_fixed_watts,
             power_variable_watts=power_variable_watts,
-            power_transition_watts_equiv=power_transition_watts_equiv,
             power_device_watts=power_device_watts,
             power_link_watts=power_link_watts,
             active_devices=active_devices,
             inactive_devices=inactive_devices,
             active_links=active_links,
             inactive_links=inactive_links,
-            transition_on_count=transition_on_count,
-            transition_off_count=transition_off_count,
         )
 
     def _active_routing_graph(self) -> "nx.Graph":

@@ -203,52 +203,6 @@
   justify-content: flex-end;
 }
 
-.backend-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(140, 176, 216, 0.32);
-  background: rgba(8, 22, 40, 0.66);
-  color: #d5e6fb;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-
-.backend-indicator-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #9db7d9;
-  box-shadow: 0 0 0 4px rgba(157, 183, 217, 0.12);
-}
-
-.backend-indicator.online {
-  border-color: rgba(85, 255, 170, 0.35);
-}
-
-.backend-indicator.online .backend-indicator-dot {
-  background: #58f8b3;
-  box-shadow: 0 0 0 4px rgba(88, 248, 179, 0.14);
-}
-
-.backend-indicator.offline {
-  border-color: rgba(255, 96, 117, 0.38);
-  color: #ffd7de;
-}
-
-.backend-indicator.offline .backend-indicator-dot {
-  background: #ff7286;
-  box-shadow: 0 0 0 4px rgba(255, 114, 134, 0.14);
-}
-
-.backend-indicator.checking .backend-indicator-dot {
-  background: #f7bf5e;
-  box-shadow: 0 0 0 4px rgba(247, 191, 94, 0.14);
-}
-
 .nav-link {
   color: var(--muted);
   font-size: 0.96rem;
@@ -275,12 +229,6 @@
   padding: 104px 0 26px;
   position: relative;
   z-index: 2;
-}
-
-.backend-banner-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: -6px;
 }
 
 .page {
@@ -789,9 +737,6 @@
 .chart-wrap {
   margin-top: 8px;
   height: 210px;
-  min-height: 210px;
-  min-width: 0;
-  width: 100%;
 }
 
 .control-card {
@@ -810,19 +755,6 @@
   border-radius: 12px;
   background: rgba(79, 52, 8, 0.24);
   padding: 9px 10px;
-}
-
-.control-warning.offline {
-  border-color: rgba(255, 96, 117, 0.32);
-  background: rgba(51, 13, 24, 0.54);
-}
-
-.control-warning.offline strong {
-  color: #ffb6c1;
-}
-
-.control-warning.offline p {
-  color: rgba(255, 228, 233, 0.88);
 }
 
 .control-warning strong {
@@ -850,12 +782,6 @@ label {
   gap: 5px;
   color: var(--text);
   font-size: 0.84rem;
-}
-
-.input-help {
-  color: var(--muted);
-  font-size: 0.72rem;
-  line-height: 1.35;
 }
 
 select,
@@ -1322,4 +1248,6 @@ th {
     display: none;
   }
 }
+
+
 

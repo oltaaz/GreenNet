@@ -166,96 +166,6 @@ _MIGRATIONS: Sequence[tuple[str, str]] = (
             ON run_step_metrics (source, run_name, episode, step);
         """,
     ),
-    (
-        "002_experiment_story_expansion",
-        """
-        ALTER TABLE runs ADD COLUMN matrix_id TEXT;
-        ALTER TABLE runs ADD COLUMN matrix_name TEXT;
-        ALTER TABLE runs ADD COLUMN matrix_manifest TEXT;
-        ALTER TABLE runs ADD COLUMN matrix_case_id TEXT;
-        ALTER TABLE runs ADD COLUMN matrix_case_label TEXT;
-        ALTER TABLE runs ADD COLUMN policy_class TEXT;
-        ALTER TABLE runs ADD COLUMN controller_policy TEXT;
-        ALTER TABLE runs ADD COLUMN controller_policy_class TEXT;
-        ALTER TABLE runs ADD COLUMN topology_name TEXT;
-        ALTER TABLE runs ADD COLUMN topology_path TEXT;
-        ALTER TABLE runs ADD COLUMN traffic_mode TEXT;
-        ALTER TABLE runs ADD COLUMN traffic_model TEXT;
-        ALTER TABLE runs ADD COLUMN traffic_name TEXT;
-        ALTER TABLE runs ADD COLUMN traffic_path TEXT;
-        ALTER TABLE runs ADD COLUMN energy_model_name TEXT;
-        ALTER TABLE runs ADD COLUMN energy_model_signature TEXT;
-        ALTER TABLE runs ADD COLUMN carbon_model_name TEXT;
-        ALTER TABLE runs ADD COLUMN qos_policy_name TEXT;
-        ALTER TABLE runs ADD COLUMN qos_policy_signature TEXT;
-        ALTER TABLE runs ADD COLUMN stability_policy_name TEXT;
-        ALTER TABLE runs ADD COLUMN stability_policy_signature TEXT;
-        ALTER TABLE runs ADD COLUMN routing_baseline TEXT;
-        ALTER TABLE runs ADD COLUMN routing_link_cost_model TEXT;
-
-        ALTER TABLE run_summaries ADD COLUMN delivery_loss_rate_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN delivery_loss_rate_std REAL;
-        ALTER TABLE run_summaries ADD COLUMN energy_steady_kwh_total_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN energy_transition_kwh_total_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN power_total_watts_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN power_fixed_watts_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN power_variable_watts_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN power_transition_watts_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN qos_violation_rate_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN qos_violation_count_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN qos_acceptance_status TEXT;
-        ALTER TABLE run_summaries ADD COLUMN qos_acceptance_missing TEXT;
-        ALTER TABLE run_summaries ADD COLUMN transition_count_total_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN transition_on_count_total_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN transition_off_count_total_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN transition_rate_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN flap_event_count_total_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN flap_rate_mean REAL;
-        ALTER TABLE run_summaries ADD COLUMN stability_status TEXT;
-        ALTER TABLE run_summaries ADD COLUMN stability_missing TEXT;
-
-        ALTER TABLE run_episode_summaries ADD COLUMN delivery_loss_rate REAL;
-        ALTER TABLE run_episode_summaries ADD COLUMN qos_violation_rate REAL;
-        ALTER TABLE run_episode_summaries ADD COLUMN transition_count_total INTEGER;
-        ALTER TABLE run_episode_summaries ADD COLUMN transition_on_count_total INTEGER;
-        ALTER TABLE run_episode_summaries ADD COLUMN transition_off_count_total INTEGER;
-        ALTER TABLE run_episode_summaries ADD COLUMN flap_event_count_total INTEGER;
-        ALTER TABLE run_episode_summaries ADD COLUMN transition_rate REAL;
-        ALTER TABLE run_episode_summaries ADD COLUMN flap_rate REAL;
-        ALTER TABLE run_episode_summaries ADD COLUMN qos_acceptance_status TEXT;
-        ALTER TABLE run_episode_summaries ADD COLUMN stability_status TEXT;
-
-        ALTER TABLE run_step_metrics ADD COLUMN transition_count INTEGER;
-        ALTER TABLE run_step_metrics ADD COLUMN flap_event INTEGER;
-        ALTER TABLE run_step_metrics ADD COLUMN flap_event_count INTEGER;
-        ALTER TABLE run_step_metrics ADD COLUMN stability_reversal_penalty REAL;
-        ALTER TABLE run_step_metrics ADD COLUMN power_total_watts REAL;
-        ALTER TABLE run_step_metrics ADD COLUMN power_fixed_watts REAL;
-        ALTER TABLE run_step_metrics ADD COLUMN power_variable_watts REAL;
-        ALTER TABLE run_step_metrics ADD COLUMN power_transition_watts REAL;
-        ALTER TABLE run_step_metrics ADD COLUMN active_devices INTEGER;
-        ALTER TABLE run_step_metrics ADD COLUMN active_links INTEGER;
-
-        CREATE TABLE final_evaluations (
-            output_dir TEXT PRIMARY KEY,
-            generated_at_utc TEXT,
-            matrix_id TEXT,
-            matrix_name TEXT,
-            matrix_manifest TEXT,
-            matrix_tag TEXT,
-            source_summary_csv TEXT,
-            summary_path TEXT,
-            report_path TEXT,
-            payload_json TEXT NOT NULL,
-            updated_at_utc TEXT NOT NULL
-        );
-
-        CREATE INDEX idx_runs_matrix_lookup
-            ON runs (matrix_id, matrix_case_id, tag, policy, scenario, seed);
-        CREATE INDEX idx_final_evaluations_lookup
-            ON final_evaluations (generated_at_utc, matrix_id, matrix_tag);
-        """,
-    ),
 )
 
 
@@ -372,10 +282,6 @@ def _json_load_row(value: Any) -> Optional[Dict[str, Any]]:
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
-
-
-def _sql_placeholders(count: int) -> str:
-    return ", ".join("?" for _ in range(count))
 
 
 def _load_json_object(path: Path) -> Optional[Dict[str, Any]]:
@@ -496,20 +402,6 @@ class RunRepository(Protocol):
 
     def get_step_rows(self, source: str, run_name: str) -> List[Dict[str, Any]]: ...
 
-    def list_summary_rows(self, base: str = "both", tag: str | None = None) -> List[Dict[str, Any]]: ...
-
-    def upsert_final_evaluation(
-        self,
-        *,
-        output_dir: str,
-        payload: Dict[str, Any],
-        summary_path: str | None,
-        report_path: str | None,
-        source_summary_csv: str | None,
-    ) -> None: ...
-
-    def get_latest_final_evaluation(self) -> Optional[Dict[str, Any]]: ...
-
 
 def discover_run_artifacts(
     run_dir: Path,
@@ -613,95 +505,20 @@ class SqliteRunRepository:
                 "DELETE FROM runs WHERE source = ? AND run_name = ?",
                 (artifacts.source, artifacts.run_name),
             )
-            run_params = (
-                artifacts.source,
-                artifacts.run_name,
-                artifacts.run_path,
-                _first_text(meta.get("run_id")),
-                _first_text(meta.get("matrix_id")),
-                _first_text(meta.get("matrix_name")),
-                _first_text(meta.get("matrix_manifest")),
-                _first_text(meta.get("matrix_case_id")),
-                _first_text(meta.get("matrix_case_label")),
-                _first_text(meta.get("policy"), parsed.get("policy")),
-                _first_text(meta.get("policy_class")),
-                _first_text(meta.get("controller_policy")),
-                _first_text(meta.get("controller_policy_class")),
-                _first_text(meta.get("scenario"), parsed.get("scenario")),
-                _first_int(meta.get("seed"), parsed.get("seed")),
-                _first_int(meta.get("eval_seed"), meta.get("seed"), parsed.get("seed")),
-                _first_int(meta.get("topology_seed"), parsed.get("topology_seed")),
-                _first_text(meta.get("topology_name")),
-                _first_text(meta.get("topology_path")),
-                _first_int(meta.get("traffic_seed")),
-                _first_int(meta.get("traffic_seed_base"), meta.get("traffic_seed")),
-                _first_text(meta.get("traffic_mode")),
-                _first_text(meta.get("traffic_model")),
-                _first_text(meta.get("traffic_name")),
-                _first_text(meta.get("traffic_path")),
-                _first_text(meta.get("tag"), parsed.get("tag")),
-                _bool_to_db(meta.get("deterministic")),
-                _bool_to_db(meta.get("save_flows")),
-                episodes_value,
-                max_steps_value,
-                _first_text(meta.get("model_path")),
-                _first_text(meta.get("runs_dir")),
-                _first_text(meta.get("energy_model_name")),
-                _first_text(meta.get("energy_model_signature")),
-                _first_text(meta.get("carbon_model_name")),
-                _first_text(meta.get("qos_policy_name")),
-                _first_text(meta.get("qos_policy_signature")),
-                _first_text(meta.get("stability_policy_name")),
-                _first_text(meta.get("stability_policy_signature")),
-                _first_text(meta.get("routing_baseline")),
-                _first_text(meta.get("routing_link_cost_model")),
-                _first_text(meta.get("policy_type")),
-                _first_text(meta.get("model_type")),
-                _first_text(meta.get("control_mode")),
-                _first_text(meta.get("traffic_scenario")),
-                _first_int(meta.get("traffic_scenario_version")),
-                _first_float(meta.get("traffic_scenario_intensity")),
-                _first_float(meta.get("traffic_scenario_duration")),
-                _first_float(meta.get("traffic_scenario_frequency")),
-                timestamp_utc,
-                created_at_utc,
-                _first_text(meta.get("command")),
-                1 if artifacts.meta is not None else 0,
-                1 if artifacts.summary is not None else 0,
-                1 if artifacts.env_config is not None else 0,
-                1 if artifacts.step_rows else 0,
-                _json_dumps(meta) if artifacts.meta is not None else None,
-                _json_dumps(artifacts.env_config) if artifacts.env_config is not None else None,
-                updated_at_utc,
-            )
             conn.execute(
-                f"""
+                """
                 INSERT INTO runs (
                     source,
                     run_name,
                     run_path,
                     meta_run_id,
-                    matrix_id,
-                    matrix_name,
-                    matrix_manifest,
-                    matrix_case_id,
-                    matrix_case_label,
                     policy,
-                    policy_class,
-                    controller_policy,
-                    controller_policy_class,
                     scenario,
                     seed,
                     eval_seed,
                     topology_seed,
-                    topology_name,
-                    topology_path,
                     traffic_seed,
                     traffic_seed_base,
-                    traffic_mode,
-                    traffic_model,
-                    traffic_name,
-                    traffic_path,
                     tag,
                     deterministic,
                     save_flows,
@@ -709,15 +526,6 @@ class SqliteRunRepository:
                     max_steps,
                     model_path,
                     runs_dir,
-                    energy_model_name,
-                    energy_model_signature,
-                    carbon_model_name,
-                    qos_policy_name,
-                    qos_policy_signature,
-                    stability_policy_name,
-                    stability_policy_signature,
-                    routing_baseline,
-                    routing_link_cost_model,
                     policy_type,
                     model_type,
                     control_mode,
@@ -736,61 +544,51 @@ class SqliteRunRepository:
                     meta_json,
                     env_config_json,
                     updated_at_utc
-                ) VALUES ({_sql_placeholders(len(run_params))})
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                run_params,
+                (
+                    artifacts.source,
+                    artifacts.run_name,
+                    artifacts.run_path,
+                    _first_text(meta.get("run_id")),
+                    _first_text(meta.get("policy"), parsed.get("policy")),
+                    _first_text(meta.get("scenario"), parsed.get("scenario")),
+                    _first_int(meta.get("seed"), parsed.get("seed")),
+                    _first_int(meta.get("eval_seed"), meta.get("seed"), parsed.get("seed")),
+                    _first_int(meta.get("topology_seed"), parsed.get("topology_seed")),
+                    _first_int(meta.get("traffic_seed")),
+                    _first_int(meta.get("traffic_seed_base"), meta.get("traffic_seed")),
+                    _first_text(meta.get("tag"), parsed.get("tag")),
+                    _bool_to_db(meta.get("deterministic")),
+                    _bool_to_db(meta.get("save_flows")),
+                    episodes_value,
+                    max_steps_value,
+                    _first_text(meta.get("model_path")),
+                    _first_text(meta.get("runs_dir")),
+                    _first_text(meta.get("policy_type")),
+                    _first_text(meta.get("model_type")),
+                    _first_text(meta.get("control_mode")),
+                    _first_text(meta.get("traffic_scenario")),
+                    _first_int(meta.get("traffic_scenario_version")),
+                    _first_float(meta.get("traffic_scenario_intensity")),
+                    _first_float(meta.get("traffic_scenario_duration")),
+                    _first_float(meta.get("traffic_scenario_frequency")),
+                    timestamp_utc,
+                    created_at_utc,
+                    _first_text(meta.get("command")),
+                    1 if artifacts.meta is not None else 0,
+                    1 if artifacts.summary is not None else 0,
+                    1 if artifacts.env_config is not None else 0,
+                    1 if artifacts.step_rows else 0,
+                    _json_dumps(meta) if artifacts.meta is not None else None,
+                    _json_dumps(artifacts.env_config) if artifacts.env_config is not None else None,
+                    updated_at_utc,
+                ),
             )
 
             if artifacts.summary is not None:
-                summary_params = (
-                    artifacts.source,
-                    artifacts.run_name,
-                    _first_int(overall.get("episodes"), len(episode_rows)),
-                    _first_float(overall.get("reward_total_mean")),
-                    _first_float(overall.get("reward_total_std")),
-                    _first_float(overall.get("delivered_total_mean")),
-                    _first_float(overall.get("delivered_total_std")),
-                    _first_float(overall.get("dropped_total_mean")),
-                    _first_float(overall.get("dropped_total_std")),
-                    _first_float(overall.get("energy_kwh_total_mean")),
-                    _first_float(overall.get("energy_kwh_total_std")),
-                    _first_float(overall.get("delivery_loss_rate_mean")),
-                    _first_float(overall.get("delivery_loss_rate_std")),
-                    _first_float(overall.get("energy_steady_kwh_total_mean")),
-                    _first_float(overall.get("energy_transition_kwh_total_mean")),
-                    _first_float(overall.get("carbon_g_total_mean")),
-                    _first_float(overall.get("carbon_g_total_std")),
-                    _first_float(overall.get("steps_mean")),
-                    _first_float(overall.get("steps_std")),
-                    _first_float(overall.get("avg_utilization_mean")),
-                    _first_float(overall.get("active_ratio_mean")),
-                    _first_float(overall.get("avg_delay_ms_mean")),
-                    _first_float(overall.get("avg_path_latency_ms_mean")),
-                    _first_float(overall.get("avg_path_latency_ms_std")),
-                    _first_float(overall.get("power_total_watts_mean")),
-                    _first_float(overall.get("power_fixed_watts_mean")),
-                    _first_float(overall.get("power_variable_watts_mean")),
-                    _first_float(overall.get("power_transition_watts_mean")),
-                    _first_float(overall.get("qos_violation_rate_mean")),
-                    _first_float(overall.get("qos_violation_count_mean")),
-                    _first_text(overall.get("qos_acceptance_status")),
-                    _first_text(overall.get("qos_acceptance_missing")),
-                    _first_float(overall.get("toggles_total_mean")),
-                    _first_float(overall.get("toggles_total_std")),
-                    _first_float(overall.get("transition_count_total_mean")),
-                    _first_float(overall.get("transition_on_count_total_mean")),
-                    _first_float(overall.get("transition_off_count_total_mean")),
-                    _first_float(overall.get("transition_rate_mean")),
-                    _first_float(overall.get("flap_event_count_total_mean")),
-                    _first_float(overall.get("flap_rate_mean")),
-                    _first_text(overall.get("stability_status")),
-                    _first_text(overall.get("stability_missing")),
-                    _json_dumps(summary),
-                    _json_dumps(overall) if isinstance(overall, dict) else None,
-                    updated_at_utc,
-                )
                 conn.execute(
-                    f"""
+                    """
                     INSERT INTO run_summaries (
                         source,
                         run_name,
@@ -803,10 +601,6 @@ class SqliteRunRepository:
                         dropped_total_std,
                         energy_kwh_total_mean,
                         energy_kwh_total_std,
-                        delivery_loss_rate_mean,
-                        delivery_loss_rate_std,
-                        energy_steady_kwh_total_mean,
-                        energy_transition_kwh_total_mean,
                         carbon_g_total_mean,
                         carbon_g_total_std,
                         steps_mean,
@@ -816,30 +610,40 @@ class SqliteRunRepository:
                         avg_delay_ms_mean,
                         avg_path_latency_ms_mean,
                         avg_path_latency_ms_std,
-                        power_total_watts_mean,
-                        power_fixed_watts_mean,
-                        power_variable_watts_mean,
-                        power_transition_watts_mean,
-                        qos_violation_rate_mean,
-                        qos_violation_count_mean,
-                        qos_acceptance_status,
-                        qos_acceptance_missing,
                         toggles_total_mean,
                         toggles_total_std,
-                        transition_count_total_mean,
-                        transition_on_count_total_mean,
-                        transition_off_count_total_mean,
-                        transition_rate_mean,
-                        flap_event_count_total_mean,
-                        flap_rate_mean,
-                        stability_status,
-                        stability_missing,
                         summary_json,
                         overall_json,
                         updated_at_utc
-                    ) VALUES ({_sql_placeholders(len(summary_params))})
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    summary_params,
+                    (
+                        artifacts.source,
+                        artifacts.run_name,
+                        _first_int(overall.get("episodes"), len(episode_rows)),
+                        _first_float(overall.get("reward_total_mean")),
+                        _first_float(overall.get("reward_total_std")),
+                        _first_float(overall.get("delivered_total_mean")),
+                        _first_float(overall.get("delivered_total_std")),
+                        _first_float(overall.get("dropped_total_mean")),
+                        _first_float(overall.get("dropped_total_std")),
+                        _first_float(overall.get("energy_kwh_total_mean")),
+                        _first_float(overall.get("energy_kwh_total_std")),
+                        _first_float(overall.get("carbon_g_total_mean")),
+                        _first_float(overall.get("carbon_g_total_std")),
+                        _first_float(overall.get("steps_mean")),
+                        _first_float(overall.get("steps_std")),
+                        _first_float(overall.get("avg_utilization_mean")),
+                        _first_float(overall.get("active_ratio_mean")),
+                        _first_float(overall.get("avg_delay_ms_mean")),
+                        _first_float(overall.get("avg_path_latency_ms_mean")),
+                        _first_float(overall.get("avg_path_latency_ms_std")),
+                        _first_float(overall.get("toggles_total_mean")),
+                        _first_float(overall.get("toggles_total_std")),
+                        _json_dumps(summary),
+                        _json_dumps(overall) if isinstance(overall, dict) else None,
+                        updated_at_utc,
+                    ),
                 )
 
                 episode_params: List[tuple[Any, ...]] = []
@@ -864,8 +668,6 @@ class SqliteRunRepository:
                             _first_float(episode_row.get("active_ratio_mean")),
                             _first_float(episode_row.get("avg_delay_ms_mean")),
                             _first_float(episode_row.get("avg_path_latency_ms_mean")),
-                            _first_float(episode_row.get("delivery_loss_rate")),
-                            _first_float(episode_row.get("qos_violation_rate")),
                             _first_int(episode_row.get("toggles_total")),
                             _first_int(episode_row.get("toggles_applied_total")),
                             _first_int(episode_row.get("toggles_reverted_total")),
@@ -874,21 +676,13 @@ class SqliteRunRepository:
                             _first_int(episode_row.get("allowed_toggle_count")),
                             _first_int(episode_row.get("toggles_attempted_count")),
                             _first_int(episode_row.get("toggles_applied_count")),
-                            _first_int(episode_row.get("transition_count_total")),
-                            _first_int(episode_row.get("transition_on_count_total")),
-                            _first_int(episode_row.get("transition_off_count_total")),
-                            _first_int(episode_row.get("flap_event_count_total")),
-                            _first_float(episode_row.get("transition_rate")),
-                            _first_float(episode_row.get("flap_rate")),
-                            _first_text(episode_row.get("qos_acceptance_status")),
-                            _first_text(episode_row.get("stability_status")),
                             _json_dumps(episode_row),
                         )
                     )
 
                 if episode_params:
                     conn.executemany(
-                        f"""
+                        """
                         INSERT INTO run_episode_summaries (
                             source,
                             run_name,
@@ -903,8 +697,6 @@ class SqliteRunRepository:
                             active_ratio_mean,
                             avg_delay_ms_mean,
                             avg_path_latency_ms_mean,
-                            delivery_loss_rate,
-                            qos_violation_rate,
                             toggles_total,
                             toggles_applied_total,
                             toggles_reverted_total,
@@ -913,16 +705,8 @@ class SqliteRunRepository:
                             allowed_toggle_count,
                             toggles_attempted_count,
                             toggles_applied_count,
-                            transition_count_total,
-                            transition_on_count_total,
-                            transition_off_count_total,
-                            flap_event_count_total,
-                            transition_rate,
-                            flap_rate,
-                            qos_acceptance_status,
-                            stability_status,
                             payload_json
-                        ) VALUES ({_sql_placeholders(len(episode_params[0]))})
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         episode_params,
                     )
@@ -957,21 +741,11 @@ class SqliteRunRepository:
                             _first_float(row.get("delta_delivered")),
                             _first_float(row.get("delta_dropped")),
                             _first_float(row.get("delta_carbon_g")),
-                            _first_float(row.get("power_total_watts")),
-                            _first_float(row.get("power_fixed_watts")),
-                            _first_float(row.get("power_variable_watts")),
-                            _first_float(row.get("power_transition_watts")),
-                            _first_int(row.get("active_devices")),
-                            _first_int(row.get("active_links")),
                             _first_int(row.get("num_active_edges")),
                             _first_int(row.get("near_saturated_edges")),
                             _bool_to_db(row.get("qos_violation")),
                             _bool_to_db(row.get("toggle_applied")),
                             _bool_to_db(row.get("toggle_reverted")),
-                            _first_int(row.get("transition_count")),
-                            _bool_to_db(row.get("flap_event")),
-                            _first_int(row.get("flap_event_count")),
-                            _first_float(row.get("stability_reversal_penalty")),
                             _first_int(row.get("blocked_by_util_count")),
                             _first_int(row.get("blocked_by_cooldown_count")),
                             _first_int(row.get("allowed_toggle_count")),
@@ -983,7 +757,7 @@ class SqliteRunRepository:
 
                 if step_params:
                     conn.executemany(
-                        f"""
+                        """
                         INSERT INTO run_step_metrics (
                             source,
                             run_name,
@@ -1006,28 +780,18 @@ class SqliteRunRepository:
                             delta_delivered,
                             delta_dropped,
                             delta_carbon_g,
-                            power_total_watts,
-                            power_fixed_watts,
-                            power_variable_watts,
-                            power_transition_watts,
-                            active_devices,
-                            active_links,
                             num_active_edges,
                             near_saturated_edges,
                             qos_violation,
                             toggle_applied,
                             toggle_reverted,
-                            transition_count,
-                            flap_event,
-                            flap_event_count,
-                            stability_reversal_penalty,
                             blocked_by_util_count,
                             blocked_by_cooldown_count,
                             allowed_toggle_count,
                             toggles_attempted_count,
                             toggles_applied_count,
                             payload_json
-                        ) VALUES ({_sql_placeholders(len(step_params[0]))})
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         step_params,
                     )
@@ -1052,31 +816,10 @@ class SqliteRunRepository:
                 r.run_path,
                 r.timestamp_utc,
                 r.created_at_utc,
-                r.matrix_id,
-                r.matrix_name,
-                r.matrix_manifest,
-                r.matrix_case_id,
-                r.matrix_case_label,
                 r.policy,
-                r.policy_class,
-                r.controller_policy,
-                r.controller_policy_class,
                 r.scenario,
                 r.seed,
                 r.topology_seed,
-                r.topology_name,
-                r.topology_path,
-                r.traffic_mode,
-                r.traffic_model,
-                r.traffic_name,
-                r.traffic_path,
-                r.traffic_scenario,
-                r.energy_model_name,
-                r.energy_model_signature,
-                r.qos_policy_name,
-                r.qos_policy_signature,
-                r.stability_policy_name,
-                r.stability_policy_signature,
                 r.tag,
                 r.episodes,
                 r.max_steps,
@@ -1090,14 +833,6 @@ class SqliteRunRepository:
                 s.energy_kwh_total_mean,
                 s.dropped_total_mean,
                 s.toggles_total_mean
-                ,s.avg_delay_ms_mean
-                ,s.qos_violation_rate_mean
-                ,s.transition_rate_mean
-                ,s.flap_rate_mean
-                ,s.qos_acceptance_status
-                ,s.qos_acceptance_missing
-                ,s.stability_status
-                ,s.stability_missing
             FROM runs r
             LEFT JOIN run_summaries s
                 ON s.source = r.source AND s.run_name = r.run_name
@@ -1114,31 +849,10 @@ class SqliteRunRepository:
                     "source": str(row["source"]),
                     "run_path": str(row["run_path"]),
                     "timestamp_utc": row["timestamp_utc"] or row["created_at_utc"],
-                    "matrix_id": row["matrix_id"],
-                    "matrix_name": row["matrix_name"],
-                    "matrix_manifest": row["matrix_manifest"],
-                    "matrix_case_id": row["matrix_case_id"],
-                    "matrix_case_label": row["matrix_case_label"],
                     "policy": row["policy"],
-                    "policy_class": row["policy_class"],
-                    "controller_policy": row["controller_policy"],
-                    "controller_policy_class": row["controller_policy_class"],
                     "scenario": row["scenario"],
                     "seed": row["seed"],
                     "topology_seed": row["topology_seed"],
-                    "topology_name": row["topology_name"],
-                    "topology_path": row["topology_path"],
-                    "traffic_mode": row["traffic_mode"],
-                    "traffic_model": row["traffic_model"],
-                    "traffic_name": row["traffic_name"],
-                    "traffic_path": row["traffic_path"],
-                    "traffic_scenario": row["traffic_scenario"],
-                    "energy_model_name": row["energy_model_name"],
-                    "energy_model_signature": row["energy_model_signature"],
-                    "qos_policy_name": row["qos_policy_name"],
-                    "qos_policy_signature": row["qos_policy_signature"],
-                    "stability_policy_name": row["stability_policy_name"],
-                    "stability_policy_signature": row["stability_policy_signature"],
                     "tag": row["tag"],
                     "episodes": row["episodes"],
                     "max_steps": row["max_steps"],
@@ -1155,15 +869,7 @@ class SqliteRunRepository:
                         "energy_kwh_total_mean": row["energy_kwh_total_mean"],
                         "dropped_total_mean": row["dropped_total_mean"],
                         "toggles_total_mean": row["toggles_total_mean"],
-                        "avg_delay_ms_mean": row["avg_delay_ms_mean"],
-                        "qos_violation_rate_mean": row["qos_violation_rate_mean"],
-                        "transition_rate_mean": row["transition_rate_mean"],
-                        "flap_rate_mean": row["flap_rate_mean"],
                     },
-                    "qos_acceptance_status": row["qos_acceptance_status"],
-                    "qos_acceptance_missing": row["qos_acceptance_missing"],
-                    "stability_status": row["stability_status"],
-                    "stability_missing": row["stability_missing"],
                 }
             )
         return snapshots
@@ -1213,203 +919,6 @@ class SqliteRunRepository:
             if payload is not None:
                 payloads.append(payload)
         return payloads
-
-    def list_summary_rows(self, base: str = "both", tag: str | None = None) -> List[Dict[str, Any]]:
-        self.ensure_initialized()
-        sources = _sources_for_base(base)
-        placeholders = ", ".join("?" for _ in sources)
-        query = f"""
-            SELECT
-                r.source,
-                r.run_name,
-                r.run_path,
-                r.meta_json,
-                s.summary_json
-            FROM runs r
-            LEFT JOIN run_summaries s
-                ON s.source = r.source AND s.run_name = r.run_name
-            WHERE r.source IN ({placeholders})
-        """
-        params: list[Any] = list(sources)
-        if tag is not None:
-            query += " AND r.tag = ?"
-            params.append(tag)
-        with self._connect() as conn:
-            rows = conn.execute(query, params).fetchall()
-
-        payloads: list[Dict[str, Any]] = []
-        for row in rows:
-            meta = _json_load_dict(row["meta_json"]) or {}
-            summary = _json_load_dict(row["summary_json"]) or {}
-            overall = summary.get("overall") if isinstance(summary.get("overall"), dict) else {}
-            payloads.append(
-                {
-                    "run_id": meta.get("run_id", row["run_name"]),
-                    "policy": meta.get("policy", ""),
-                    "policy_class": meta.get("policy_class", ""),
-                    "controller_policy": meta.get("controller_policy", ""),
-                    "controller_policy_class": meta.get("controller_policy_class", ""),
-                    "scenario": meta.get("scenario", ""),
-                    "seed": meta.get("seed", ""),
-                    "tag": meta.get("tag", ""),
-                    "created_at_utc": meta.get("created_at_utc") or meta.get("timestamp_utc", ""),
-                    "episodes": meta.get("episodes", ""),
-                    "max_steps": meta.get("max_steps", ""),
-                    "deterministic": meta.get("deterministic", ""),
-                    "matrix_id": meta.get("matrix_id", ""),
-                    "matrix_name": meta.get("matrix_name", ""),
-                    "matrix_manifest": meta.get("matrix_manifest", ""),
-                    "matrix_case_id": meta.get("matrix_case_id", ""),
-                    "matrix_case_label": meta.get("matrix_case_label", ""),
-                    "topology_seed": meta.get("topology_seed", ""),
-                    "topology_name": meta.get("topology_name", ""),
-                    "topology_path": meta.get("topology_path", ""),
-                    "traffic_seed": meta.get("traffic_seed", ""),
-                    "traffic_seed_base": meta.get("traffic_seed_base", ""),
-                    "traffic_mode": meta.get("traffic_mode", ""),
-                    "traffic_model": meta.get("traffic_model", ""),
-                    "traffic_name": meta.get("traffic_name", ""),
-                    "traffic_path": meta.get("traffic_path", ""),
-                    "traffic_scenario": meta.get("traffic_scenario", ""),
-                    "traffic_scenario_version": meta.get("traffic_scenario_version", ""),
-                    "traffic_scenario_intensity": meta.get("traffic_scenario_intensity", ""),
-                    "traffic_scenario_duration": meta.get("traffic_scenario_duration", ""),
-                    "traffic_scenario_frequency": meta.get("traffic_scenario_frequency", ""),
-                    "qos_policy_name": meta.get("qos_policy_name", ""),
-                    "qos_policy_signature": meta.get("qos_policy_signature", ""),
-                    "qos_target_norm_drop": meta.get("qos_target_norm_drop", ""),
-                    "qos_min_volume": meta.get("qos_min_volume", ""),
-                    "qos_avg_delay_guard_multiplier": meta.get("qos_avg_delay_guard_multiplier", ""),
-                    "qos_avg_delay_guard_margin_ms": meta.get("qos_avg_delay_guard_margin_ms", ""),
-                    "stability_policy_name": meta.get("stability_policy_name", ""),
-                    "stability_policy_signature": meta.get("stability_policy_signature", ""),
-                    "stability_reversal_window_steps": meta.get("stability_reversal_window_steps", ""),
-                    "stability_reversal_penalty": meta.get("stability_reversal_penalty", ""),
-                    "stability_max_transition_rate": meta.get("stability_max_transition_rate", ""),
-                    "stability_max_flap_rate": meta.get("stability_max_flap_rate", ""),
-                    "stability_max_flap_count": meta.get("stability_max_flap_count", ""),
-                    "energy_model_name": meta.get("energy_model_name", ""),
-                    "energy_model_signature": meta.get("energy_model_signature", ""),
-                    "power_utilization_sensitive": meta.get("power_utilization_sensitive", ""),
-                    "power_transition_on_joules": meta.get("power_transition_on_joules", ""),
-                    "power_transition_off_joules": meta.get("power_transition_off_joules", ""),
-                    "carbon_model_name": meta.get("carbon_model_name", ""),
-                    "routing_baseline": meta.get("routing_baseline", ""),
-                    "routing_link_cost_model": meta.get("routing_link_cost_model", ""),
-                    "reward_total_mean": overall.get("reward_total_mean", ""),
-                    "delivered_total_mean": overall.get("delivered_total_mean", ""),
-                    "dropped_total_mean": overall.get("dropped_total_mean", ""),
-                    "energy_kwh_total_mean": overall.get("energy_kwh_total_mean", ""),
-                    "energy_steady_kwh_total_mean": overall.get("energy_steady_kwh_total_mean", ""),
-                    "energy_transition_kwh_total_mean": overall.get("energy_transition_kwh_total_mean", ""),
-                    "carbon_g_total_mean": overall.get("carbon_g_total_mean", ""),
-                    "power_total_watts_mean": overall.get("power_total_watts_mean", ""),
-                    "power_fixed_watts_mean": overall.get("power_fixed_watts_mean", ""),
-                    "power_variable_watts_mean": overall.get("power_variable_watts_mean", ""),
-                    "power_transition_watts_mean": overall.get("power_transition_watts_mean", ""),
-                    "active_devices_mean": overall.get("active_devices_mean", ""),
-                    "active_links_mean": overall.get("active_links_mean", ""),
-                    "avg_utilization_mean": overall.get("avg_utilization_mean", ""),
-                    "active_ratio_mean": overall.get("active_ratio_mean", ""),
-                    "delivery_loss_rate_mean": overall.get("delivery_loss_rate_mean", ""),
-                    "avg_delay_ms_mean": overall.get("avg_delay_ms_mean", ""),
-                    "avg_path_latency_ms_mean": overall.get("avg_path_latency_ms_mean", ""),
-                    "qos_violation_rate_mean": overall.get("qos_violation_rate_mean", ""),
-                    "qos_violation_count_mean": overall.get("qos_violation_count_mean", ""),
-                    "qos_acceptance_status": overall.get("qos_acceptance_status", ""),
-                    "qos_acceptance_missing": overall.get("qos_acceptance_missing", ""),
-                    "transition_count_total_mean": overall.get("transition_count_total_mean", ""),
-                    "transition_on_count_total_mean": overall.get("transition_on_count_total_mean", ""),
-                    "transition_off_count_total_mean": overall.get("transition_off_count_total_mean", ""),
-                    "transition_rate_mean": overall.get("transition_rate_mean", ""),
-                    "flap_event_count_total_mean": overall.get("flap_event_count_total_mean", ""),
-                    "flap_rate_mean": overall.get("flap_rate_mean", ""),
-                    "stability_status": overall.get("stability_status", ""),
-                    "stability_missing": overall.get("stability_missing", ""),
-                    "results_dir": row["run_path"],
-                    "status": "ok" if summary else "partial",
-                    "error": "" if summary else "missing summary_json",
-                }
-            )
-        return payloads
-
-    def upsert_final_evaluation(
-        self,
-        *,
-        output_dir: str,
-        payload: Dict[str, Any],
-        summary_path: str | None,
-        report_path: str | None,
-        source_summary_csv: str | None,
-    ) -> None:
-        self.ensure_initialized()
-        source_meta = payload.get("source") if isinstance(payload.get("source"), dict) else {}
-        with self._connect() as conn, conn:
-            self._apply_migrations(conn)
-            conn.execute(
-                """
-                INSERT INTO final_evaluations (
-                    output_dir,
-                    generated_at_utc,
-                    matrix_id,
-                    matrix_name,
-                    matrix_manifest,
-                    matrix_tag,
-                    source_summary_csv,
-                    summary_path,
-                    report_path,
-                    payload_json,
-                    updated_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(output_dir) DO UPDATE SET
-                    generated_at_utc=excluded.generated_at_utc,
-                    matrix_id=excluded.matrix_id,
-                    matrix_name=excluded.matrix_name,
-                    matrix_manifest=excluded.matrix_manifest,
-                    matrix_tag=excluded.matrix_tag,
-                    source_summary_csv=excluded.source_summary_csv,
-                    summary_path=excluded.summary_path,
-                    report_path=excluded.report_path,
-                    payload_json=excluded.payload_json,
-                    updated_at_utc=excluded.updated_at_utc
-                """,
-                (
-                    output_dir,
-                    _first_text(payload.get("generated_at_utc")),
-                    _first_text(source_meta.get("matrix_id")),
-                    _first_text(source_meta.get("matrix_name")),
-                    _first_text(source_meta.get("matrix_manifest")),
-                    _first_text(source_meta.get("matrix_tag")),
-                    source_summary_csv,
-                    summary_path,
-                    report_path,
-                    _json_dumps(payload),
-                    _now_utc_iso(),
-                ),
-            )
-
-    def get_latest_final_evaluation(self) -> Optional[Dict[str, Any]]:
-        self.ensure_initialized()
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT output_dir, summary_path, report_path, payload_json
-                FROM final_evaluations
-                ORDER BY COALESCE(generated_at_utc, updated_at_utc) DESC, updated_at_utc DESC
-                LIMIT 1
-                """
-            ).fetchone()
-        if row is None:
-            return None
-        payload = _json_load_dict(row["payload_json"])
-        if payload is None:
-            return None
-        payload["artifact"] = {
-            "summary_path": row["summary_path"],
-            "report_path": row["report_path"],
-            "output_dir": row["output_dir"],
-        }
-        return payload
 
 
 def _sources_for_base(base: str) -> tuple[str, ...]:
@@ -1482,22 +991,3 @@ def backfill_run_directories(
             persisted += 1
 
     return BackfillReport(scanned=scanned, persisted=persisted, skipped=skipped, failed=failed)
-
-
-def persist_final_evaluation_bundle(
-    *,
-    output_dir: Path,
-    payload: Dict[str, Any],
-    summary_path: Path | None = None,
-    report_path: Path | None = None,
-    source_summary_csv: Path | None = None,
-    db_path: Path | str | None = None,
-) -> None:
-    repository = get_run_repository(db_path)
-    repository.upsert_final_evaluation(
-        output_dir=str(output_dir),
-        payload=payload,
-        summary_path=None if summary_path is None else str(summary_path),
-        report_path=None if report_path is None else str(report_path),
-        source_summary_csv=None if source_summary_csv is None else str(source_summary_csv),
-    )

@@ -7,7 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api_app
-from greennet.persistence import get_run_repository
 
 
 pytestmark = pytest.mark.integration
@@ -49,20 +48,12 @@ def test_runs_and_health_endpoints_return_expected_shapes(api_client: TestClient
     assert runs_payload["items"][0]["run_id"] == generated_run.name
     assert runs_payload["items"][0]["has"]["per_step"] is True
     assert runs_payload["items"][0]["has"]["summary"] is True
-    assert runs_payload["items"][0]["qos_acceptance_status"] is not None
-    assert runs_payload["items"][0]["stability_status"] is not None
-    assert runs_payload["items"][0]["highlights"]["avg_delay_ms_mean"] is not None
-    assert runs_payload["items"][0]["highlights"]["qos_violation_rate_mean"] is not None
-    assert "transition_rate_mean" in runs_payload["items"][0]["highlights"]
 
     assert aggregate.status_code == 200
     aggregate_payload = aggregate.json()
     assert len(aggregate_payload) == 1
-    assert aggregate_payload[0]["group"]["policy"] == "all_on"
+    assert aggregate_payload[0]["group"]["policy"] == "noop"
     assert aggregate_payload[0]["group"]["scenario"] == "normal"
-    assert "avg_delay_ms_mean_mean" in aggregate_payload[0]
-    assert "qos_violation_rate_mean_mean" in aggregate_payload[0]
-    assert "transition_rate_mean_mean" in aggregate_payload[0]
 
 
 def test_run_detail_endpoints_return_expected_shapes(api_client: TestClient, generated_run: Path) -> None:
@@ -84,12 +75,7 @@ def test_run_detail_endpoints_return_expected_shapes(api_client: TestClient, gen
     assert env_response.json()["max_steps"] == 4
 
     assert summary_response.status_code == 200
-    overall_summary = summary_response.json()["overall"]
-    assert "qos_acceptance_status" in overall_summary
-    assert "qos_thresholds" in overall_summary
-    assert "qos_violation_rate_mean" in overall_summary
-    assert "stability_status" in overall_summary
-    assert "transition_rate_mean" in overall_summary
+    assert "overall" in summary_response.json()
 
     assert files_response.status_code == 200
     assert "per_step.csv" in files_response.json()["files"]
@@ -144,7 +130,7 @@ def test_final_evaluation_endpoint_returns_latest_valid_artifact(
                 "scope": "ALL",
                 "scenario": "ALL",
                 "policy": "ppo",
-                "policy_class": "ai_policy",
+                "policy_class": "ai",
                 "hypothesis_status": "not_achieved",
             }
         ],
@@ -157,7 +143,7 @@ def test_final_evaluation_endpoint_returns_latest_valid_artifact(
                 "scope": "ALL",
                 "scenario": "ALL",
                 "policy": "heuristic",
-                "policy_class": "heuristic_baseline",
+                "policy_class": "baseline",
                 "hypothesis_status": "not_achieved",
             }
         ],
@@ -180,76 +166,3 @@ def test_final_evaluation_endpoint_returns_latest_valid_artifact(
     assert payload["generated_at_utc"] == "2026-03-22T00:00:00+00:00"
     assert payload["artifact"]["summary_path"].endswith("artifacts/final_pipeline/demo/summary/final_evaluation/final_evaluation_summary.json")
     assert payload["artifact"]["report_path"].endswith("artifacts/final_pipeline/demo/summary/final_evaluation/final_evaluation_report.md")
-
-
-def test_final_evaluation_endpoint_prefers_database_payload(
-    api_client: TestClient,
-    repo_root: Path,
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    db_path = tmp_path / "greennet.sqlite3"
-    monkeypatch.setenv("GREENNET_DB_PATH", str(db_path))
-    repository = get_run_repository(db_path)
-    repository.upsert_final_evaluation(
-        output_dir=str(repo_root / "artifacts" / "final_pipeline" / "official_acceptance_v1"),
-        payload={
-            "generated_at_utc": "2026-04-10T08:00:00+00:00",
-            "source": {
-                "matrix_id": "official_acceptance_v1",
-                "matrix_name": "GreenNet Official Acceptance Matrix v1",
-                "matrix_manifest": str(
-                    repo_root / "configs" / "acceptance_matrices" / "official_acceptance_v1.json"
-                ),
-                "matrix_tag": "official_acceptance_v1",
-            },
-            "summary_rows": [
-                {
-                    "scope_type": "overall",
-                    "scope": "ALL",
-                    "policy": "ppo",
-                    "policy_class": "ai_policy",
-                    "hypothesis_status": "not_achieved",
-                }
-            ],
-        },
-        summary_path=str(
-            repo_root
-            / "artifacts"
-            / "final_pipeline"
-            / "official_acceptance_v1"
-            / "summary"
-            / "final_evaluation"
-            / api_app.FINAL_EVALUATION_SUMMARY_FILENAME
-        ),
-        report_path=str(
-            repo_root
-            / "artifacts"
-            / "final_pipeline"
-            / "official_acceptance_v1"
-            / "summary"
-            / "final_evaluation"
-            / api_app.FINAL_EVALUATION_REPORT_FILENAME
-        ),
-        source_summary_csv=str(
-            repo_root
-            / "artifacts"
-            / "final_pipeline"
-            / "official_acceptance_v1"
-            / "summary"
-            / "results_summary_official_acceptance_v1.csv"
-        ),
-    )
-
-    api_app._latest_final_evaluation_artifact.cache_clear()
-
-    response = api_client.get("/api/final_evaluation")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["generated_at_utc"] == "2026-04-10T08:00:00+00:00"
-    assert payload["source"]["matrix_id"] == "official_acceptance_v1"
-    assert payload["artifact"]["output_dir"].endswith("artifacts/final_pipeline/official_acceptance_v1")
-    assert payload["artifact"]["summary_path"].endswith(
-        "artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation/final_evaluation_summary.json"
-    )

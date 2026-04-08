@@ -1,8 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import SimulatorCanvas from "../components/SimulatorCanvas";
 import { ErrorNotice, InfoNotice, LoadingNotice } from "../components/StatusState";
-import { getRunPerStep, getSteps, getTopology, listRunsWithSource, startRun, type RunCatalogSource } from "../lib/api";
-import { useBackendStatus } from "../hooks/useBackendStatus";
+import { getRunPerStep, getSteps, getTopology, listRuns, startRun } from "../lib/api";
 import {
   fallbackTopology,
   formatPolicyLabel,
@@ -12,9 +11,9 @@ import {
   latestRunByPolicy,
   linkStateFromRatio,
   normalizePerStep,
-  selectTopRuns,
   timelineFromRows,
 } from "../lib/data";
+import { isDemoRunId } from "../lib/demo";
 import type { RunSummary, StepState, TopologyData } from "../lib/types";
 
 function upsertRun(runs: RunSummary[], nextRun: RunSummary): RunSummary[] {
@@ -29,13 +28,11 @@ function upsertRun(runs: RunSummary[], nextRun: RunSummary): RunSummary[] {
 }
 
 export default function SimulatorPage() {
-  const { status: backendStatus, message: backendMessage } = useBackendStatus();
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [policy, setPolicy] = useState("ppo");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [topology, setTopology] = useState<TopologyData>(fallbackTopology("simulator"));
   const [timeline, setTimeline] = useState<StepState[]>([]);
-  const [runCatalogSource, setRunCatalogSource] = useState<RunCatalogSource>("backend");
 
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
@@ -45,23 +42,19 @@ export default function SimulatorPage() {
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
-  const [topologyFallbackNotice, setTopologyFallbackNotice] = useState("");
-  const visibleRuns = useMemo(() => selectTopRuns(runs, 20), [runs]);
 
   useEffect(() => {
     let alive = true;
 
     async function loadRuns() {
       try {
-        const catalog = await listRunsWithSource();
+        const runItems = await listRuns();
         if (alive) {
-          setRuns(catalog.runs);
-          setRunCatalogSource(catalog.source);
+          setRuns(runItems);
         }
       } catch (apiError) {
         if (alive) {
           setError(apiError instanceof Error ? apiError.message : "Failed to load runs");
-          setRunCatalogSource("backend");
         }
       }
     }
@@ -94,7 +87,6 @@ export default function SimulatorPage() {
     async function loadTimeline() {
       setLoading(true);
       setError("");
-      setTopologyFallbackNotice("");
 
       try {
         const [rowsRaw, topo, stepsFromApi] = await Promise.all([
@@ -126,17 +118,11 @@ export default function SimulatorPage() {
         setTopology(graph);
         setTimeline(mergedTimeline);
         setCurrentStep(0);
-        if (topo == null && alive) {
-          setTopologyFallbackNotice(
-            "The backend did not return a topology for this run, so the simulator is showing a generated layout derived from the run identifier.",
-          );
-        }
       } catch (apiError) {
         if (alive) {
           setError(apiError instanceof Error ? apiError.message : "Failed to load simulator timeline");
           setTimeline([]);
           setTopology(fallbackTopology(`${selectedRunId}-${policy}-fallback`));
-          setTopologyFallbackNotice("");
         }
       } finally {
         if (alive) {
@@ -153,19 +139,14 @@ export default function SimulatorPage() {
   }, [policy, selectedRunId]);
 
   async function handleStartPolicyRun(): Promise<void> {
-    if (!backendOnline) {
-      setError(backendMessage);
-      return;
-    }
-
     setRunning(true);
     setError("");
 
     try {
       const started = await startRun({ policy, scenario: "normal", seed: 42, steps: 300 });
-      const catalog = await listRunsWithSource();
+      const refreshed = await listRuns();
       setRuns(
-        upsertRun(catalog.runs, {
+        upsertRun(refreshed, {
           run_id: started.run_id,
           policy,
           scenario: "normal",
@@ -173,7 +154,6 @@ export default function SimulatorPage() {
           tag: "dashboard",
         }),
       );
-      setRunCatalogSource(catalog.source);
       setSelectedRunId(started.run_id);
     } catch (apiError) {
       setError(apiError instanceof Error ? apiError.message : "Could not start run from simulator");
@@ -192,7 +172,8 @@ export default function SimulatorPage() {
     const run = runs.find((item) => item.run_id === selectedRunId);
     return run ? inferPolicy(run) : policy;
   }, [policy, runs, selectedRunId]);
-  const backendOnline = backendStatus === "online";
+
+  const demoMode = isDemoRunId(selectedRunId);
 
   const linkTelemetry = useMemo(() => {
     if (!step) {
@@ -249,19 +230,12 @@ export default function SimulatorPage() {
 
       {loading ? <LoadingNotice title="Loading simulator" description="Fetching topology and per-step states." /> : null}
       {error ? <ErrorNotice title="Simulator Error" description={error} /> : null}
-      {!backendOnline ? (
-        <InfoNotice
-          title="Run controls disabled"
-          description={`${backendMessage} Playback remains available for existing data, but starting a new policy run is disabled.`}
-        />
-      ) : null}
-      {runCatalogSource === "demo" ? (
+      {demoMode ? (
         <InfoNotice
           title="Demo Data Mode"
-          description="The backend run catalog was unavailable, so the simulator is using generated demo runs."
+          description="This run is generated locally because backend run data is missing or unavailable."
         />
       ) : null}
-      {topologyFallbackNotice ? <InfoNotice title="Generated Topology Layout" description={topologyFallbackNotice} /> : null}
 
       <section className="simulator-layout">
         <div className="glass-card simulator-canvas-card">
@@ -282,32 +256,31 @@ export default function SimulatorPage() {
             <h3>Simulator Playback</h3>
           </div>
 
-            <label>
-              Policy
-              <select value={policy} onChange={(event) => setPolicy(event.target.value)}>
-              <option value="all_on">Traditional (All-On)</option>
-              <option value="heuristic">Energy-Aware Heuristic</option>
-              <option value="ppo">PPO-Based Hybrid (AI)</option>
-              </select>
-            </label>
+          <label>
+            Policy
+            <select value={policy} onChange={(event) => setPolicy(event.target.value)}>
+              <option value="all_on">All-On</option>
+              <option value="heuristic">Heuristic</option>
+              <option value="ppo">PPO</option>
+            </select>
+          </label>
 
           <label>
             Run
             <select value={selectedRunId} onChange={(event) => setSelectedRunId(event.target.value)}>
-              {visibleRuns.map((run) => (
+              {runs.map((run) => (
                 <option key={run.run_id} value={run.run_id}>
                   {formatRunOptionLabel(run)}
                 </option>
               ))}
             </select>
-            <small className="input-help">Official reviewer-safe runs are listed first. Other entries are retained only for fallback/demo use.</small>
           </label>
 
           <div className="button-row">
             <button className="btn-primary" onClick={() => setPlaying((prev) => !prev)}>
               {playing ? "Pause" : "Play"}
             </button>
-            <button className="btn-muted" onClick={handleStartPolicyRun} disabled={running || !backendOnline}>
+            <button className="btn-muted" onClick={handleStartPolicyRun} disabled={running}>
               {running ? "Starting..." : "Run Policy"}
             </button>
           </div>

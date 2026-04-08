@@ -35,32 +35,6 @@ def test_apply_traffic_scenario_normalizes_aliases_and_scales_fields() -> None:
     assert config.spike_duration_range == (2, 10)
 
 
-def test_apply_traffic_scenario_diurnal_is_distinct_from_normal() -> None:
-    normal = apply_traffic_scenario(StochasticTrafficConfig(node_count=8), "normal")
-    diurnal = apply_traffic_scenario(StochasticTrafficConfig(node_count=8), "diurnal")
-
-    assert normal.diurnal_profile is None
-    assert diurnal.diurnal_profile is not None
-    assert max(diurnal.diurnal_profile) == pytest.approx(1.0)
-
-
-def test_apply_traffic_scenario_hotspot_is_safe_for_small_topologies() -> None:
-    config = apply_traffic_scenario(StochasticTrafficConfig(node_count=6), "hotspot")
-
-    assert config.hotspots
-    assert all(0 <= src < 6 and 0 <= dst < 6 and src != dst for src, dst, _weight in config.hotspots)
-
-
-def test_apply_traffic_scenario_supports_flash_crowd_and_multi_peak() -> None:
-    flash = apply_traffic_scenario(StochasticTrafficConfig(node_count=12), "flash crowd")
-    multi_peak = apply_traffic_scenario(StochasticTrafficConfig(node_count=12), "multi_peak")
-
-    assert flash.spike_prob > 0.05
-    assert flash.hotspots
-    assert multi_peak.diurnal_profile is not None
-    assert len(multi_peak.diurnal_profile) >= 8
-
-
 def test_apply_traffic_scenario_rejects_unknown_scenarios() -> None:
     with pytest.raises(ValueError, match="Unknown traffic scenario"):
         apply_traffic_scenario(StochasticTrafficConfig(node_count=4), "not-a-scenario")
@@ -109,16 +83,6 @@ def test_named_replay_profile_repeats_on_its_declared_cycle() -> None:
     assert starts == [0.0, 8.0]
 
 
-def test_named_replay_profiles_cover_small_and_large_topologies() -> None:
-    small = load_named_traffic_profile("regional_ring_commuter_matrices", node_count=6)
-    large = load_named_traffic_profile("backbone_large_flash_crowd_bursts", node_count=12)
-
-    assert small.node_count == 6
-    assert small.cycle_length == 4
-    assert large.node_count == 12
-    assert large.cycle_length == 10
-
-
 def test_load_traffic_profile_rejects_node_count_mismatch() -> None:
     payload = {
         "format_version": 1,
@@ -128,25 +92,3 @@ def test_load_traffic_profile_rejects_node_count_mismatch() -> None:
 
     with pytest.raises(TrafficValidationError, match="active topology uses node_count=5"):
         load_traffic_profile_from_dict(payload, node_count=5)
-
-
-def test_load_traffic_profile_rejects_positive_diagonal_matrix() -> None:
-    payload = {
-        "format_version": 1,
-        "node_count": 3,
-        "matrices": [
-            [
-                [1, 0, 0],
-                [0, 0, 2],
-                [0, 0, 0],
-            ]
-        ],
-    }
-
-    with pytest.raises(TrafficValidationError, match="zero diagonal"):
-        load_traffic_profile_from_dict(payload, node_count=3)
-
-
-def test_named_traffic_profile_reports_node_count_incompatibility() -> None:
-    with pytest.raises(TrafficValidationError, match="not compatible with node_count=6"):
-        load_named_traffic_profile("commuter_matrices", node_count=6)

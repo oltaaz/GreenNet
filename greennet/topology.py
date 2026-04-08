@@ -24,17 +24,6 @@ class TopologyValidationError(ValueError):
     """Raised when a topology input file is malformed or unsupported."""
 
 
-@dataclass(frozen=True)
-class NamedTopologyOption:
-    """Named packaged topology exposed through the public selection interface."""
-
-    name: str
-    file_name: str
-    topology_class: str
-    description: str
-    aliases: tuple[str, ...] = ()
-
-
 @dataclass
 class TopologyConfig:
     """Configuration for generating a topology graph."""
@@ -45,36 +34,6 @@ class TopologyConfig:
     seed: int | None = None
     topology_name: str | None = None
     topology_path: str | None = None
-
-
-OFFICIAL_NAMED_TOPOLOGIES: tuple[NamedTopologyOption, ...] = (
-    NamedTopologyOption(
-        name="small",
-        file_name="regional_ring.json",
-        topology_class="small",
-        description="Six-node regional ring with two higher-capacity cross links.",
-        aliases=("regional_ring",),
-    ),
-    NamedTopologyOption(
-        name="medium",
-        file_name="metro_hub.json",
-        topology_class="medium",
-        description="Eight-node metro core with diagonals and access spurs.",
-        aliases=("metro_hub",),
-    ),
-    NamedTopologyOption(
-        name="large",
-        file_name="backbone_large.json",
-        topology_class="large",
-        description="Twelve-node backbone with a meshed core and four access spurs.",
-        aliases=("backbone_large",),
-    ),
-)
-
-_NAMED_TOPOLOGY_BY_NAME = {option.name: option for option in OFFICIAL_NAMED_TOPOLOGIES}
-_NAMED_TOPOLOGY_BY_ALIAS = {
-    alias: option for option in OFFICIAL_NAMED_TOPOLOGIES for alias in option.aliases
-}
 
 
 def build_random_topology(config: TopologyConfig) -> GraphT:
@@ -95,31 +54,10 @@ def build_random_topology(config: TopologyConfig) -> GraphT:
 
 
 def list_named_topologies() -> list[str]:
-    """Return accepted packaged topology selectors, including compatibility aliases."""
-    names = {option.name for option in OFFICIAL_NAMED_TOPOLOGIES}
-    names.update(alias for option in OFFICIAL_NAMED_TOPOLOGIES for alias in option.aliases)
-    if NAMED_TOPOLOGY_DIR.exists():
-        names.update(path.stem for path in NAMED_TOPOLOGY_DIR.glob("*.json"))
-    return sorted(names)
-
-
-def list_official_topology_classes() -> list[str]:
-    """Return the stable named topology classes recommended in docs and configs."""
-    return [option.name for option in OFFICIAL_NAMED_TOPOLOGIES]
-
-
-def describe_named_topologies() -> list[dict[str, str]]:
-    """Return metadata for the stable packaged topology options."""
-    return [
-        {
-            "name": option.name,
-            "file_name": option.file_name,
-            "topology_class": option.topology_class,
-            "description": option.description,
-            "aliases": ", ".join(option.aliases),
-        }
-        for option in OFFICIAL_NAMED_TOPOLOGIES
-    ]
+    """Return packaged topology names available to the simulator."""
+    if not NAMED_TOPOLOGY_DIR.exists():
+        return []
+    return sorted(path.stem for path in NAMED_TOPOLOGY_DIR.glob("*.json"))
 
 
 def load_topology_from_edges(
@@ -149,30 +87,13 @@ def load_named_topology(name: str) -> GraphT:
     if not normalized:
         raise TopologyValidationError("Topology name must be a non-empty string.")
 
-    option = _NAMED_TOPOLOGY_BY_NAME.get(normalized) or _NAMED_TOPOLOGY_BY_ALIAS.get(normalized)
-    if option is not None:
-        path = NAMED_TOPOLOGY_DIR / option.file_name
-        graph = load_topology_from_file(path)
-        graph.graph["topology_name"] = option.name
-        graph.graph["topology_requested_name"] = normalized
-        graph.graph["topology_class"] = option.topology_class
-        graph.graph["topology_description"] = option.description
-        graph.graph["topology_aliases"] = list(option.aliases)
-        return graph
-
     path = NAMED_TOPOLOGY_DIR / f"{normalized}.json"
     if not path.exists():
         available = ", ".join(list_named_topologies()) or "<none>"
-        official = ", ".join(list_official_topology_classes()) or "<none>"
         raise TopologyValidationError(
-            f"Unknown topology '{normalized}'. Official topology classes: {official}. "
-            f"All accepted named topologies: {available}."
+            f"Unknown topology '{normalized}'. Available named topologies: {available}."
         )
-    graph = load_topology_from_file(path)
-    graph.graph["topology_name"] = normalized
-    graph.graph["topology_requested_name"] = normalized
-    graph.graph["topology_class"] = "custom_named"
-    return graph
+    return load_topology_from_file(path)
 
 
 def load_topology_from_file(path: str | Path) -> GraphT:

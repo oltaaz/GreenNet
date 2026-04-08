@@ -20,8 +20,6 @@ import networkx as nx
 
 from greennet.env import GreenNetEnv
 from greennet.persistence import get_run_repository, infer_run_source
-from greennet.qos import evaluate_run_qos, runtime_thresholds_from_config
-from greennet.stability import evaluate_run_stability, stability_policy_from_config
 from greennet.utils.config import load_env_config_from_run
 
 app = FastAPI(title="GreenNet Metrics API")
@@ -37,9 +35,6 @@ if (REPO_ROOT / "runs").exists() is False and (REPO_ROOT / "results").exists() i
 RESULTS_DIR = REPO_ROOT / "results"
 RUNS_DIR = REPO_ROOT / "runs"
 LOCKED_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "locked"
-CANONICAL_FINAL_EVALUATION_DIR = (
-    REPO_ROOT / "artifacts" / "final_pipeline" / "official_acceptance_v1" / "summary" / "final_evaluation"
-)
 
 BaseChoice = Literal["results", "runs", "both"]
 GROUP_BY_FIELDS = {"policy", "scenario", "tag", "topology_seed", "deterministic"}
@@ -52,10 +47,6 @@ HIGHLIGHT_FIELDS = [
     "energy_kwh_total_mean",
     "dropped_total_mean",
     "toggles_total_mean",
-    "transition_rate_mean",
-    "flap_rate_mean",
-    "avg_delay_ms_mean",
-    "qos_violation_rate_mean",
 ]
 PACKET_EVENT_LIMIT = 40
 INT_COLUMNS = {
@@ -108,13 +99,6 @@ FLOAT_COLUMNS = {
     "reward_qos",
     "reward_toggle",
     "qos_excess",
-}
-BOOL_COLUMNS = {
-    "terminated",
-    "truncated",
-    "qos_violation",
-    "toggle_applied",
-    "toggle_reverted",
 }
 RUN_PREFIX_RE = re.compile(r"^(?P<stamp>\d{8}_\d{6})")
 RESULTS_SAVED_RE = re.compile(r"^\[run_experiment\] results saved to (?P<path>.+)$", re.MULTILINE)
@@ -194,63 +178,6 @@ def _run_repository():
         return get_run_repository()
     except Exception:
         return None
-
-
-def _path_within_repo(path_text: Any) -> bool:
-    if path_text in ("", None):
-        return False
-    try:
-        candidate = Path(str(path_text)).expanduser()
-        resolved = candidate.resolve() if candidate.is_absolute() else (REPO_ROOT / candidate).resolve()
-        repo_root = REPO_ROOT.resolve()
-        resolved.relative_to(repo_root)
-        return True
-    except Exception:
-        return False
-
-
-def _path_within_canonical_final_bundle(path_text: Any) -> bool:
-    if path_text in ("", None):
-        return False
-    try:
-        candidate = Path(str(path_text)).expanduser()
-        resolved = candidate.resolve() if candidate.is_absolute() else (REPO_ROOT / candidate).resolve()
-        canonical_root = CANONICAL_FINAL_EVALUATION_DIR.resolve()
-        resolved.relative_to(canonical_root)
-        return True
-    except Exception:
-        return False
-
-
-def _db_final_evaluation_matches_repo(payload: Dict[str, Any]) -> bool:
-    artifact = payload.get("artifact")
-    if not isinstance(artifact, dict):
-        return False
-
-    if CANONICAL_FINAL_EVALUATION_DIR.exists():
-        for key in ("output_dir", "summary_path", "report_path"):
-            if _path_within_canonical_final_bundle(artifact.get(key)):
-                return True
-
-    for key in ("output_dir", "summary_path", "report_path"):
-        if _path_within_repo(artifact.get(key)):
-            return True
-    return False
-
-
-def _latest_final_evaluation_from_db() -> Optional[Dict[str, Any]]:
-    repo = _run_repository()
-    if repo is None:
-        return None
-    try:
-        payload = repo.get_latest_final_evaluation()
-    except Exception:
-        return None
-    if not payload or not isinstance(payload, dict):
-        return None
-    if not _db_final_evaluation_matches_repo(payload):
-        return None
-    return payload
 
 
 def _run_identity_for_dir(run_dir: Path) -> Tuple[str, str]:
@@ -359,7 +286,6 @@ def _read_locked_note(bundle_dir: Path) -> Optional[str]:
 
 def _final_evaluation_candidate_paths() -> List[Path]:
     preferred = [
-        CANONICAL_FINAL_EVALUATION_DIR / FINAL_EVALUATION_SUMMARY_FILENAME,
         REPO_ROOT / "artifacts" / "final_evaluation" / "latest" / FINAL_EVALUATION_SUMMARY_FILENAME,
     ]
 
@@ -377,7 +303,7 @@ def _final_evaluation_candidate_paths() -> List[Path]:
 
 @lru_cache(maxsize=4)
 def _latest_final_evaluation_artifact() -> Optional[Dict[str, Any]]:
-    ranked: List[Tuple[int, float, int, str, Path, Optional[Path], Dict[str, Any]]] = []
+    ranked: List[Tuple[float, int, str, Path, Optional[Path], Dict[str, Any]]] = []
     for summary_path in _final_evaluation_candidate_paths():
         payload = load_json(summary_path)
         if not payload or not isinstance(payload.get("summary_rows"), list):
@@ -387,7 +313,6 @@ def _latest_final_evaluation_artifact() -> Optional[Dict[str, Any]]:
         generated_at = _parse_iso_timestamp(payload.get("generated_at_utc"))
         ranked.append(
             (
-                1 if summary_path.is_relative_to(CANONICAL_FINAL_EVALUATION_DIR) else 0,
                 generated_at.timestamp() if generated_at is not None else float(summary_path.stat().st_mtime),
                 1 if "artifacts" in summary_path.parts else 0,
                 str(summary_path),
@@ -398,7 +323,7 @@ def _latest_final_evaluation_artifact() -> Optional[Dict[str, Any]]:
         )
 
     if ranked:
-        _, _, _, _, summary_path, report_path, payload = max(ranked)
+        _, _, _, summary_path, report_path, payload = max(ranked)
         return {
             "summary_path": summary_path,
             "report_path": report_path,
@@ -611,7 +536,6 @@ def _row_float(row: Dict[str, Any], key: str) -> float:
 
 @lru_cache(maxsize=64)
 def _recompute_summary_from_per_step(run_dir_str: str) -> Optional[Dict[str, Any]]:
-    run_dir = Path(run_dir_str)
     raw_rows = list(_read_all_per_step_rows(run_dir_str))
     if not raw_rows:
         return None
@@ -644,40 +568,12 @@ def _recompute_summary_from_per_step(run_dir_str: str) -> Optional[Dict[str, Any
                 "avg_path_latency_ms_mean": (
                     _mean_or_zero(avg_path_latency_values) if avg_path_latency_values else None
                 ),
-                "delivery_loss_rate": (
-                    float(sum(_row_float(row, "dropped") for row in rows))
-                    / max(
-                        float(sum(_row_float(row, "delivered") for row in rows))
-                        + float(sum(_row_float(row, "dropped") for row in rows)),
-                        1e-9,
-                    )
-                ),
-                "qos_violation_count": int(sum(1 for row in rows if _to_bool(row.get("qos_violation")) is True)),
-                "qos_violation_rate": (
-                    float(sum(1 for row in rows if _to_bool(row.get("qos_violation")) is True)) / float(max(len(rows), 1))
-                ),
                 "toggles_applied_total": int(sum(1 for row in rows if _to_bool(row.get("toggle_applied")) is True)),
                 "toggles_reverted_total": int(sum(1 for row in rows if _to_bool(row.get("toggle_reverted")) is True)),
-                "transition_count_total": int(
-                    sum(
-                        _to_int(row.get("transition_count"))
-                        if row.get("transition_count") not in ("", None)
-                        else int(_to_bool(row.get("toggle_applied")) is True)
-                        for row in rows
-                    )
-                ),
-                "flap_event_count_total": int(sum(_to_int(row.get("flap_event_count")) or 0 for row in rows)),
             }
         )
         episode_summaries[-1]["toggles_total"] = (
             int(episode_summaries[-1]["toggles_applied_total"]) + int(episode_summaries[-1]["toggles_reverted_total"])
-        )
-        episode_summaries[-1]["transition_rate"] = (
-            float(episode_summaries[-1]["transition_count_total"]) / float(max(len(rows), 1))
-        )
-        transition_total = int(episode_summaries[-1]["transition_count_total"])
-        episode_summaries[-1]["flap_rate"] = (
-            float(episode_summaries[-1]["flap_event_count_total"]) / float(max(transition_total, 1))
         )
 
     overall: Dict[str, Any] = {
@@ -688,8 +584,6 @@ def _recompute_summary_from_per_step(run_dir_str: str) -> Optional[Dict[str, Any
         "delivered_total_std": _std_or_zero([float(item["delivered_total"]) for item in episode_summaries]),
         "dropped_total_mean": _mean_or_zero([float(item["dropped_total"]) for item in episode_summaries]),
         "dropped_total_std": _std_or_zero([float(item["dropped_total"]) for item in episode_summaries]),
-        "delivery_loss_rate_mean": _mean_or_zero([float(item["delivery_loss_rate"]) for item in episode_summaries]),
-        "delivery_loss_rate_std": _std_or_zero([float(item["delivery_loss_rate"]) for item in episode_summaries]),
         "energy_kwh_total_mean": _mean_or_zero([float(item["energy_kwh_total"]) for item in episode_summaries]),
         "energy_kwh_total_std": _std_or_zero([float(item["energy_kwh_total"]) for item in episode_summaries]),
         "carbon_g_total_mean": _mean_or_zero([float(item["carbon_g_total"]) for item in episode_summaries]),
@@ -699,23 +593,12 @@ def _recompute_summary_from_per_step(run_dir_str: str) -> Optional[Dict[str, Any
         "avg_utilization_mean": _mean_or_zero([float(item["avg_utilization_mean"]) for item in episode_summaries]),
         "active_ratio_mean": _mean_or_zero([float(item["active_ratio_mean"]) for item in episode_summaries]),
         "avg_delay_ms_mean": _mean_or_zero([float(item["avg_delay_ms_mean"]) for item in episode_summaries]),
-        "qos_violation_rate_mean": _mean_or_zero([float(item["qos_violation_rate"]) for item in episode_summaries]),
-        "qos_violation_rate_std": _std_or_zero([float(item["qos_violation_rate"]) for item in episode_summaries]),
-        "qos_violation_rate_count": len(episode_summaries),
-        "qos_violation_count_mean": _mean_or_zero([float(item["qos_violation_count"]) for item in episode_summaries]),
-        "qos_violation_count_std": _std_or_zero([float(item["qos_violation_count"]) for item in episode_summaries]),
-        "qos_violation_count_count": len(episode_summaries),
-        "qos_violation_count_total": float(sum(float(item["qos_violation_count"]) for item in episode_summaries)),
         "toggles_total_mean": _mean_or_zero([float(item["toggles_total"]) for item in episode_summaries]),
         "toggles_total_std": _std_or_zero([float(item["toggles_total"]) for item in episode_summaries]),
         "toggles_applied_mean": _mean_or_zero([float(item["toggles_applied_total"]) for item in episode_summaries]),
         "toggles_applied_std": _std_or_zero([float(item["toggles_applied_total"]) for item in episode_summaries]),
         "toggles_reverted_mean": _mean_or_zero([float(item["toggles_reverted_total"]) for item in episode_summaries]),
         "toggles_reverted_std": _std_or_zero([float(item["toggles_reverted_total"]) for item in episode_summaries]),
-        "transition_count_total_mean": _mean_or_zero([float(item["transition_count_total"]) for item in episode_summaries]),
-        "transition_rate_mean": _mean_or_zero([float(item["transition_rate"]) for item in episode_summaries]),
-        "flap_event_count_total_mean": _mean_or_zero([float(item["flap_event_count_total"]) for item in episode_summaries]),
-        "flap_rate_mean": _mean_or_zero([float(item["flap_rate"]) for item in episode_summaries]),
     }
 
     avg_path_latency_episode_values = [
@@ -726,27 +609,6 @@ def _recompute_summary_from_per_step(run_dir_str: str) -> Optional[Dict[str, Any
     if avg_path_latency_episode_values:
         overall["avg_path_latency_ms_mean"] = _mean_or_zero(avg_path_latency_episode_values)
         overall["avg_path_latency_ms_std"] = _std_or_zero(avg_path_latency_episode_values)
-
-    cfg = load_env_config_from_run(run_dir, verbose=False)
-    qos_summary = evaluate_run_qos(
-        delivered_total=_to_float(overall.get("delivered_total_mean")),
-        dropped_total=_to_float(overall.get("dropped_total_mean")),
-        avg_delay_ms=_to_float(overall.get("avg_delay_ms_mean")),
-        avg_path_latency_ms=_to_float(overall.get("avg_path_latency_ms_mean")),
-        qos_violation_rate=_to_float(overall.get("qos_violation_rate_mean")),
-        qos_violation_count=_to_float(overall.get("qos_violation_count_total")),
-        thresholds=runtime_thresholds_from_config(cfg),
-    )
-    overall.update(qos_summary)
-    stability_summary = evaluate_run_stability(
-        steps=_to_float(overall.get("steps_mean")),
-        transition_count_total=_to_float(overall.get("transition_count_total_mean")),
-        flap_event_count_total=_to_float(overall.get("flap_event_count_total_mean")),
-        policy=stability_policy_from_config(cfg),
-    )
-    overall.update(stability_summary)
-    overall["transition_rate_mean"] = stability_summary.get("transition_rate")
-    overall["flap_rate_mean"] = stability_summary.get("flap_rate")
 
     return {"episodes": episode_summaries, "overall": overall}
 
@@ -763,21 +625,6 @@ def _summary_payload_for_run(run_dir: Path) -> Dict[str, Any]:
     stored_overall = payload.get("overall") if isinstance(payload.get("overall"), dict) else {}
     payload["overall"] = {**stored_overall, **recomputed["overall"]}
     payload["episodes"] = recomputed["episodes"]
-
-    meta = _load_db_json_payload(source, run_dir, "run_meta.json") or load_json(run_dir / "run_meta.json") or {}
-    if isinstance(payload["overall"], dict):
-        if "qos_thresholds" not in payload["overall"] and isinstance(meta.get("qos_thresholds"), dict):
-            payload["overall"]["qos_thresholds"] = meta.get("qos_thresholds")
-        if "qos_policy_name" not in payload["overall"] and meta.get("qos_policy_name") not in ("", None):
-            payload["overall"]["qos_policy_name"] = meta.get("qos_policy_name")
-        if "qos_policy_signature" not in payload["overall"] and meta.get("qos_policy_signature") not in ("", None):
-            payload["overall"]["qos_policy_signature"] = meta.get("qos_policy_signature")
-        if "stability_thresholds" not in payload["overall"] and isinstance(meta.get("stability_thresholds"), dict):
-            payload["overall"]["stability_thresholds"] = meta.get("stability_thresholds")
-        if "stability_policy_name" not in payload["overall"] and meta.get("stability_policy_name") not in ("", None):
-            payload["overall"]["stability_policy_name"] = meta.get("stability_policy_name")
-        if "stability_policy_signature" not in payload["overall"] and meta.get("stability_policy_signature") not in ("", None):
-            payload["overall"]["stability_policy_signature"] = meta.get("stability_policy_signature")
     return payload
 
 
@@ -1299,24 +1146,9 @@ def get_run_record(run_dir: Path, source: str, db_snapshot: Optional[Dict[str, A
         "started_at": parsed.get("started_at"),
         "timestamp_utc": None,
         "policy": parsed.get("policy"),
-        "policy_class": None,
-        "controller_policy": None,
-        "controller_policy_class": None,
         "scenario": parsed.get("scenario"),
         "seed": parsed.get("seed"),
         "topology_seed": parsed.get("topology_seed"),
-        "topology_name": None,
-        "topology_path": None,
-        "traffic_mode": None,
-        "traffic_model": None,
-        "traffic_name": None,
-        "traffic_path": None,
-        "traffic_scenario": None,
-        "matrix_id": None,
-        "matrix_name": None,
-        "matrix_manifest": None,
-        "matrix_case_id": None,
-        "matrix_case_label": None,
         "tag": parsed.get("tag"),
         "episodes": None,
         "max_steps": None,
@@ -1332,28 +1164,13 @@ def get_run_record(run_dir: Path, source: str, db_snapshot: Optional[Dict[str, A
             record["started_at"] = record["timestamp_utc"]
 
         record["policy"] = db_snapshot.get("policy") or record["policy"]
-        record["policy_class"] = db_snapshot.get("policy_class")
-        record["controller_policy"] = db_snapshot.get("controller_policy")
-        record["controller_policy_class"] = db_snapshot.get("controller_policy_class")
         record["scenario"] = db_snapshot.get("scenario") or record["scenario"]
-        record["matrix_id"] = db_snapshot.get("matrix_id")
-        record["matrix_name"] = db_snapshot.get("matrix_name")
-        record["matrix_manifest"] = db_snapshot.get("matrix_manifest")
-        record["matrix_case_id"] = db_snapshot.get("matrix_case_id")
-        record["matrix_case_label"] = db_snapshot.get("matrix_case_label")
         record["tag"] = db_snapshot.get("tag") or record["tag"]
 
         if db_snapshot.get("seed") is not None:
             record["seed"] = _to_int(db_snapshot.get("seed"))
         if db_snapshot.get("topology_seed") is not None:
             record["topology_seed"] = _to_int(db_snapshot.get("topology_seed"))
-        record["topology_name"] = db_snapshot.get("topology_name")
-        record["topology_path"] = db_snapshot.get("topology_path")
-        record["traffic_mode"] = db_snapshot.get("traffic_mode")
-        record["traffic_model"] = db_snapshot.get("traffic_model")
-        record["traffic_name"] = db_snapshot.get("traffic_name")
-        record["traffic_path"] = db_snapshot.get("traffic_path")
-        record["traffic_scenario"] = db_snapshot.get("traffic_scenario")
 
         record["episodes"] = _to_int(db_snapshot.get("episodes"))
         record["max_steps"] = _to_int(db_snapshot.get("max_steps"))
@@ -1366,10 +1183,6 @@ def get_run_record(run_dir: Path, source: str, db_snapshot: Optional[Dict[str, A
             else {}
         )
         record["highlights"] = {field: _to_float(highlights_payload.get(field)) for field in HIGHLIGHT_FIELDS}
-        record["qos_acceptance_status"] = db_snapshot.get("qos_acceptance_status")
-        record["qos_acceptance_missing"] = db_snapshot.get("qos_acceptance_missing")
-        record["stability_status"] = db_snapshot.get("stability_status")
-        record["stability_missing"] = db_snapshot.get("stability_missing")
         return record
 
     meta = load_json(run_dir / "run_meta.json")
@@ -1397,10 +1210,6 @@ def get_run_record(run_dir: Path, source: str, db_snapshot: Optional[Dict[str, A
         overall = summary["overall"]
         for field in HIGHLIGHT_FIELDS:
             record["highlights"][field] = _to_float(overall.get(field))
-        record["qos_acceptance_status"] = overall.get("qos_acceptance_status") or overall.get("qos_acceptability_status")
-        record["qos_acceptance_missing"] = overall.get("qos_acceptance_missing") or overall.get("qos_acceptability_missing")
-        record["stability_status"] = overall.get("stability_status")
-        record["stability_missing"] = overall.get("stability_missing")
 
     return record
 
@@ -1470,9 +1279,6 @@ def _matches_text_filter(actual: Any, expected: Optional[str]) -> bool:
 def _coerce_per_step_value(key: str, value: Optional[str]) -> Any:
     if value is None or value == "":
         return value
-    if key in BOOL_COLUMNS:
-        parsed_bool = _to_bool(value)
-        return parsed_bool if parsed_bool is not None else value
     if key in INT_COLUMNS:
         parsed_int = _to_int(value)
         return parsed_int if parsed_int is not None else value
@@ -1839,9 +1645,6 @@ def official_results(scenario: Optional[str] = Query(None)) -> Dict[str, Any]:
 
 @app.get("/api/final_evaluation")
 def final_evaluation() -> Dict[str, Any]:
-    db_payload = _latest_final_evaluation_from_db()
-    if db_payload is not None:
-        return db_payload
     artifact = _latest_final_evaluation_artifact()
     if artifact is None:
         raise HTTPException(status_code=404, detail="No final evaluation summary artifact was found")

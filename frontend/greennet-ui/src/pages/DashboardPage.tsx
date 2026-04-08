@@ -3,7 +3,6 @@ import ChartCard from "../components/ChartCard";
 import KpiCard from "../components/KpiCard";
 import OfficialResultCard from "../components/OfficialResultCard";
 import RunControls from "../components/RunControls";
-import StatusBadge from "../components/StatusBadge";
 import { ErrorNotice, InfoNotice, LoadingNotice } from "../components/StatusState";
 import TopologyPanel from "../components/TopologyPanel";
 import {
@@ -12,30 +11,21 @@ import {
   getRunPerStep,
   getRunSummary,
   getTopology,
-  listRunsWithSource,
+  listRuns,
   startRun,
-  type RunCatalogSource,
 } from "../lib/api";
-import { useBackendStatus } from "../hooks/useBackendStatus";
 import { isDemoRunId } from "../lib/demo";
 import {
   chartRows,
   fallbackTopology,
   formatPolicyLabel,
   formatScenarioLabel,
-  formatStatusLabel,
   fmt,
   inferPolicy,
   kpiFromOverall,
   latestRunByPolicy,
   linkStateFromRatio,
   normalizePerStep,
-  selectTopRuns,
-  selectQosAcceptanceMissing,
-  selectQosAcceptanceStatus,
-  selectStabilityMissing,
-  selectStabilityStatus,
-  statusTone,
   toMetrics,
 } from "../lib/data";
 import type {
@@ -50,9 +40,9 @@ import type {
 type PolicySeries = Record<string, PerStepRow[]>;
 
 const REFERENCE_POLICY_STYLES: Record<string, { label: string; color: string }> = {
-  all_on: { label: "Traditional", color: "#f7bf5e" },
+  all_on: { label: "All-On", color: "#f7bf5e" },
   heuristic: { label: "Heuristic", color: "#5dc8ff" },
-  ppo: { label: "PPO-Based Hybrid (AI)", color: "#00f2bf" },
+  ppo: { label: "PPO", color: "#00f2bf" },
 };
 
 function upsertRun(runs: RunSummary[], nextRun: RunSummary): RunSummary[] {
@@ -67,7 +57,6 @@ function upsertRun(runs: RunSummary[], nextRun: RunSummary): RunSummary[] {
 }
 
 export default function DashboardPage() {
-  const { status: backendStatus, message: backendMessage } = useBackendStatus();
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string>("");
   const [rows, setRows] = useState<PerStepRow[]>([]);
@@ -76,8 +65,6 @@ export default function DashboardPage() {
   const [topology, setTopology] = useState<TopologyData>(fallbackTopology("dashboard"));
   const [policySeries, setPolicySeries] = useState<PolicySeries>({});
   const [linkState, setLinkState] = useState<LinkStateMap | null>(null);
-  const [runCatalogSource, setRunCatalogSource] = useState<RunCatalogSource>("backend");
-  const [topologyFallbackNotice, setTopologyFallbackNotice] = useState("");
 
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
@@ -89,7 +76,6 @@ export default function DashboardPage() {
   const [seed, setSeed] = useState("");
   const [steps, setSteps] = useState("");
   const [topologyStepIndex, setTopologyStepIndex] = useState(0);
-  const visibleRuns = useMemo(() => selectTopRuns(runs, 20), [runs]);
 
   useEffect(() => {
     let alive = true;
@@ -97,30 +83,22 @@ export default function DashboardPage() {
     async function loadRuns() {
       setLoadingRuns(true);
       setError("");
-      setTopologyFallbackNotice("");
 
       try {
-        const catalog = await listRunsWithSource();
+        const runItems = await listRuns();
         if (!alive) {
           return;
         }
 
-        setRuns(catalog.runs);
-        setRunCatalogSource(catalog.source);
-        setSelectedRunId((currentRunId) => {
-          const preferredRun = latestRunByPolicy(catalog.runs, "ppo") ?? catalog.runs[0] ?? null;
-          if (!currentRunId && catalog.runs.length > 0) {
-            return preferredRun?.run_id ?? "";
-          }
-          if (currentRunId && !catalog.runs.find((run) => run.run_id === currentRunId)) {
-            return preferredRun?.run_id ?? "";
-          }
-          return currentRunId;
-        });
+        setRuns(runItems);
+        if (!selectedRunId && runItems.length > 0) {
+          setSelectedRunId(runItems[0].run_id);
+        } else if (selectedRunId && !runItems.find((run) => run.run_id === selectedRunId)) {
+          setSelectedRunId(runItems[0]?.run_id ?? "");
+        }
       } catch (apiError) {
         if (alive) {
           setError(apiError instanceof Error ? apiError.message : "Failed to load runs");
-          setRunCatalogSource("backend");
         }
       } finally {
         if (alive) {
@@ -161,7 +139,6 @@ export default function DashboardPage() {
     async function loadRunData() {
       setLoadingData(true);
       setError("");
-      setTopologyFallbackNotice("");
 
       try {
         const [stepRows, topo, summary] = await Promise.all([
@@ -178,18 +155,12 @@ export default function DashboardPage() {
         setOverallSummary(summary);
         setTopology(topo ?? fallbackTopology(selectedRunId));
         setTopologyStepIndex(Math.max(0, normalized.length - 1));
-        if (topo == null && alive) {
-          setTopologyFallbackNotice(
-            "The backend did not return a topology for this run, so the dashboard is rendering a generated layout derived from the run identifier.",
-          );
-        }
       } catch (apiError) {
         if (alive) {
           setError(apiError instanceof Error ? apiError.message : "Failed to load run data");
           setRows([]);
           setOverallSummary(null);
           setTopology(fallbackTopology(selectedRunId));
-          setTopologyFallbackNotice("");
         }
       } finally {
         if (alive) {
@@ -318,18 +289,10 @@ export default function DashboardPage() {
   }, [previousRow, topology.edges]);
 
   const selectedRun = runs.find((run) => run.run_id === selectedRunId);
-  const demoMode = runCatalogSource === "demo" || (selectedRun ? isDemoRunId(selectedRun.run_id) : false);
-  const backendOnline = backendStatus === "online";
+  const demoMode = selectedRun ? isDemoRunId(selectedRun.run_id) : false;
   const activeOfficialScenario = (selectedRun?.scenario ?? "").toLowerCase();
   const highlightedOfficialResult =
     officialResults.find((item) => item.scenario === activeOfficialScenario) ?? null;
-  const runQosStatus = selectQosAcceptanceStatus(overallSummary);
-  const runQosMissing = selectQosAcceptanceMissing(overallSummary);
-  const runStabilityStatus = selectStabilityStatus(overallSummary);
-  const runStabilityMissing = selectStabilityMissing(overallSummary);
-  const runHasCentralQosThresholds = Boolean(
-    overallSummary?.qos_acceptance_thresholds ?? overallSummary?.qos_thresholds,
-  );
 
   const kpis = useMemo(() => kpiFromOverall(overallSummary), [overallSummary]);
   const timeData = useMemo(() => chartRows(rows), [rows]);
@@ -374,11 +337,6 @@ export default function DashboardPage() {
   }, [policySeries, timeData]);
 
   async function handleRun(): Promise<void> {
-    if (!backendOnline) {
-      setError(backendMessage);
-      return;
-    }
-
     const seedValue = seed === "" ? Number.NaN : Number(seed);
     const stepsValue = steps === "" ? Number.NaN : Number(steps);
 
@@ -392,7 +350,7 @@ export default function DashboardPage() {
 
     try {
       const started = await startRun({ policy, scenario, seed: seedValue, steps: stepsValue });
-      const catalog = await listRunsWithSource();
+      const refreshed = await listRuns();
       const startedRun: RunSummary = {
         run_id: started.run_id,
         policy,
@@ -402,8 +360,7 @@ export default function DashboardPage() {
         tag: "dashboard",
       };
 
-      setRuns(upsertRun(catalog.runs, startedRun));
-      setRunCatalogSource(catalog.source);
+      setRuns(upsertRun(refreshed, startedRun));
       setSelectedRunId(started.run_id);
     } catch (apiError) {
       setError(apiError instanceof Error ? apiError.message : "Unable to start run on backend");
@@ -445,19 +402,12 @@ export default function DashboardPage() {
 
       {loadingRuns ? <LoadingNotice title="Loading runs" description="Fetching available simulation outputs." /> : null}
       {error ? <ErrorNotice title="Data Error" description={error} /> : null}
-      {!backendOnline ? (
-        <InfoNotice
-          title="Live backend controls disabled"
-          description={`${backendMessage} Existing generated/demo content can still render, but starting new runs is disabled.`}
-        />
-      ) : null}
       {demoMode ? (
         <InfoNotice
           title="Demo Data Mode"
-          description="The backend run catalog or selected run data is unavailable, so the dashboard is showing generated simulation data."
+          description="Backend data is unavailable or empty. Showing generated simulation data so the dashboard remains fully interactive."
         />
       ) : null}
-      {topologyFallbackNotice ? <InfoNotice title="Generated Topology Layout" description={topologyFallbackNotice} /> : null}
       {highlightedOfficialResult ? (
         <InfoNotice
           title="Scenario Validation Available"
@@ -489,21 +439,6 @@ export default function DashboardPage() {
               <strong>{selectedRun.max_steps ?? overallSummary?.steps_mean ?? "-"}</strong>
             </article>
           </div>
-          {runQosStatus || runQosMissing || runStabilityStatus || runStabilityMissing || runHasCentralQosThresholds ? (
-            <div className="status-badge-row">
-              {runQosStatus ? (
-                <StatusBadge label={`QoS ${formatStatusLabel(runQosStatus)}`} tone={statusTone(runQosStatus)} />
-              ) : null}
-              {runQosMissing ? <StatusBadge label={`QoS ${formatStatusLabel(runQosMissing)}`} tone="warning" /> : null}
-              {runStabilityStatus ? (
-                <StatusBadge label={`Stability ${formatStatusLabel(runStabilityStatus)}`} tone={statusTone(runStabilityStatus)} />
-              ) : null}
-              {runStabilityMissing ? (
-                <StatusBadge label={`Stability ${formatStatusLabel(runStabilityMissing)}`} tone="warning" />
-              ) : null}
-              {runHasCentralQosThresholds ? <StatusBadge label="QoS policy loaded" tone="neutral" /> : null}
-            </div>
-          ) : null}
         </section>
       ) : null}
 
@@ -574,10 +509,8 @@ export default function DashboardPage() {
             seed={seed}
             steps={steps}
             loading={running}
-            backendOnline={backendOnline}
-            backendMessage={backendMessage}
             runId={selectedRunId}
-            runs={visibleRuns}
+            runs={runs}
             onPolicyChange={setPolicy}
             onScenarioChange={setScenario}
             onSeedChange={setSeed}
