@@ -1,17 +1,10 @@
-import { fmt, officialLockedScenarioMetrics } from "../lib/data";
+import { fmt, formatScenarioLabel, officialLockedScenarioMetrics } from "../lib/data";
 import type { OfficialLockedResult } from "../lib/types";
 
 type OfficialResultCardProps = {
   result: OfficialLockedResult;
   active?: boolean;
 };
-
-function formatScenarioLabel(value: string): string {
-  if (!value) {
-    return "Unknown";
-  }
-  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
-}
 
 export default function OfficialResultCard({ result, active = false }: OfficialResultCardProps) {
   const metrics = officialLockedScenarioMetrics(result);
@@ -56,7 +49,7 @@ export default function OfficialResultCard({ result, active = false }: OfficialR
         {metrics.map((metric) => (
           <div key={`${result.scenario}-${metric.label}`} className="official-result-kpi">
             <span>{metric.label}</span>
-            <strong>{fmt(metric.value, metric.unit === "kWh" ? 3 : 2)}</strong>
+            <strong>{fmt(metric.value, metric.digits ?? (metric.unit === "kWh" ? 3 : 2))}</strong>
             <small>{metric.unit}</small>
           </div>
         ))}
@@ -65,7 +58,7 @@ export default function OfficialResultCard({ result, active = false }: OfficialR
       {decision || result.notes ? (
         <p className="card-caption">
           {decision?.reason ? `${decision.reason}. ` : ""}
-          {decision?.delta_reward != null ? `Reward Delta vs No-Op ${fmt(decision.delta_reward, 2)}. ` : ""}
+          {decision?.delta_reward != null ? `Reward Delta vs All-On ${fmt(decision.delta_reward, 2)}. ` : ""}
           {result.notes ?? ""}
         </p>
       ) : null}

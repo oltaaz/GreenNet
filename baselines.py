@@ -1,8 +1,8 @@
-"""Baseline comparison script for GreenNet.
+"""Traditional controller baselines for GreenNet.
 
 Runs three policies on the same seeded environment:
   A) Always-on (no toggles)
-  B) Heuristic sleep-if-idle (toggle off low-util edges, toggle on if congested)
+  B) Utilization-threshold controller (toggle off low-util edges, toggle on if congested)
   C) RL policy (if a PPO model path is provided)
 """
 from __future__ import annotations
@@ -25,11 +25,31 @@ except Exception:  # pragma: no cover - optional dependency
 ActionFn = Callable[[Dict[str, Any], Dict[str, Any], GreenNetEnv], int]
 
 
+def canonical_controller_policy_name(policy: str | None) -> str:
+    key = str(policy or "").strip().lower()
+    if key in {"noop", "all_on"}:
+        return "all_on"
+    if key in {"baseline", "heuristic"}:
+        return "utilization_threshold"
+    if key == "ppo":
+        return "ppo"
+    return key or "unknown"
+
+
+def controller_policy_class(policy: str | None) -> str:
+    canonical = canonical_controller_policy_name(policy)
+    if canonical in {"all_on", "utilization_threshold"}:
+        return "traditional_baseline"
+    if canonical == "ppo":
+        return "ai_enhanced"
+    return "other"
+
+
 def action_always_on(_: Dict[str, Any], __: Dict[str, Any], ___: GreenNetEnv) -> int:
     return 0
 
 
-def action_sleep_if_idle(
+def action_utilization_threshold(
     obs: Dict[str, Any],
     info: Dict[str, Any],
     env: GreenNetEnv,
@@ -63,6 +83,10 @@ def action_sleep_if_idle(
         return env.edge_list.index(inactive_edges[0]) + 1
 
     return 0
+
+
+# Backward-compatible alias used by older evaluation code paths.
+action_sleep_if_idle = action_utilization_threshold
 
 
 def action_rl(model: Any | None) -> ActionFn:
@@ -117,7 +141,9 @@ def summarize(log: List[Dict[str, float]]) -> Dict[str, float]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run baseline comparisons (always-on, heuristic sleep, RL).")
+    parser = argparse.ArgumentParser(
+        description="Run controller-baseline comparisons (all-on, utilization-threshold, RL)."
+    )
     parser.add_argument("--steps", type=int, default=100, help="Number of steps per policy.")
     parser.add_argument("--seed", type=int, default=7, help="Environment seed to align flows/topology.")
     parser.add_argument("--model", type=Path, default=None, help="Path to a trained PPO model (.zip) for RL baseline.")
@@ -127,7 +153,7 @@ def main() -> None:
     results: List[Dict[str, Any]] = []
 
     results.append(run_episode("always_on", args.seed, args.steps, action_always_on))
-    results.append(run_episode("sleep_if_idle", args.seed, args.steps, action_sleep_if_idle))
+    results.append(run_episode("utilization_threshold", args.seed, args.steps, action_utilization_threshold))
 
     rl_included = False
     if args.model and args.model.exists() and PPO is not None:

@@ -12,8 +12,8 @@ export default function HomePage() {
           <Link className="btn-primary" to="/dashboard">
             Open Dashboard
           </Link>
-          <Link className="btn-muted" to="/simulator">
-            Open Simulator
+          <Link className="btn-muted" to="/results">
+            Open Results
           </Link>
         </div>
       </section>
@@ -36,7 +36,8 @@ export default function HomePage() {
         <article className="glass-card info-card">
           <h3>Architecture</h3>
           <p>
-            Python APIs provide run and step metrics. React + Vite presents dashboards, charts, and simulation playback.
+            FastAPI provides run and step metrics. The official React frontend presents dashboards, comparison results,
+            and simulator playback from the same backend data.
           </p>
         </article>
 

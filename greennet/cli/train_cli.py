@@ -30,6 +30,7 @@ except Exception:  # pragma: no cover
 from greennet.env import EnvConfig, GreenNetEnv
 from greennet.utils.config import (
     load_env_config_from_run,
+    resolve_env_paths_in_config,
     save_env_config,
     save_train_config,
     load_train_config_from_run,
@@ -126,7 +127,16 @@ def _extract_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
             env_overrides.update(block)
 
     # Allow top-level seed keys to flow into env config.
-    for key in ("topology_seed", "topology_seeds", "topology_randomize", "traffic_seed"):
+    for key in (
+        "topology_seed",
+        "topology_seeds",
+        "topology_randomize",
+        "topology_name",
+        "topology_path",
+        "traffic_seed",
+        "traffic_name",
+        "traffic_path",
+    ):
         if key in config and key not in env_overrides:
             env_overrides[key] = config[key]
 
@@ -215,11 +225,15 @@ def default_train_env_config() -> EnvConfig:
         flows_per_step=6,
         base_capacity=15.0,
 
-
-
-        # configs for forecasting
+        # Forecasting config
         enable_forecasting=True,
+        forecast_model="ema",
         forecast_alpha=0.6,
+        forecast_beta=0.2,
+        forecast_trend_damping=0.9,
+        forecast_adaptive_alphas=(0.1, 0.2, 0.4, 0.6, 0.8, 0.95),
+        forecast_adaptive_error_alpha=0.02,
+        forecast_adaptive_temperature=0.25,
         forecast_horizon_steps=3,
         demand_norm_scale=0.0,  # scale factor to keep demand values in a reasonable range for the forecaster
 
@@ -239,7 +253,10 @@ def load_config(config_path: Path | None) -> Dict[str, Any]:
     if config_path is None:
         return dict(DEFAULT_CONFIG)
     with config_path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+        config = json.load(handle)
+    if not isinstance(config, dict):
+        raise ValueError(f"Config file must contain a JSON object: {config_path}")
+    return resolve_env_paths_in_config(config, base_dir=config_path.parent)
 
 
 def make_env(seed: int, env_config: EnvConfig):
@@ -1093,4 +1110,3 @@ def main() -> None:
     model.save(str(run_dir / "ppo_greennet"))
     print(f"[algo] {type(model).__name__}")
     print(f"Saved to {run_dir}")
-

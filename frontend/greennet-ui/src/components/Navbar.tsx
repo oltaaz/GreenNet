@@ -3,9 +3,8 @@
 const navItems = [
   { to: "/", label: "Home" },
   { to: "/dashboard", label: "Dashboard" },
-  { to: "/compare", label: "Compare" },
+  { to: "/results", label: "Results" },
   { to: "/simulator", label: "Simulator" },
-  { to: "/research", label: "Research" },
   { to: "/about", label: "About" },
 ];
 

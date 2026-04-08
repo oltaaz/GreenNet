@@ -1,4 +1,5 @@
-﻿import type { RunSummary } from "../lib/types";
+﻿import { formatRunOptionLabel } from "../lib/data";
+import type { RunSummary } from "../lib/types";
 
 type RunControlsProps = {
   policy: string;
@@ -89,7 +90,7 @@ export default function RunControls({
             <select value={runId ?? ""} onChange={(event) => onRunSelect(event.target.value)}>
               {runs.map((run) => (
                 <option key={run.run_id} value={run.run_id}>
-                  {run.run_id}
+                  {formatRunOptionLabel(run)}
                 </option>
               ))}
             </select>
@@ -99,8 +100,8 @@ export default function RunControls({
         <label>
           Policy
           <select value={policy} onChange={(event) => onPolicyChange(event.target.value)}>
-            <option value="baseline">Baseline</option>
-            <option value="noop">No-Op</option>
+            <option value="all_on">All-On</option>
+            <option value="heuristic">Heuristic</option>
             <option value="ppo">PPO</option>
           </select>
         </label>

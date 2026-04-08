@@ -170,7 +170,72 @@ python3 experiments/run_matrix.py \
   --tag matrix_v4 \
   --ppo-model <PATH_TO_PPO_ZIP>
 
+---------------------------------------------------------------------------------------------------------------------------------------
+
+## 7) Final Thesis Evaluation Bundle
+
+Build one authoritative baseline-vs-AI summary from existing result artifacts.
+
+Using an already packaged matrix summary:
+
+python3 experiments/final_evaluation.py \
+  --summary-csv experiments/official_matrix_v6/results_summary_matrix_v6.csv \
+  --primary-baseline-policy heuristic \
+  --ai-policies ppo \
+  --output-dir experiments/official_matrix_v6/final_evaluation
+
+Or scan `results/` directly by tag:
+
+python3 experiments/final_evaluation.py \
+  --results-dir results \
+  --tag matrix_v6 \
+  --primary-baseline-policy heuristic \
+  --ai-policies ppo \
+  --output-dir artifacts/final_evaluation/matrix_v6
+
+Writes:
+- `final_evaluation_summary.csv`
+- `final_evaluation_summary.json`
+- `final_evaluation_report.md`
+
 Note: single knob change vs v3 = toggle_cooldown_steps=4 (was 12) and global_toggle_cooldown_steps=10 (was 40).
+
+---------------------------------------------------------------------------------------------------------------------------------------
+
+## 7a) Final Thesis Pipeline (single end-to-end runner)
+
+Use this when you want one command that handles matrix execution, aggregation, summary tables, final evaluation, plots, and a concise report bundle.
+
+Full rerun:
+
+python3 experiments/final_pipeline.py \
+  --tag matrix_v7 \
+  --policies all_on,heuristic,ppo \
+  --scenarios normal,burst,hotspot \
+  --seeds 0,1,2,3,4,5,6,7,8,9 \
+  --episodes 50 \
+  --steps 300 \
+  --ppo-model runs/<RUN_ID>/ppo_greennet.zip \
+  --output-dir artifacts/final_pipeline/matrix_v7
+
+Rebuild from an existing packaged matrix:
+
+python3 experiments/final_pipeline.py \
+  --summary-csv experiments/official_matrix_v6/results_summary_matrix_v6.csv \
+  --skip-eval \
+  --tag matrix_v6 \
+  --output-dir artifacts/final_pipeline/matrix_v6
+
+Bundle outputs:
+- `summary/results_summary_<tag>.csv`
+- `summary/results_summary_by_seed_<tag>.csv`
+- `summary/leaderboard_<tag>.csv`
+- `summary/research_question_summary.csv`
+- `summary/final_evaluation/final_evaluation_report.md`
+- `plots/*.csv`
+- `plots/*.png` (if `matplotlib` is installed)
+- `report/concise_report.md`
+- `metadata/pipeline_manifest.json`
 
 ---------------------------------------------------------------------------------------------------------------------------------------
 

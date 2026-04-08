@@ -33,6 +33,16 @@ python experiments/summarize_runs.py
 
 This writes `experiments/training_history.csv` with one row per run and prints a short summary to the terminal.
 
+## Run database
+
+Core run persistence now also writes to SQLite.
+
+- default DB file: `artifacts/db/greennet.sqlite3`
+- manual init: `python3 -m greennet.persistence init`
+- backfill older artifact-only runs: `python3 -m greennet.persistence backfill --base both`
+
+See `docs/run_database.md` for schema scope, migration behavior, and backend integration notes.
+
 ## Pruning runs safely
 The pruning script is dry-run by default and prints an action plan (KEEP / STRIP / DELETE). Use `--apply` to perform changes. STRIP removes model artifacts only; DELETE removes tiny empty runs (when enabled).
 

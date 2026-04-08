@@ -17,16 +17,25 @@ RUN_DIR_RE = re.compile(r"\[run_experiment\] results saved to (.+)")
 SUMMARY_COLUMNS = [
     "run_id",
     "policy",
+    "controller_policy",
+    "controller_policy_class",
     "scenario",
     "seed",
     "episodes",
     "max_steps",
     "deterministic",
+    "routing_baseline",
+    "routing_link_cost_model",
     "reward_total_mean",
     "delivered_total_mean",
     "dropped_total_mean",
     "energy_kwh_total_mean",
     "carbon_g_total_mean",
+    "power_total_watts_mean",
+    "power_fixed_watts_mean",
+    "power_variable_watts_mean",
+    "active_devices_mean",
+    "active_links_mean",
     "avg_utilization_mean",
     "active_ratio_mean",
     "avg_delay_ms_mean",
@@ -137,16 +146,25 @@ def _row_from_meta(
     return {
         "run_id": meta.get("run_id", ""),
         "policy": meta.get("policy", fallback_policy),
+        "controller_policy": meta.get("controller_policy", ""),
+        "controller_policy_class": meta.get("controller_policy_class", ""),
         "scenario": meta.get("scenario", fallback_scenario),
         "seed": meta.get("seed", fallback_seed),
         "episodes": meta.get("episodes", episodes),
         "max_steps": meta.get("max_steps", max_steps),
         "deterministic": meta.get("deterministic", deterministic),
+        "routing_baseline": meta.get("routing_baseline", ""),
+        "routing_link_cost_model": meta.get("routing_link_cost_model", ""),
         "reward_total_mean": overall.get("reward_total_mean", ""),
         "delivered_total_mean": overall.get("delivered_total_mean", ""),
         "dropped_total_mean": overall.get("dropped_total_mean", ""),
         "energy_kwh_total_mean": overall.get("energy_kwh_total_mean", ""),
         "carbon_g_total_mean": overall.get("carbon_g_total_mean", ""),
+        "power_total_watts_mean": overall.get("power_total_watts_mean", ""),
+        "power_fixed_watts_mean": overall.get("power_fixed_watts_mean", ""),
+        "power_variable_watts_mean": overall.get("power_variable_watts_mean", ""),
+        "active_devices_mean": overall.get("active_devices_mean", ""),
+        "active_links_mean": overall.get("active_links_mean", ""),
         "avg_utilization_mean": overall.get("avg_utilization_mean", ""),
         "active_ratio_mean": overall.get("active_ratio_mean", ""),
         "avg_delay_ms_mean": overall.get("avg_delay_ms_mean", ""),
@@ -175,6 +193,8 @@ def main() -> None:
         default=None,
         help="Force topology seed for ALL runs. If omitted and PPO is included, inferred from PPO model env_config.json.",
     )
+    parser.add_argument("--routing-baseline", type=str, default=None)
+    parser.add_argument("--routing-link-cost-model", type=str, default=None)
     args = parser.parse_args()
 
     seeds = _parse_seed_list(args.seeds)
@@ -256,6 +276,10 @@ def main() -> None:
                         cmd.extend(["--tag", str(args.tag)])
                     if policy == "ppo" and model_path is not None:
                         cmd.extend(["--model", str(model_path)])
+                    if args.routing_baseline:
+                        cmd.extend(["--routing-baseline", str(args.routing_baseline)])
+                    if args.routing_link_cost_model:
+                        cmd.extend(["--routing-link-cost-model", str(args.routing_link_cost_model)])
                     if not args.deterministic:
                         cmd.append("--stochastic")
 

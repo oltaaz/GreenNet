@@ -1,4 +1,10 @@
 ﻿import type {
+  FinalEvaluationArtifact,
+  FinalEvaluationClassification,
+  FinalEvaluationReport,
+  FinalEvaluationSource,
+  FinalEvaluationSummaryRow,
+  FinalEvaluationThresholds,
   LinkStateMap,
   OfficialLockedDeltaSummary,
   OfficialLockedEvalRow,
@@ -14,7 +20,7 @@
   TopologyEdge,
   TopologyNode,
 } from "./types";
-import { deriveOverallFromRows, fallbackTopology } from "./data";
+import { deriveOverallFromRows, fallbackTopology, normalizePolicy } from "./data";
 import {
   getDemoPerStep,
   getDemoSteps,
@@ -24,7 +30,6 @@ import {
 } from "./demo";
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
-const CURATED_RUN_TAG = (import.meta.env.VITE_RUN_TAG ?? "dashboard").trim();
 
 function withBase(path: string): string {
   if (!API_BASE_URL) {
@@ -103,12 +108,24 @@ function normalizeRun(row: unknown): RunSummary {
   return {
     run_id: toStringSafe(item.run_id ?? item.id, ""),
     started_at: (item.started_at as string | null | undefined) ?? null,
-    policy: (item.policy as string | null | undefined) ?? null,
+    policy: normalizePolicy(item.policy),
     scenario: (item.scenario as string | null | undefined) ?? null,
     seed: item.seed == null ? null : toNumber(item.seed, 0),
     topology_seed: item.topology_seed == null ? null : toNumber(item.topology_seed, 0),
     max_steps: item.max_steps == null ? null : toNumber(item.max_steps, 0),
     tag: (item.tag as string | null | undefined) ?? null,
+    source: (item.source as string | null | undefined) ?? null,
+    episodes: item.episodes == null ? null : toNumber(item.episodes, 0),
+    deterministic: item.deterministic == null ? null : Boolean(item.deterministic),
+    has:
+      item.has && typeof item.has === "object"
+        ? {
+            per_step: Boolean((item.has as Record<string, unknown>).per_step),
+            summary: Boolean((item.has as Record<string, unknown>).summary),
+            meta: Boolean((item.has as Record<string, unknown>).meta),
+            env_config: Boolean((item.has as Record<string, unknown>).env_config),
+          }
+        : null,
     reward_total_mean: toOptionalNumber(item.reward_total_mean ?? highlights.reward_total_mean),
     dropped_total_mean: toOptionalNumber(item.dropped_total_mean ?? highlights.dropped_total_mean),
     energy_kwh_total_mean: toOptionalNumber(item.energy_kwh_total_mean ?? highlights.energy_kwh_total_mean),
@@ -213,6 +230,234 @@ function normalizeOfficialResult(payload: unknown): OfficialLockedResult | null 
     noop_det: normalizeOfficialStats(item.noop_det),
     delta_summary: normalizeOfficialDeltaSummary(item.delta_summary),
     notes: (item.notes as string | null | undefined) ?? null,
+  };
+}
+
+function normalizeStringList(payload: unknown): string[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  return payload
+    .map((item) => toStringSafe(item, "").trim())
+    .filter((item): item is string => item.length > 0);
+}
+
+function normalizeFinalEvaluationSource(payload: unknown): FinalEvaluationSource | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+
+  const item = payload as Record<string, unknown>;
+  return {
+    mode: toStringSafe(item.mode, "unknown"),
+    description: toStringSafe(item.description, ""),
+    selected_run_count: toOptionalNumber(item.selected_run_count),
+    selected_policies: normalizeStringList(item.selected_policies),
+    selected_scenarios: normalizeStringList(item.selected_scenarios),
+  };
+}
+
+function normalizeFinalEvaluationClassification(payload: unknown): FinalEvaluationClassification | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+
+  const item = payload as Record<string, unknown>;
+  return {
+    primary_baseline_policy: toStringSafe(item.primary_baseline_policy, ""),
+    baseline_policies: normalizeStringList(item.baseline_policies),
+    ai_policies: normalizeStringList(item.ai_policies),
+  };
+}
+
+function normalizeFinalEvaluationThresholds(payload: unknown): FinalEvaluationThresholds | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+
+  const item = payload as Record<string, unknown>;
+  return {
+    energy_target_pct: toNumber(item.energy_target_pct, 0),
+    max_qos_violation_rate_increase_abs: toNumber(item.max_qos_violation_rate_increase_abs, 0),
+    max_delivered_loss_pct: toNumber(item.max_delivered_loss_pct, 0),
+    max_dropped_increase_pct: toNumber(item.max_dropped_increase_pct, 0),
+    max_delay_increase_pct: toNumber(item.max_delay_increase_pct, 0),
+    max_path_latency_increase_pct: toNumber(item.max_path_latency_increase_pct, 0),
+  };
+}
+
+type FinalEvaluationNumberField =
+  | "run_count"
+  | "seed_count"
+  | "episodes_total"
+  | "steps_total"
+  | "energy_kwh_mean"
+  | "energy_kwh_std"
+  | "energy_kwh_count"
+  | "energy_kwh_delta_vs_baseline"
+  | "energy_reduction_pct_vs_baseline"
+  | "delivered_traffic_mean"
+  | "delivered_traffic_std"
+  | "delivered_traffic_count"
+  | "delivered_traffic_delta_vs_baseline"
+  | "delivered_traffic_change_pct_vs_baseline"
+  | "dropped_traffic_mean"
+  | "dropped_traffic_std"
+  | "dropped_traffic_count"
+  | "dropped_traffic_delta_vs_baseline"
+  | "dropped_traffic_change_pct_vs_baseline"
+  | "avg_delay_ms_mean"
+  | "avg_delay_ms_std"
+  | "avg_delay_ms_count"
+  | "avg_delay_ms_delta_vs_baseline"
+  | "avg_delay_ms_change_pct_vs_baseline"
+  | "avg_path_latency_ms_mean"
+  | "avg_path_latency_ms_std"
+  | "avg_path_latency_ms_count"
+  | "avg_path_latency_ms_delta_vs_baseline"
+  | "avg_path_latency_ms_change_pct_vs_baseline"
+  | "qos_violation_rate_mean"
+  | "qos_violation_rate_std"
+  | "qos_violation_rate_count"
+  | "qos_violation_rate_delta_vs_baseline"
+  | "qos_violation_count_mean"
+  | "qos_violation_count_std"
+  | "qos_violation_count_count"
+  | "qos_violation_count_total"
+  | "qos_violation_count_delta_vs_baseline"
+  | "carbon_g_mean"
+  | "carbon_g_std"
+  | "carbon_g_count"
+  | "carbon_g_delta_vs_baseline"
+  | "carbon_reduction_pct_vs_baseline";
+
+const FINAL_EVALUATION_NUMBER_FIELDS: FinalEvaluationNumberField[] = [
+  "run_count",
+  "seed_count",
+  "episodes_total",
+  "steps_total",
+  "energy_kwh_mean",
+  "energy_kwh_std",
+  "energy_kwh_count",
+  "energy_kwh_delta_vs_baseline",
+  "energy_reduction_pct_vs_baseline",
+  "delivered_traffic_mean",
+  "delivered_traffic_std",
+  "delivered_traffic_count",
+  "delivered_traffic_delta_vs_baseline",
+  "delivered_traffic_change_pct_vs_baseline",
+  "dropped_traffic_mean",
+  "dropped_traffic_std",
+  "dropped_traffic_count",
+  "dropped_traffic_delta_vs_baseline",
+  "dropped_traffic_change_pct_vs_baseline",
+  "avg_delay_ms_mean",
+  "avg_delay_ms_std",
+  "avg_delay_ms_count",
+  "avg_delay_ms_delta_vs_baseline",
+  "avg_delay_ms_change_pct_vs_baseline",
+  "avg_path_latency_ms_mean",
+  "avg_path_latency_ms_std",
+  "avg_path_latency_ms_count",
+  "avg_path_latency_ms_delta_vs_baseline",
+  "avg_path_latency_ms_change_pct_vs_baseline",
+  "qos_violation_rate_mean",
+  "qos_violation_rate_std",
+  "qos_violation_rate_count",
+  "qos_violation_rate_delta_vs_baseline",
+  "qos_violation_count_mean",
+  "qos_violation_count_std",
+  "qos_violation_count_count",
+  "qos_violation_count_total",
+  "qos_violation_count_delta_vs_baseline",
+  "carbon_g_mean",
+  "carbon_g_std",
+  "carbon_g_count",
+  "carbon_g_delta_vs_baseline",
+  "carbon_reduction_pct_vs_baseline",
+];
+
+function normalizeFinalEvaluationRow(payload: unknown): FinalEvaluationSummaryRow | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const item = payload as Record<string, unknown>;
+  const row: FinalEvaluationSummaryRow = {
+    scope_type: toStringSafe(item.scope_type, ""),
+    scope: toStringSafe(item.scope, ""),
+    scenario: toStringSafe(item.scenario, ""),
+    policy: toStringSafe(item.policy, ""),
+    policy_class: toStringSafe(item.policy_class, ""),
+    seed_list: toStringSafe(item.seed_list, ""),
+    comparison_baseline_policy: toStringSafe(item.comparison_baseline_policy, ""),
+    comparison_available: item.comparison_available == null ? undefined : Boolean(item.comparison_available),
+    is_primary_baseline: item.is_primary_baseline == null ? undefined : Boolean(item.is_primary_baseline),
+    is_best_policy_for_scope:
+      item.is_best_policy_for_scope == null ? undefined : Boolean(item.is_best_policy_for_scope),
+    is_best_ai_policy_for_scope:
+      item.is_best_ai_policy_for_scope == null ? undefined : Boolean(item.is_best_ai_policy_for_scope),
+    qos_acceptability_status: toStringSafe(item.qos_acceptability_status, ""),
+    qos_acceptability_missing: toStringSafe(item.qos_acceptability_missing, ""),
+    hypothesis_status: toStringSafe(item.hypothesis_status, ""),
+  };
+
+  for (const field of FINAL_EVALUATION_NUMBER_FIELDS) {
+    const value = toOptionalNumber(item[field]);
+    if (value !== undefined) {
+      row[field] = value;
+    }
+  }
+
+  if (!row.scope_type || !row.scope || !row.policy) {
+    return null;
+  }
+
+  return row;
+}
+
+function normalizeFinalEvaluationArtifact(payload: unknown): FinalEvaluationArtifact | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+
+  const item = payload as Record<string, unknown>;
+  const summaryPath = toStringSafe(item.summary_path, "");
+  if (!summaryPath) {
+    return undefined;
+  }
+
+  return {
+    summary_path: summaryPath,
+    report_path: toStringSafe(item.report_path, "") || null,
+  };
+}
+
+function normalizeFinalEvaluationReport(payload: unknown): FinalEvaluationReport | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const item = payload as Record<string, unknown>;
+  const summaryRows = toArrayPayload(item.summary_rows)
+    .map(normalizeFinalEvaluationRow)
+    .filter((row): row is FinalEvaluationSummaryRow => row !== null);
+
+  if (!summaryRows.length) {
+    return null;
+  }
+
+  return {
+    generated_at_utc: toStringSafe(item.generated_at_utc, ""),
+    source: normalizeFinalEvaluationSource(item.source),
+    classification: normalizeFinalEvaluationClassification(item.classification),
+    hypothesis_thresholds: normalizeFinalEvaluationThresholds(item.hypothesis_thresholds),
+    best_policy: normalizeFinalEvaluationRow(item.best_policy),
+    best_ai_policy: normalizeFinalEvaluationRow(item.best_ai_policy),
+    overall_hypothesis_status: toStringSafe(item.overall_hypothesis_status, "") || null,
+    summary_rows: summaryRows,
+    artifact: normalizeFinalEvaluationArtifact(item.artifact),
   };
 }
 
@@ -405,42 +650,6 @@ function collapsePerStepRows(rows: PerStepRow[]): PerStepRow[] {
     .sort((a, b) => a.t - b.t);
 }
 
-function dedupeCuratedRuns(runs: RunSummary[]): RunSummary[] {
-  const selected = new Map<string, RunSummary>();
-  const order: string[] = [];
-
-  for (const run of runs) {
-    const policy = toStringSafe(run.policy, "unknown").toLowerCase();
-    const scenario = toStringSafe(run.scenario, "unknown").toLowerCase();
-    const key = `${policy}::${scenario}`;
-    const current = selected.get(key);
-
-    if (!current) {
-      order.push(key);
-      selected.set(key, run);
-      continue;
-    }
-
-    const currentDropped = current.dropped_total_mean ?? Number.POSITIVE_INFINITY;
-    const nextDropped = run.dropped_total_mean ?? Number.POSITIVE_INFINITY;
-    const currentEnergy = current.energy_kwh_total_mean ?? Number.POSITIVE_INFINITY;
-    const nextEnergy = run.energy_kwh_total_mean ?? Number.POSITIVE_INFINITY;
-    const currentReward = current.reward_total_mean ?? Number.NEGATIVE_INFINITY;
-    const nextReward = run.reward_total_mean ?? Number.NEGATIVE_INFINITY;
-
-    const isBetter =
-      nextDropped < currentDropped ||
-      (nextDropped === currentDropped && nextEnergy < currentEnergy) ||
-      (nextDropped === currentDropped && nextEnergy === currentEnergy && nextReward > currentReward);
-
-    if (isBetter) {
-      selected.set(key, run);
-    }
-  }
-
-  return order.map((key) => selected.get(key)).filter((run): run is RunSummary => Boolean(run));
-}
-
 async function tryEndpoints<T>(requests: Array<() => Promise<T>>): Promise<T> {
   let lastError: unknown = new Error("No endpoints attempted");
 
@@ -463,30 +672,48 @@ async function tryOptionalEndpoints<T>(requests: Array<() => Promise<T>>): Promi
   }
 }
 
-export async function listRuns(): Promise<RunSummary[]> {
-  const requests: Array<{ curated: boolean; load: () => Promise<unknown> }> = [];
+type ListRunsOptions = {
+  tag?: string;
+  policy?: string;
+  scenario?: string;
+  seed?: number;
+  limit?: number;
+};
 
-  if (CURATED_RUN_TAG) {
-    const query = `?tag=${encodeURIComponent(CURATED_RUN_TAG)}&limit=200`;
-    requests.push(
-      { curated: true, load: () => requestJson<unknown>(`/api/runs${query}`) },
-      { curated: true, load: () => requestJson<unknown>(`/api/runs_flat${query}`) },
-    );
+function buildRunsQuery(options: ListRunsOptions): string {
+  const params = new URLSearchParams();
+  params.set("limit", String(options.limit ?? 200));
+
+  if (options.tag) {
+    params.set("tag", options.tag);
+  }
+  if (options.policy) {
+    params.set("policy", normalizePolicy(options.policy));
+  }
+  if (options.scenario) {
+    params.set("scenario", options.scenario.trim().toLowerCase());
+  }
+  if (options.seed != null) {
+    params.set("seed", String(options.seed));
   }
 
-  requests.push(
-    { curated: false, load: () => requestJson<unknown>("/api/runs?limit=200") },
-    { curated: false, load: () => requestJson<unknown>("/api/runs_flat?limit=200") },
-    { curated: false, load: () => requestJson<unknown>("/runs") },
-  );
+  return `?${params.toString()}`;
+}
 
-  for (const request of requests) {
+export async function listRuns(options: ListRunsOptions = {}): Promise<RunSummary[]> {
+  const query = buildRunsQuery(options);
+  const requests: Array<() => Promise<unknown>> = [
+    () => requestJson<unknown>(`/api/runs${query}`),
+    () => requestJson<unknown>(`/api/runs_flat${query}`),
+    () => requestJson<unknown>("/runs"),
+  ];
+
+  for (const load of requests) {
     try {
-      const payload = await request.load();
-      const rows = toArrayPayload(payload);
-      const normalized = rows.map(normalizeRun).filter((run) => run.run_id);
+      const payload = await load();
+      const normalized = toArrayPayload(payload).map(normalizeRun).filter((run) => run.run_id);
       if (normalized.length > 0) {
-        return request.curated ? dedupeCuratedRuns(normalized) : normalized;
+        return normalized;
       }
     } catch {
       // Try the next source.
@@ -507,6 +734,15 @@ export async function getOfficialLockedResults(scenarios: string[] = []): Promis
   return toArrayPayload(payload)
     .map(normalizeOfficialResult)
     .filter((result): result is OfficialLockedResult => result !== null && Boolean(result.bundle_id));
+}
+
+export async function getFinalEvaluationReport(): Promise<FinalEvaluationReport | null> {
+  const payload = await tryOptionalEndpoints<unknown>([() => requestJson<unknown>("/api/final_evaluation")]);
+  if (!payload) {
+    return null;
+  }
+
+  return normalizeFinalEvaluationReport(payload);
 }
 
 export async function getRunPerStep(runId: string): Promise<PerStepRow[]> {
@@ -550,8 +786,8 @@ export async function getRunSummary(runId: string): Promise<RunOverallSummary | 
 
 export async function startRun(params: StartRunParams): Promise<{ run_id: string }> {
   const payload = {
-    policy: params.policy,
-    scenario: params.scenario,
+    policy: normalizePolicy(params.policy),
+    scenario: params.scenario.trim().toLowerCase(),
     seed: params.seed,
     steps: params.steps,
   };

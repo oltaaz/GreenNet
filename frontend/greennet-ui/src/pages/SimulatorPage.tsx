@@ -4,6 +4,8 @@ import { ErrorNotice, InfoNotice, LoadingNotice } from "../components/StatusStat
 import { getRunPerStep, getSteps, getTopology, listRuns, startRun } from "../lib/api";
 import {
   fallbackTopology,
+  formatPolicyLabel,
+  formatRunOptionLabel,
   fmt,
   inferPolicy,
   latestRunByPolicy,
@@ -257,8 +259,8 @@ export default function SimulatorPage() {
           <label>
             Policy
             <select value={policy} onChange={(event) => setPolicy(event.target.value)}>
-              <option value="baseline">Baseline</option>
-              <option value="noop">No-Op</option>
+              <option value="all_on">All-On</option>
+              <option value="heuristic">Heuristic</option>
               <option value="ppo">PPO</option>
             </select>
           </label>
@@ -268,7 +270,7 @@ export default function SimulatorPage() {
             <select value={selectedRunId} onChange={(event) => setSelectedRunId(event.target.value)}>
               {runs.map((run) => (
                 <option key={run.run_id} value={run.run_id}>
-                  {run.run_id}
+                  {formatRunOptionLabel(run)}
                 </option>
               ))}
             </select>
@@ -362,7 +364,7 @@ export default function SimulatorPage() {
             </article>
           </section>
 
-          <p className="card-caption">Policy in focus: {derivedPolicy}</p>
+          <p className="card-caption">Policy in focus: {formatPolicyLabel(derivedPolicy)}</p>
         </aside>
       </section>
     </div>

@@ -1,4 +1,4 @@
-﻿import { fallbackTopology, linkStateFromRatio, timelineFromRows } from "./data";
+﻿import { fallbackTopology, linkStateFromRatio, normalizePolicy, timelineFromRows } from "./data";
 import type { PerStepRow, RunSummary, StartRunParams, StepState, TopologyData } from "./types";
 
 type DemoRunConfig = {
@@ -11,6 +11,17 @@ type DemoRunConfig = {
 };
 
 const DEMO_KEY = "greennet_demo_runs_v1";
+
+function normalizeDemoPolicy(policy: string): string {
+  const raw = policy.trim().toLowerCase();
+  if (raw === "baseline") {
+    return "all_on";
+  }
+  if (raw === "noop") {
+    return "heuristic";
+  }
+  return normalizePolicy(raw);
+}
 
 function seeded(seed: number): () => number {
   let s = seed >>> 0;
@@ -43,16 +54,16 @@ function baseDemoRuns(): DemoRunConfig[] {
       started_at: null,
     },
     {
-      run_id: "demo-baseline-normal-42-300",
-      policy: "baseline",
+      run_id: "demo-all_on-normal-42-300",
+      policy: "all_on",
       scenario: "normal",
       seed: 42,
       steps: 300,
       started_at: null,
     },
     {
-      run_id: "demo-noop-normal-42-300",
-      policy: "noop",
+      run_id: "demo-heuristic-normal-42-300",
+      policy: "heuristic",
       scenario: "normal",
       seed: 42,
       steps: 300,
@@ -86,7 +97,7 @@ function readStoredRuns(): DemoRunConfig[] {
 
       runs.push({
         run_id: row.run_id,
-        policy: row.policy,
+        policy: normalizeDemoPolicy(row.policy),
         scenario: row.scenario,
         seed: Number.isFinite(Number(row.seed)) ? Number(row.seed) : 42,
         steps: Number.isFinite(Number(row.steps)) ? Number(row.steps) : 300,
@@ -127,7 +138,7 @@ function parseRunId(runId: string): DemoRunConfig {
 
   return {
     run_id: runId,
-    policy: match[1].toLowerCase(),
+    policy: normalizeDemoPolicy(match[1]),
     scenario: match[2].toLowerCase(),
     seed: parseNumber(match[3], 42),
     steps: parseNumber(match[4], 300),
@@ -157,11 +168,11 @@ function scenarioTraffic(scenario: string, t: number, noise: number): number {
 }
 
 function activeRatio(policy: string, trafficNorm: number, prev: number, noise: number): number {
-  if (policy === "baseline") {
+  if (policy === "all_on") {
     return 1;
   }
 
-  if (policy === "noop") {
+  if (policy === "heuristic") {
     const raw = 0.66 + Math.sin(trafficNorm * 3.1) * 0.14 + (noise - 0.5) * 0.12;
     return clamp(raw, 0.44, 0.84);
   }
@@ -174,11 +185,11 @@ function activeRatio(policy: string, trafficNorm: number, prev: number, noise: n
 function deliveredRatio(policy: string, trafficNorm: number, active: number, noise: number): number {
   const activeDeficit = Math.max(0, 0.82 - active);
 
-  if (policy === "baseline") {
+  if (policy === "all_on") {
     return clamp(0.94 - Math.max(0, trafficNorm - 0.84) * 0.06 + (noise - 0.5) * 0.01, 0.84, 0.97);
   }
 
-  if (policy === "noop") {
+  if (policy === "heuristic") {
     return clamp(0.88 - activeDeficit * 0.31 - Math.max(0, trafficNorm - 0.9) * 0.08 + (noise - 0.5) * 0.02, 0.66, 0.93);
   }
 
@@ -186,15 +197,15 @@ function deliveredRatio(policy: string, trafficNorm: number, active: number, noi
 }
 
 function delayMs(policy: string, trafficNorm: number, active: number, switched: number, noise: number): number {
-  const base = policy === "baseline" ? 10.8 : policy === "noop" ? 12.2 : 10.1;
-  const pressure = trafficNorm * (policy === "noop" ? 11.2 : 8.8);
-  const activePenalty = Math.max(0, 0.78 - active) * (policy === "noop" ? 17 : 10);
-  const switchPenalty = switched * (policy === "noop" ? 3.4 : 1.7);
+  const base = policy === "all_on" ? 10.8 : policy === "heuristic" ? 12.2 : 10.1;
+  const pressure = trafficNorm * (policy === "heuristic" ? 11.2 : 8.8);
+  const activePenalty = Math.max(0, 0.78 - active) * (policy === "heuristic" ? 17 : 10);
+  const switchPenalty = switched * (policy === "heuristic" ? 3.4 : 1.7);
   return Math.max(3.6, base + pressure + activePenalty + switchPenalty + (noise - 0.5) * 2.2);
 }
 
 function energyStepKwh(policy: string, trafficNorm: number, active: number): number {
-  const factor = policy === "baseline" ? 1.12 : policy === "noop" ? 0.95 : 0.84;
+  const factor = policy === "all_on" ? 1.12 : policy === "heuristic" ? 0.95 : 0.84;
   const raw = (0.026 + active * 0.062 + trafficNorm * 0.018) * factor;
   return Math.max(0.0012, raw);
 }
@@ -203,7 +214,7 @@ function configToSummary(config: DemoRunConfig): RunSummary {
   return {
     run_id: config.run_id,
     started_at: config.started_at ?? null,
-    policy: config.policy,
+    policy: normalizeDemoPolicy(config.policy),
     scenario: config.scenario,
     seed: config.seed,
     topology_seed: config.seed,
@@ -245,11 +256,12 @@ export function listDemoRuns(): RunSummary[] {
 
 export function createDemoRun(params: StartRunParams): { run_id: string } {
   const now = Date.now();
-  const runId = `demo-${params.policy}-${params.scenario}-${params.seed}-${params.steps}-${now}`;
+  const policy = normalizeDemoPolicy(String(params.policy));
+  const runId = `demo-${policy}-${params.scenario}-${params.seed}-${params.steps}-${now}`;
 
   const created: DemoRunConfig = {
     run_id: runId,
-    policy: params.policy.toLowerCase(),
+    policy,
     scenario: params.scenario.toLowerCase(),
     seed: params.seed,
     steps: params.steps,
@@ -271,7 +283,7 @@ export function getDemoPerStep(runId: string): PerStepRow[] {
   let cumulativeCarbon = 0;
   let cumulativeDelivered = 0;
   let cumulativeDropped = 0;
-  let prevActive = config.policy === "baseline" ? 1 : 0.72;
+  let prevActive = config.policy === "all_on" ? 1 : 0.72;
 
   const rows: PerStepRow[] = [];
 

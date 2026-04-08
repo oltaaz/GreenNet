@@ -18,13 +18,14 @@ import { isDemoRunId } from "../lib/demo";
 import {
   chartRows,
   fallbackTopology,
+  formatPolicyLabel,
+  formatScenarioLabel,
   fmt,
   inferPolicy,
   kpiFromOverall,
   latestRunByPolicy,
   linkStateFromRatio,
   normalizePerStep,
-  officialLockedScenarioMetrics,
   toMetrics,
 } from "../lib/data";
 import type {
@@ -37,6 +38,12 @@ import type {
 } from "../lib/types";
 
 type PolicySeries = Record<string, PerStepRow[]>;
+
+const REFERENCE_POLICY_STYLES: Record<string, { label: string; color: string }> = {
+  all_on: { label: "All-On", color: "#f7bf5e" },
+  heuristic: { label: "Heuristic", color: "#5dc8ff" },
+  ppo: { label: "PPO", color: "#00f2bf" },
+};
 
 function upsertRun(runs: RunSummary[], nextRun: RunSummary): RunSummary[] {
   const existing = runs.findIndex((run) => run.run_id === nextRun.run_id);
@@ -195,7 +202,7 @@ export default function DashboardPage() {
     let alive = true;
 
     async function loadPolicySeries() {
-      const policies = ["baseline", "ppo"];
+      const policies = ["all_on", "heuristic", "ppo"];
       const result: PolicySeries = {};
 
       await Promise.all(
@@ -287,11 +294,27 @@ export default function DashboardPage() {
   const highlightedOfficialResult =
     officialResults.find((item) => item.scenario === activeOfficialScenario) ?? null;
 
-  const kpis = useMemo(
-    () => (highlightedOfficialResult ? officialLockedScenarioMetrics(highlightedOfficialResult) : kpiFromOverall(overallSummary)),
-    [highlightedOfficialResult, overallSummary],
-  );
+  const kpis = useMemo(() => kpiFromOverall(overallSummary), [overallSummary]);
   const timeData = useMemo(() => chartRows(rows), [rows]);
+  const energyLines = useMemo(() => {
+    const lines: Array<{ dataKey: string; label: string; color: string; dashed?: boolean }> = [
+      { dataKey: "selected", label: "Selected Run", color: "#55ffaa" },
+    ];
+
+    for (const [policyName, style] of Object.entries(REFERENCE_POLICY_STYLES)) {
+      if ((policySeries[policyName] ?? []).length === 0) {
+        continue;
+      }
+      lines.push({
+        dataKey: policyName,
+        label: `${style.label} (latest)`,
+        color: style.color,
+        dashed: true,
+      });
+    }
+
+    return lines;
+  }, [policySeries]);
 
   const energyData = useMemo(() => {
     const merged = new Map<number, Record<string, number>>();
@@ -365,14 +388,14 @@ export default function DashboardPage() {
     <div className="page dashboard-page">
       <section className="page-title-row">
         <div>
-          <p className="page-eyebrow">Network Simulation Dashboard</p>
-          <h1>Analyze energy, delay, drops, and link activity per step</h1>
+          <p className="page-eyebrow">Current Run Overview</p>
+          <h1>Inspect the selected run with the same energy, QoS, and activity labels used in reporting</h1>
         </div>
         {selectedRun ? (
           <div className="meta-chip">
             <span>Run</span>
             <strong>{selectedRun.run_id}</strong>
-            <small>{inferPolicy(selectedRun)}</small>
+            <small>{formatPolicyLabel(inferPolicy(selectedRun))}</small>
           </div>
         ) : null}
       </section>
@@ -387,9 +410,36 @@ export default function DashboardPage() {
       ) : null}
       {highlightedOfficialResult ? (
         <InfoNotice
-          title="Official Locked Summary Available"
-          description={`Burst and hotspot now include official locked acceptance summaries. The highlighted official card below matches the current ${highlightedOfficialResult.scenario} scenario, while the charts and topology playback remain live-run views.`}
+          title="Scenario Validation Available"
+          description={`An official locked validation bundle is available for ${formatScenarioLabel(highlightedOfficialResult.scenario)}. The card below keeps the acceptance result visible while this page stays focused on the selected live run.`}
         />
+      ) : null}
+
+      {selectedRun ? (
+        <section className="glass-card run-overview-card">
+          <div className="card-heading">
+            <p>Current Run</p>
+            <h3>Selection details</h3>
+          </div>
+          <div className="report-stat-grid compact">
+            <article className="report-stat">
+              <span>Policy</span>
+              <strong>{formatPolicyLabel(inferPolicy(selectedRun))}</strong>
+            </article>
+            <article className="report-stat">
+              <span>Scenario</span>
+              <strong>{formatScenarioLabel(selectedRun.scenario ?? scenario)}</strong>
+            </article>
+            <article className="report-stat">
+              <span>Seed</span>
+              <strong>{selectedRun.seed ?? selectedRun.topology_seed ?? "-"}</strong>
+            </article>
+            <article className="report-stat">
+              <span>Steps</span>
+              <strong>{selectedRun.max_steps ?? overallSummary?.steps_mean ?? "-"}</strong>
+            </article>
+          </div>
+        </section>
       ) : null}
 
       {kpis.length > 0 ? (
@@ -423,35 +473,31 @@ export default function DashboardPage() {
           {loadingData ? <LoadingNotice title="Loading run metrics" description="Reading per-step data." /> : null}
 
           <ChartCard
-            title="Step Energy Over Time"
+            title="Energy by Step"
             subtitle="kWh per step"
             data={energyData.length > 0 ? energyData : timeData}
-            lines={[
-              { dataKey: "selected", label: "Selected Run", color: "#55ffaa" },
-              { dataKey: "baseline", label: "Baseline", color: "#5dc8ff", dashed: true },
-              { dataKey: "ppo", label: "PPO", color: "#00f2bf" },
-            ]}
+            lines={energyLines}
           />
 
           <ChartCard
-            title="Path Latency Over Time"
-            subtitle="base routing latency in ms"
+            title="Path Latency by Step"
+            subtitle="routing latency in ms"
             data={timeData}
             lines={[{ dataKey: "avg_path_latency_ms", label: "Path Latency", color: "#66d2ff" }]}
           />
 
           <ChartCard
-            title="Dropped Packets Per Step"
-            subtitle="packets"
+            title="Dropped Traffic by Step"
+            subtitle="packets per step"
             data={timeData}
             lines={[{ dataKey: "dropped", label: "Dropped", color: "#ff7f96" }]}
           />
 
           <ChartCard
-            title="Active Links Ratio Over Time"
+            title="Active Links by Step"
             subtitle="%"
             data={timeData}
-            lines={[{ dataKey: "active_ratio", label: "Active Ratio", color: "#50f7b7" }]}
+            lines={[{ dataKey: "active_ratio", label: "Active Links", color: "#50f7b7" }]}
             yAxisFormatter={(value) => `${fmt(value, 0)}%`}
           />
         </div>

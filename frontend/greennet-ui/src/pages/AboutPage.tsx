@@ -15,13 +15,16 @@
           quality-of-service constraints.
         </p>
         <p>
-          This production-oriented frontend is designed for thesis demos and evaluation workflows. It combines
-          interactive KPI dashboards, per-policy comparison overlays, and a real-time simulator canvas that visualizes
-          packet movement under dynamic link states.
+          This is the official GreenNet demo and product interface. It combines interactive KPI dashboards,
+          comparison/results views, and a simulator canvas that visualizes packet movement under dynamic link states.
         </p>
         <p>
           The app is API-first: all pages consume backend run data using a single typed client layer (`src/lib/api.ts`)
           and gracefully fallback when optional endpoints (topology link-state packet-events) are not yet available.
+        </p>
+        <p>
+          The Streamlit dashboard is still available for analyst and developer workflows, but it is now positioned as
+          internal tooling rather than the public-facing product surface.
         </p>
       </section>
     </div>

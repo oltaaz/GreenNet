@@ -1,4 +1,6 @@
 ﻿import type {
+  FinalEvaluationReport,
+  FinalEvaluationSummaryRow,
   KpiMetric,
   LinkStateMap,
   OfficialLockedResult,
@@ -12,8 +14,23 @@
   TopologyNode,
 } from "./types";
 
+const POLICY_ALIASES: Record<string, string> = {
+  all_on: "all_on",
+  noop: "all_on",
+  heuristic: "heuristic",
+  baseline: "heuristic",
+  ppo: "ppo",
+};
+
 export function edgeId(source: string, target: string): string {
   return source < target ? `${source}__${target}` : `${target}__${source}`;
+}
+
+function capitalize(value: string): string {
+  if (!value) {
+    return "";
+  }
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -134,26 +151,25 @@ export function kpiFromOverall(summary: RunOverallSummary | null): KpiMetric[] {
     return [];
   }
 
-  const steps = Math.max(1, toNumber(summary.steps_mean, 1));
   const delivered = toNumber(summary.delivered_total_mean, 0);
   const dropped = toNumber(summary.dropped_total_mean, 0);
-  const totalPacketsSent =
-    delivered + dropped;
+  const totalPacketsSent = delivered + dropped;
   const dropRate = totalPacketsSent > 0 ? (dropped / totalPacketsSent) * 100 : 0;
 
   return [
-    { label: "Energy Usage", value: toNumber(summary.energy_kwh_total_mean, 0), unit: "kWh" },
-    { label: "Carbon Emissions", value: toNumber(summary.carbon_g_total_mean, 0), unit: "g CO2" },
+    { label: "Total Energy", value: toNumber(summary.energy_kwh_total_mean, 0), unit: "kWh", digits: 3 },
+    { label: "Carbon Emissions", value: toNumber(summary.carbon_g_total_mean, 0), unit: "g CO2", digits: 3 },
+    { label: "Delivered Traffic", value: delivered, unit: "pkts", digits: 0 },
+    { label: "Dropped Traffic", value: dropped, unit: "pkts", digits: 0 },
+    { label: "Drop Rate", value: dropRate, unit: "%", digits: 1 },
+    { label: "Average Delay", value: toNumber(summary.avg_delay_ms_mean, 0), unit: "ms", digits: 1 },
     {
       label: "Path Latency",
       value: toNumber(summary.avg_path_latency_ms_mean ?? summary.avg_delay_ms_mean, 0),
       unit: "ms",
+      digits: 2,
     },
-    { label: "Packets / Step", value: totalPacketsSent / steps, unit: "pkts" },
-    { label: "Dropped / Step", value: dropped / steps, unit: "pkts" },
-    { label: "Drop Rate", value: dropRate, unit: "%" },
-    { label: "Active Links Ratio", value: toNumber(summary.active_ratio_mean, 0) * 100, unit: "%" },
-    { label: "Run Length", value: steps, unit: "steps" },
+    { label: "Active Links", value: toNumber(summary.active_ratio_mean, 0) * 100, unit: "%", digits: 1 },
   ];
 }
 
@@ -172,17 +188,31 @@ export function chartRows(rows: PerStepRow[]): Array<Record<string, number>> {
   }));
 }
 
+export function normalizePolicy(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+
+  return POLICY_ALIASES[normalized] ?? normalized;
+}
+
 export function inferPolicy(run: RunSummary): string {
-  if (run.policy && run.policy.trim()) {
-    return run.policy.toLowerCase();
+  const normalizedPolicy = normalizePolicy(run.policy);
+  if (normalizedPolicy) {
+    return normalizedPolicy;
   }
 
   const runId = run.run_id.toLowerCase();
-  if (runId.includes("baseline") || runId.includes("all_on")) {
-    return "baseline";
+  if (runId.includes("heuristic") || runId.includes("baseline")) {
+    return "heuristic";
   }
-  if (runId.includes("noop") || runId.includes("heuristic")) {
-    return "noop";
+  if (runId.includes("all_on") || runId.includes("noop")) {
+    return "all_on";
   }
   if (runId.includes("ppo") || runId.includes("rl")) {
     return "ppo";
@@ -191,7 +221,8 @@ export function inferPolicy(run: RunSummary): string {
 }
 
 export function latestRunByPolicy(runs: RunSummary[], policy: string): RunSummary | null {
-  const filtered = runs.filter((run) => inferPolicy(run) === policy.toLowerCase());
+  const expectedPolicy = normalizePolicy(policy);
+  const filtered = runs.filter((run) => inferPolicy(run) === expectedPolicy);
   if (!filtered.length) {
     return null;
   }
@@ -310,15 +341,18 @@ export function compareSummary(rows: PerStepRow[], overall?: RunOverallSummary |
   const summary = overall ?? deriveOverallFromRows(rows);
   const delivered = toNumber(summary?.delivered_total_mean, 0);
   const dropped = toNumber(summary?.dropped_total_mean, 0);
+  const totalPacketsSent = delivered + dropped;
+  const dropRate = totalPacketsSent > 0 ? (dropped / totalPacketsSent) * 100 : 0;
 
   return {
     energy_kwh: toNumber(summary?.energy_kwh_total_mean, 0),
     carbon_g: toNumber(summary?.carbon_g_total_mean, 0),
-    avg_delay_ms: toNumber(summary?.avg_path_latency_ms_mean ?? summary?.avg_delay_ms_mean, 0),
+    avg_delay_ms: toNumber(summary?.avg_delay_ms_mean, 0),
+    avg_path_latency_ms: toNumber(summary?.avg_path_latency_ms_mean ?? summary?.avg_delay_ms_mean, 0),
     congestion_delay_ms: 0,
-    packets_sent: delivered + dropped,
     dropped,
     delivered,
+    drop_rate: dropRate,
     active_ratio: toNumber(summary?.active_ratio_mean, 0) * 100,
     reward: toNumber(summary?.reward_total_mean, 0),
   };
@@ -333,12 +367,12 @@ export function officialLockedScenarioMetrics(result: OfficialLockedResult): Kpi
   }
 
   return [
-    { label: "Delivered (mean)", value: toNumber(trained.delivered_mean, 0), unit: "pkts" },
-    { label: "Dropped (mean)", value: toNumber(trained.dropped_mean, 0), unit: "pkts" },
-    { label: "Drop Rate", value: toNumber(trained.drop_rate, 0) * 100, unit: "%" },
-    { label: "Energy (mean)", value: toNumber(trained.energy_kwh_mean, 0), unit: "kWh" },
-    { label: "Drop Delta vs No-Op", value: toNumber(delta?.delta_dropped, 0), unit: "pkts" },
-    { label: "Energy Delta vs No-Op", value: toNumber(delta?.delta_energy_kwh, 0), unit: "kWh" },
+    { label: "Delivered Traffic", value: toNumber(trained.delivered_mean, 0), unit: "pkts", digits: 0 },
+    { label: "Dropped Traffic", value: toNumber(trained.dropped_mean, 0), unit: "pkts", digits: 0 },
+    { label: "Drop Rate", value: toNumber(trained.drop_rate, 0) * 100, unit: "%", digits: 1 },
+    { label: "Total Energy", value: toNumber(trained.energy_kwh_mean, 0), unit: "kWh", digits: 3 },
+    { label: "Dropped vs All-On", value: toNumber(delta?.delta_dropped, 0), unit: "pkts", digits: 0 },
+    { label: "Energy vs All-On", value: toNumber(delta?.delta_energy_kwh, 0), unit: "kWh", digits: 3 },
   ];
 }
 
@@ -347,15 +381,111 @@ export function fmt(value: number, digits = 2): string {
 }
 
 export function formatPolicyLabel(policy: string): string {
-  const normalized = policy.toLowerCase();
+  const normalized = normalizePolicy(policy);
   if (normalized === "ppo") {
     return "PPO";
   }
-  if (normalized === "noop") {
-    return "No-Op";
+  if (normalized === "all_on") {
+    return "All-On";
   }
-  if (normalized === "baseline") {
-    return "Baseline";
+  if (normalized === "heuristic") {
+    return "Heuristic";
   }
   return policy;
+}
+
+export function formatRunOptionLabel(run: RunSummary): string {
+  const parts = [formatPolicyLabel(inferPolicy(run))];
+  const scenario = typeof run.scenario === "string" ? run.scenario.trim().toLowerCase() : "";
+  const seed = run.seed ?? run.topology_seed;
+  const tag = typeof run.tag === "string" ? run.tag.trim() : "";
+  const source = typeof run.source === "string" ? run.source.trim().toLowerCase() : "";
+
+  if (scenario) {
+    parts.push(capitalize(scenario));
+  }
+  if (seed != null) {
+    parts.push(`seed ${seed}`);
+  }
+  if (tag) {
+    parts.push(`tag ${tag}`);
+  }
+  if (source) {
+    parts.push(source);
+  }
+
+  parts.push(run.run_id);
+  return parts.join(" | ");
+}
+
+const SCENARIO_SORT_ORDER = ["normal", "burst", "hotspot"];
+
+function titleCaseFromSlug(value: string): string {
+  return value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+export function formatScenarioLabel(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || normalized === "all") {
+    return "All Scenarios";
+  }
+  return titleCaseFromSlug(normalized);
+}
+
+export function formatStatusLabel(value: string): string {
+  if (!value) {
+    return "Unknown";
+  }
+  return titleCaseFromSlug(value);
+}
+
+export function statusTone(value: string): "success" | "warning" | "danger" | "neutral" {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "achieved" || normalized === "acceptable" || normalized === "pass") {
+    return "success";
+  }
+  if (normalized === "insufficient_data" || normalized === "check") {
+    return "warning";
+  }
+  if (normalized === "not_achieved" || normalized === "missing" || normalized === "fail") {
+    return "danger";
+  }
+  return "neutral";
+}
+
+export function formatSignedValue(value: number | undefined, digits = 2, suffix = ""): string {
+  if (value == null || !Number.isFinite(value)) {
+    return "-";
+  }
+
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${fmt(value, digits)}${suffix}`;
+}
+
+export function sortScenarioRows(rows: FinalEvaluationSummaryRow[]): FinalEvaluationSummaryRow[] {
+  return [...rows].sort((left, right) => {
+    const leftIndex = SCENARIO_SORT_ORDER.indexOf((left.scope || left.scenario || "").toLowerCase());
+    const rightIndex = SCENARIO_SORT_ORDER.indexOf((right.scope || right.scenario || "").toLowerCase());
+    return (leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex) - (rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex);
+  });
+}
+
+export function finalEvaluationRowsForScope(
+  report: FinalEvaluationReport | null,
+  scopeType: "overall" | "scenario",
+): FinalEvaluationSummaryRow[] {
+  if (!report) {
+    return [];
+  }
+
+  const filtered = report.summary_rows.filter((row) => row.scope_type === scopeType);
+  return scopeType === "scenario" ? sortScenarioRows(filtered) : filtered;
+}
+
+export function bestAiScenarioRows(report: FinalEvaluationReport | null): FinalEvaluationSummaryRow[] {
+  return finalEvaluationRowsForScope(report, "scenario").filter((row) => row.is_best_ai_policy_for_scope);
 }

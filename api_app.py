@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 import networkx as nx
 
 from greennet.env import GreenNetEnv
+from greennet.persistence import get_run_repository, infer_run_source
 from greennet.utils.config import load_env_config_from_run
 
 app = FastAPI(title="GreenNet Metrics API")
@@ -39,6 +40,8 @@ BaseChoice = Literal["results", "runs", "both"]
 GROUP_BY_FIELDS = {"policy", "scenario", "tag", "topology_seed", "deterministic"}
 KEY_FILES = ["per_step.csv", "summary.json", "run_meta.json", "env_config.json"]
 OFFICIAL_LOCKED_SCENARIOS = ("normal", "burst", "hotspot")
+FINAL_EVALUATION_SUMMARY_FILENAME = "final_evaluation_summary.json"
+FINAL_EVALUATION_REPORT_FILENAME = "final_evaluation_report.md"
 HIGHLIGHT_FIELDS = [
     "reward_total_mean",
     "energy_kwh_total_mean",
@@ -56,6 +59,10 @@ INT_COLUMNS = {
     "num_active_edges",
     "near_saturated_edges",
     "flows_count",
+    "active_devices",
+    "inactive_devices",
+    "active_links",
+    "inactive_links",
     "blocked_by_util_count",
     "blocked_by_cooldown_count",
     "allowed_toggle_count",
@@ -76,6 +83,11 @@ FLOAT_COLUMNS = {
     "avg_path_latency_ms",
     "energy_kwh",
     "carbon_g",
+    "power_total_watts",
+    "power_fixed_watts",
+    "power_variable_watts",
+    "power_device_watts",
+    "power_link_watts",
     "delta_energy_kwh",
     "delta_delivered",
     "delta_dropped",
@@ -161,6 +173,53 @@ def load_json(path: Path) -> Optional[Dict[str, Any]]:
     return data if isinstance(data, dict) else None
 
 
+def _run_repository():
+    try:
+        return get_run_repository()
+    except Exception:
+        return None
+
+
+def _run_identity_for_dir(run_dir: Path) -> Tuple[str, str]:
+    return infer_run_source(run_dir, repo_root=REPO_ROOT), run_dir.name
+
+
+def _db_run_snapshots(base: BaseChoice) -> Dict[Tuple[str, str], Dict[str, Any]]:
+    repo = _run_repository()
+    if repo is None:
+        return {}
+
+    try:
+        snapshots = repo.list_run_snapshots(base=base)
+    except Exception:
+        return {}
+
+    indexed: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for snapshot in snapshots:
+        source = str(snapshot.get("source") or "")
+        run_name = str(snapshot.get("run_id") or "")
+        if source and run_name:
+            indexed[(source, run_name)] = snapshot
+    return indexed
+
+
+def _load_db_json_payload(source: str, run_dir: Path, filename: str) -> Optional[Dict[str, Any]]:
+    repo = _run_repository()
+    if repo is None:
+        return None
+
+    try:
+        if filename == "run_meta.json":
+            return repo.get_run_meta(source, run_dir.name)
+        if filename == "env_config.json":
+            return repo.get_env_config(source, run_dir.name)
+        if filename == "summary.json":
+            return repo.get_run_summary(source, run_dir.name)
+    except Exception:
+        return None
+    return None
+
+
 def _edge_id(source: Any, target: Any) -> str:
     source_id = str(source)
     target_id = str(target)
@@ -223,6 +282,55 @@ def _read_locked_note(bundle_dir: Path) -> Optional[str]:
             line = line[2:].strip()
         lines.append(line)
     return " ".join(lines) if lines else None
+
+
+def _final_evaluation_candidate_paths() -> List[Path]:
+    preferred = [
+        REPO_ROOT / "artifacts" / "final_evaluation" / "latest" / FINAL_EVALUATION_SUMMARY_FILENAME,
+    ]
+
+    candidates: List[Path] = [path for path in preferred if path.exists()]
+    for root in (REPO_ROOT / "artifacts", REPO_ROOT / "experiments"):
+        if not root.exists():
+            continue
+        candidates.extend(root.rglob(FINAL_EVALUATION_SUMMARY_FILENAME))
+
+    deduped: Dict[str, Path] = {}
+    for path in candidates:
+        deduped[str(path.resolve())] = path.resolve()
+    return list(deduped.values())
+
+
+@lru_cache(maxsize=4)
+def _latest_final_evaluation_artifact() -> Optional[Dict[str, Any]]:
+    ranked: List[Tuple[float, int, str, Path, Optional[Path], Dict[str, Any]]] = []
+    for summary_path in _final_evaluation_candidate_paths():
+        payload = load_json(summary_path)
+        if not payload or not isinstance(payload.get("summary_rows"), list):
+            continue
+
+        report_path = summary_path.with_name(FINAL_EVALUATION_REPORT_FILENAME)
+        generated_at = _parse_iso_timestamp(payload.get("generated_at_utc"))
+        ranked.append(
+            (
+                generated_at.timestamp() if generated_at is not None else float(summary_path.stat().st_mtime),
+                1 if "artifacts" in summary_path.parts else 0,
+                str(summary_path),
+                summary_path,
+                report_path if report_path.exists() else None,
+                payload,
+            )
+        )
+
+    if ranked:
+        _, _, _, summary_path, report_path, payload = max(ranked)
+        return {
+            "summary_path": summary_path,
+            "report_path": report_path,
+            "payload": payload,
+        }
+
+    return None
 
 
 @lru_cache(maxsize=16)
@@ -392,6 +500,16 @@ def _official_locked_result_for_scenario(scenario: str) -> Optional[Dict[str, An
 @lru_cache(maxsize=64)
 def _read_all_per_step_rows(run_dir_str: str) -> Tuple[Dict[str, Any], ...]:
     run_dir = Path(run_dir_str)
+    source, run_name = _run_identity_for_dir(run_dir)
+    repo = _run_repository()
+    if repo is not None:
+        try:
+            db_rows = repo.get_step_rows(source, run_name)
+        except Exception:
+            db_rows = []
+        if db_rows:
+            return tuple({k: _coerce_per_step_value(k, v) for k, v in row.items()} for row in db_rows)
+
     csv_path = run_dir / "per_step.csv"
     if not csv_path.exists():
         return tuple()
@@ -497,7 +615,8 @@ def _recompute_summary_from_per_step(run_dir_str: str) -> Optional[Dict[str, Any
 
 def _summary_payload_for_run(run_dir: Path) -> Dict[str, Any]:
     summary_path = run_dir / "summary.json"
-    stored = load_json(summary_path) or {}
+    source, _ = _run_identity_for_dir(run_dir)
+    stored = _load_db_json_payload(source, run_dir, "summary.json") or load_json(summary_path) or {}
     recomputed = _recompute_summary_from_per_step(str(run_dir))
     if recomputed is None:
         return stored
@@ -1015,9 +1134,11 @@ def _key_file_flags(run_dir: Path) -> Dict[str, bool]:
     }
 
 
-def get_run_record(run_dir: Path, source: str) -> Dict[str, Any]:
+def get_run_record(run_dir: Path, source: str, db_snapshot: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     parsed = parse_run_dir_name(run_dir.name)
-    flags = _key_file_flags(run_dir)
+    file_flags = _key_file_flags(run_dir)
+    db_has = db_snapshot.get("has") if isinstance(db_snapshot, dict) and isinstance(db_snapshot.get("has"), dict) else {}
+    flags = {key: bool(file_flags.get(key)) or bool(db_has.get(key)) for key in file_flags}
 
     record: Dict[str, Any] = {
         "run_id": run_dir.name,
@@ -1036,6 +1157,33 @@ def get_run_record(run_dir: Path, source: str) -> Dict[str, Any]:
         "has": flags,
         "highlights": {field: None for field in HIGHLIGHT_FIELDS},
     }
+
+    if db_snapshot:
+        record["timestamp_utc"] = db_snapshot.get("timestamp_utc")
+        if record["started_at"] is None and isinstance(record["timestamp_utc"], str):
+            record["started_at"] = record["timestamp_utc"]
+
+        record["policy"] = db_snapshot.get("policy") or record["policy"]
+        record["scenario"] = db_snapshot.get("scenario") or record["scenario"]
+        record["tag"] = db_snapshot.get("tag") or record["tag"]
+
+        if db_snapshot.get("seed") is not None:
+            record["seed"] = _to_int(db_snapshot.get("seed"))
+        if db_snapshot.get("topology_seed") is not None:
+            record["topology_seed"] = _to_int(db_snapshot.get("topology_seed"))
+
+        record["episodes"] = _to_int(db_snapshot.get("episodes"))
+        record["max_steps"] = _to_int(db_snapshot.get("max_steps"))
+        record["deterministic"] = _to_bool(db_snapshot.get("deterministic"))
+        record["model_path"] = db_snapshot.get("model_path")
+
+        highlights_payload = (
+            db_snapshot.get("highlights")
+            if isinstance(db_snapshot.get("highlights"), dict)
+            else {}
+        )
+        record["highlights"] = {field: _to_float(highlights_payload.get(field)) for field in HIGHLIGHT_FIELDS}
+        return record
 
     meta = load_json(run_dir / "run_meta.json")
     if meta:
@@ -1105,6 +1253,10 @@ def _resolve_run_dir_or_404(run_id: str, base: BaseChoice) -> Tuple[str, Path]:
 
 def _load_run_json_or_error(run_id: str, filename: str, base: BaseChoice) -> Tuple[str, Dict[str, Any]]:
     source, run_dir = _resolve_run_dir_or_404(run_id, base=base)
+    payload = _load_db_json_payload(source, run_dir, filename)
+    if payload is not None:
+        return source, payload
+
     file_path = run_dir / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"{filename} not found for run_id: {run_id}")
@@ -1212,9 +1364,10 @@ def _list_runs_payload(
     offset: int,
 ) -> Dict[str, Any]:
     runs: List[Dict[str, Any]] = []
+    db_snapshots = _db_run_snapshots(base)
     for source, run_dir in _scan_run_dirs(base=base):
         try:
-            record = get_run_record(run_dir, source)
+            record = get_run_record(run_dir, source, db_snapshot=db_snapshots.get((source, run_dir.name)))
         except Exception:
             # Never fail this endpoint because one folder is broken.
             continue
@@ -1488,6 +1641,22 @@ def official_results(scenario: Optional[str] = Query(None)) -> Dict[str, Any]:
             items.append(payload)
 
     return {"total": len(items), "items": items}
+
+
+@app.get("/api/final_evaluation")
+def final_evaluation() -> Dict[str, Any]:
+    artifact = _latest_final_evaluation_artifact()
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="No final evaluation summary artifact was found")
+
+    payload = dict(artifact["payload"])
+    summary_path = artifact["summary_path"]
+    report_path = artifact.get("report_path")
+    payload["artifact"] = {
+        "summary_path": str(summary_path.relative_to(REPO_ROOT)),
+        "report_path": None if report_path is None else str(report_path.relative_to(REPO_ROOT)),
+    }
+    return payload
 
 
 @app.get("/api/aggregate")

@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 
 from greennet.env import EnvConfig
+from greennet.topology import TopologyConfig, build_topology
+
+ENV_PATH_FIELDS = ("topology_path", "traffic_path")
 
 
 def _load_json(path: Path) -> Dict[str, Any]:
@@ -17,6 +20,58 @@ def _load_json(path: Path) -> Dict[str, Any]:
 def _filter_env_fields(raw: Dict[str, Any]) -> Dict[str, Any]:
     allowed = {f.name for f in fields(EnvConfig)} if is_dataclass(EnvConfig) else set()
     return {k: v for k, v in raw.items() if not allowed or k in allowed}
+
+
+def _resolve_env_path_fields(raw: Dict[str, Any], *, base_dir: Path) -> Dict[str, Any]:
+    resolved = dict(raw)
+    for key in ENV_PATH_FIELDS:
+        value = resolved.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = (base_dir / path).resolve()
+        resolved[key] = str(path)
+    return resolved
+
+
+def normalize_loaded_topology_fields(env_config: EnvConfig) -> EnvConfig:
+    """Synchronize node_count/directivity when a fixed topology file or name is configured."""
+    if not (getattr(env_config, "topology_name", None) or getattr(env_config, "topology_path", None)):
+        return env_config
+
+    graph = build_topology(
+        TopologyConfig(
+            node_count=int(getattr(env_config, "node_count", 0) or 0),
+            edge_prob=float(getattr(env_config, "edge_prob", 0.0) or 0.0),
+            directed=bool(getattr(env_config, "directed", False)),
+            seed=getattr(env_config, "topology_seed", None),
+            topology_name=getattr(env_config, "topology_name", None),
+            topology_path=getattr(env_config, "topology_path", None),
+        )
+    )
+    env_config.node_count = int(graph.number_of_nodes())
+    env_config.directed = bool(graph.is_directed())
+    return env_config
+
+
+def resolve_env_paths_in_config(config: Dict[str, Any], *, base_dir: Path) -> Dict[str, Any]:
+    """Resolve relative env path fields inside a loaded config object."""
+    resolved = dict(config)
+
+    for key in ENV_PATH_FIELDS:
+        value = resolved.get(key)
+        if isinstance(value, str) and value.strip():
+            path = Path(value).expanduser()
+            if not path.is_absolute():
+                resolved[key] = str((base_dir / path).resolve())
+
+    for block_key in ("env", "env_config", "env_kwargs"):
+        block = resolved.get(block_key)
+        if isinstance(block, dict):
+            resolved[block_key] = _resolve_env_path_fields(block, base_dir=base_dir)
+
+    return resolved
 
 
 def load_env_config_from_run(run_dir: Path, *, verbose: bool = True, fallback: EnvConfig | None = None) -> EnvConfig:
@@ -33,7 +88,8 @@ def load_env_config_from_run(run_dir: Path, *, verbose: bool = True, fallback: E
         try:
             raw = _load_json(cfg_path)
             env_data = _filter_env_fields(raw if isinstance(raw, dict) else {})
-            cfg = EnvConfig(**env_data)
+            env_data = _resolve_env_path_fields(env_data, base_dir=cfg_path.parent)
+            cfg = normalize_loaded_topology_fields(EnvConfig(**env_data))
             if verbose:
                 print(f"[env_config] Loaded from {cfg_path} (keys={sorted(env_data.keys())})")
             return cfg
@@ -57,9 +113,10 @@ def load_env_config_from_run(run_dir: Path, *, verbose: bool = True, fallback: E
             for key in ("env", "env_config", "env_kwargs"):
                 if isinstance(raw.get(key), dict):
                     env_data.update(raw[key])
+        env_data = _resolve_env_path_fields(env_data, base_dir=cand.parent)
         env_filtered = _filter_env_fields(env_data)
         if env_filtered:
-            cfg = EnvConfig(**env_filtered)
+            cfg = normalize_loaded_topology_fields(EnvConfig(**env_filtered))
             if verbose:
                 print(f"[env_config] Loaded from {cand} (keys={sorted(env_filtered.keys())})")
             return cfg
@@ -94,8 +151,10 @@ def save_env_config(run_dir: Path, env_config: EnvConfig) -> None:
     """Persist the environment configuration used for this run."""
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "env_config.json"
+    normalize_loaded_topology_fields(env_config)
+    payload = _resolve_env_path_fields(asdict(env_config), base_dir=Path.cwd())
     with path.open("w", encoding="utf-8") as handle:
-        json.dump(asdict(env_config), handle, indent=2, sort_keys=True)
+        json.dump(payload, handle, indent=2, sort_keys=True)
 
 
 def save_train_config(run_dir: Path, train_config: Dict[str, Any]) -> None:

@@ -567,6 +567,126 @@
   font-size: 0.8rem;
 }
 
+.status-badge-row,
+.table-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(139, 168, 199, 0.34);
+  background: rgba(10, 27, 47, 0.78);
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.status-badge.success {
+  border-color: rgba(85, 255, 170, 0.48);
+  color: #7af7c3;
+  background: rgba(18, 72, 55, 0.35);
+}
+
+.status-badge.warning {
+  border-color: rgba(255, 199, 93, 0.38);
+  color: #ffd37b;
+  background: rgba(73, 56, 18, 0.35);
+}
+
+.status-badge.danger {
+  border-color: rgba(255, 125, 148, 0.4);
+  color: #ff97aa;
+  background: rgba(79, 24, 38, 0.34);
+}
+
+.report-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.report-hero-card,
+.report-threshold-card,
+.run-overview-card,
+.scenario-report-card {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.report-lead {
+  margin: 0;
+  color: #d5e4f7;
+  font-size: 0.95rem;
+  line-height: 1.52;
+}
+
+.report-stat-grid,
+.threshold-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.report-stat-grid.compact {
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+}
+
+.report-stat {
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(4, 17, 33, 0.64);
+  border: 1px solid rgba(91, 123, 161, 0.24);
+  display: grid;
+  gap: 3px;
+}
+
+.report-stat span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.report-stat strong {
+  font-size: 1.05rem;
+  line-height: 1.15;
+}
+
+.report-stat small {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.scenario-report-section {
+  display: grid;
+  gap: 10px;
+}
+
+.scenario-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.scenario-report-head,
+.table-policy-cell {
+  display: grid;
+  gap: 8px;
+}
+
+.report-highlight-row {
+  background: rgba(12, 31, 56, 0.34);
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.75fr) minmax(280px, 1fr);
@@ -1053,6 +1173,10 @@ th {
     padding: clamp(24px, 7vw, 40px);
   }
 
+  .report-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
@@ -1124,8 +1248,6 @@ th {
     display: none;
   }
 }
-
-
 
 
 

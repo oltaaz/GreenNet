@@ -1,4 +1,11 @@
-﻿export type PolicyType = "baseline" | "noop" | "ppo" | string;
+﻿export type PolicyType = "all_on" | "heuristic" | "ppo" | string;
+
+export type RunFileFlags = {
+  per_step: boolean;
+  summary: boolean;
+  meta: boolean;
+  env_config: boolean;
+};
 
 export type RunSummary = {
   run_id: string;
@@ -9,6 +16,10 @@ export type RunSummary = {
   topology_seed?: number | null;
   max_steps?: number | null;
   tag?: string | null;
+  source?: string | null;
+  episodes?: number | null;
+  deterministic?: boolean | null;
+  has?: RunFileFlags | null;
   reward_total_mean?: number;
   dropped_total_mean?: number;
   energy_kwh_total_mean?: number;
@@ -150,4 +161,105 @@ export type KpiMetric = {
   label: string;
   value: number;
   unit: string;
+  digits?: number;
+};
+
+export type FinalEvaluationSource = {
+  mode: string;
+  description: string;
+  selected_run_count?: number;
+  selected_policies?: string[];
+  selected_scenarios?: string[];
+};
+
+export type FinalEvaluationClassification = {
+  primary_baseline_policy: string;
+  baseline_policies: string[];
+  ai_policies: string[];
+};
+
+export type FinalEvaluationThresholds = {
+  energy_target_pct: number;
+  max_qos_violation_rate_increase_abs: number;
+  max_delivered_loss_pct: number;
+  max_dropped_increase_pct: number;
+  max_delay_increase_pct: number;
+  max_path_latency_increase_pct: number;
+};
+
+export type FinalEvaluationSummaryRow = {
+  scope_type: string;
+  scope: string;
+  scenario: string;
+  policy: string;
+  policy_class: string;
+  run_count?: number;
+  seed_count?: number;
+  episodes_total?: number;
+  steps_total?: number;
+  seed_list?: string;
+  comparison_baseline_policy?: string;
+  comparison_available?: boolean;
+  is_primary_baseline?: boolean;
+  is_best_policy_for_scope?: boolean;
+  is_best_ai_policy_for_scope?: boolean;
+  qos_acceptability_status?: string;
+  qos_acceptability_missing?: string;
+  hypothesis_status?: string;
+  energy_kwh_mean?: number;
+  energy_kwh_std?: number;
+  energy_kwh_count?: number;
+  energy_kwh_delta_vs_baseline?: number;
+  energy_reduction_pct_vs_baseline?: number;
+  delivered_traffic_mean?: number;
+  delivered_traffic_std?: number;
+  delivered_traffic_count?: number;
+  delivered_traffic_delta_vs_baseline?: number;
+  delivered_traffic_change_pct_vs_baseline?: number;
+  dropped_traffic_mean?: number;
+  dropped_traffic_std?: number;
+  dropped_traffic_count?: number;
+  dropped_traffic_delta_vs_baseline?: number;
+  dropped_traffic_change_pct_vs_baseline?: number;
+  avg_delay_ms_mean?: number;
+  avg_delay_ms_std?: number;
+  avg_delay_ms_count?: number;
+  avg_delay_ms_delta_vs_baseline?: number;
+  avg_delay_ms_change_pct_vs_baseline?: number;
+  avg_path_latency_ms_mean?: number;
+  avg_path_latency_ms_std?: number;
+  avg_path_latency_ms_count?: number;
+  avg_path_latency_ms_delta_vs_baseline?: number;
+  avg_path_latency_ms_change_pct_vs_baseline?: number;
+  qos_violation_rate_mean?: number;
+  qos_violation_rate_std?: number;
+  qos_violation_rate_count?: number;
+  qos_violation_rate_delta_vs_baseline?: number;
+  qos_violation_count_mean?: number;
+  qos_violation_count_std?: number;
+  qos_violation_count_count?: number;
+  qos_violation_count_total?: number;
+  qos_violation_count_delta_vs_baseline?: number;
+  carbon_g_mean?: number;
+  carbon_g_std?: number;
+  carbon_g_count?: number;
+  carbon_g_delta_vs_baseline?: number;
+  carbon_reduction_pct_vs_baseline?: number;
+};
+
+export type FinalEvaluationArtifact = {
+  summary_path: string;
+  report_path?: string | null;
+};
+
+export type FinalEvaluationReport = {
+  generated_at_utc: string;
+  source?: FinalEvaluationSource;
+  classification?: FinalEvaluationClassification;
+  hypothesis_thresholds?: FinalEvaluationThresholds;
+  best_policy?: FinalEvaluationSummaryRow | null;
+  best_ai_policy?: FinalEvaluationSummaryRow | null;
+  overall_hypothesis_status?: string | null;
+  summary_rows: FinalEvaluationSummaryRow[];
+  artifact?: FinalEvaluationArtifact;
 };

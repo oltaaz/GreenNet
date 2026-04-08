@@ -1,8 +1,8 @@
-"""Routing utilities: k-shortest paths and softmin splitting."""
+"""Routing utilities for static shortest-path, ECMP, and softmin baselines."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Sequence, Optional
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 import math
 
 try:
@@ -20,6 +20,40 @@ class RouteSplit:
 
     paths: Sequence[Sequence[int]]
     weights: Sequence[float]
+
+
+DEFAULT_ROUTING_COST_ATTR = "routing_cost"
+DEFAULT_WEIGHT_ATTR = "weight"
+
+ROUTING_BASELINE_ALIASES = {
+    "min_hop_single_path": "min_hop_single_path",
+    "min_hop": "min_hop_single_path",
+    "shortest": "min_hop_single_path",
+    "shortest_path": "min_hop_single_path",
+    "single_shortest_path": "min_hop_single_path",
+    "spf_single": "min_hop_single_path",
+    "ospf_ecmp": "ospf_ecmp",
+    "ospf": "ospf_ecmp",
+    "ospf_like": "ospf_ecmp",
+    "link_state_ecmp": "ospf_ecmp",
+    "ecmp": "ospf_ecmp",
+    "k_shortest_softmin": "k_shortest_softmin",
+    "softmin": "k_shortest_softmin",
+    "ksp_softmin": "k_shortest_softmin",
+}
+
+ROUTING_COST_MODEL_ALIASES = {
+    "unit": "unit",
+    "hop": "unit",
+    "hop_count": "unit",
+    "uniform": "unit",
+    "latency": "latency",
+    "latency_ms": "latency",
+    "delay": "latency",
+    "inverse_capacity": "inverse_capacity",
+    "inv_capacity": "inverse_capacity",
+    "capacity_inverse": "inverse_capacity",
+}
 
 
 def _safe_float(value, default: float) -> float:
@@ -49,6 +83,87 @@ def _normalize_route_split(paths: Sequence[Sequence[int]], weights: Sequence[flo
         return RouteSplit(paths=list(paths), weights=[uni] * len(paths))
 
     return RouteSplit(paths=list(paths), weights=[w / s for w in cleaned])
+
+
+def canonicalize_routing_baseline_name(name: str | None) -> str:
+    key = str(name or "min_hop_single_path").strip().lower()
+    canonical = ROUTING_BASELINE_ALIASES.get(key)
+    if canonical is None:
+        raise ValueError(
+            "Unknown routing baseline: "
+            f"{name!r}. Expected one of {sorted(set(ROUTING_BASELINE_ALIASES.values()))} "
+            f"or aliases {sorted(ROUTING_BASELINE_ALIASES)}."
+        )
+    return canonical
+
+
+def canonicalize_routing_link_cost_model(name: str | None) -> str:
+    key = str(name or "unit").strip().lower()
+    canonical = ROUTING_COST_MODEL_ALIASES.get(key)
+    if canonical is None:
+        raise ValueError(
+            "Unknown routing link-cost model: "
+            f"{name!r}. Expected one of {sorted(set(ROUTING_COST_MODEL_ALIASES.values()))} "
+            f"or aliases {sorted(ROUTING_COST_MODEL_ALIASES)}."
+        )
+    return canonical
+
+
+def static_link_cost(
+    edge_data: Dict[str, object],
+    *,
+    model: str = "unit",
+    default_capacity: float = 10.0,
+    default_latency_ms: float = 10.0,
+    reference_bandwidth: float = 100.0,
+) -> float:
+    """Return a static additive link cost for a traditional routing baseline.
+
+    This stays intentionally simple. We model forwarding-time route selection,
+    not OSPF control-plane dynamics such as hellos, LSAs, or timers.
+    """
+    cost_model = canonicalize_routing_link_cost_model(model)
+    if cost_model == "unit":
+        return 1.0
+    if cost_model == "latency":
+        latency_ms = _safe_float(edge_data.get("latency_ms", default_latency_ms), default_latency_ms)
+        return max(1.0, latency_ms)
+
+    capacity = _safe_float(edge_data.get("capacity", default_capacity), default_capacity)
+    if capacity <= 0.0:
+        return max(1.0, _safe_float(reference_bandwidth, 100.0))
+    return max(1.0, float(math.ceil(_safe_float(reference_bandwidth, 100.0) / capacity)))
+
+
+def annotate_routing_costs(
+    graph: "nx.Graph",
+    *,
+    model: str = "unit",
+    cost_attr: str = DEFAULT_ROUTING_COST_ATTR,
+    mirror_weight_attr: str | None = DEFAULT_WEIGHT_ATTR,
+    default_capacity: float = 10.0,
+    default_latency_ms: float = 10.0,
+    reference_bandwidth: float = 100.0,
+) -> None:
+    """Populate a static routing-cost attribute on every edge.
+
+    By default we also mirror the cost onto `weight` for backward compatibility
+    with older code paths and tests that still reference that attribute directly.
+    """
+    if nx is None:
+        raise ImportError("networkx is required for routing") from _nx_import_error
+
+    for _u, _v, data in graph.edges(data=True):
+        cost = static_link_cost(
+            data,
+            model=model,
+            default_capacity=default_capacity,
+            default_latency_ms=default_latency_ms,
+            reference_bandwidth=reference_bandwidth,
+        )
+        data[cost_attr] = float(cost)
+        if mirror_weight_attr:
+            data[mirror_weight_attr] = float(cost)
 
 
 def _as_simple_weighted_graph(graph: "nx.Graph", weight: Optional[str] = "weight") -> "nx.Graph":
@@ -139,6 +254,31 @@ def k_shortest_paths(
     return paths
 
 
+def equal_cost_shortest_paths(
+    graph: "nx.Graph",
+    source: int,
+    target: int,
+    *,
+    weight: Optional[str] = "weight",
+    max_paths: int | None = None,
+) -> List[List[int]]:
+    """Return equal-cost shortest paths for ECMP-style routing."""
+    if nx is None:
+        raise ImportError("networkx is required for routing") from _nx_import_error
+
+    G = _as_simple_weighted_graph(graph, weight=weight)
+
+    try:
+        paths = [list(path) for path in nx.all_shortest_paths(G, source, target, weight=weight)]
+    except (nx.NetworkXNoPath, nx.NodeNotFound):
+        return []
+
+    paths.sort(key=lambda path: tuple(path))
+    if max_paths is not None and max_paths > 0:
+        return paths[: int(max_paths)]
+    return paths
+
+
 def softmin_split(costs: Iterable[float], temperature: float = 1.0) -> List[float]:
     """Compute softmin weights from path costs.
 
@@ -184,8 +324,8 @@ def split_for_paths(paths: Sequence[Sequence[int]], costs: Iterable[float],
     return _normalize_route_split(paths, weights)
 
 
-class ShortestPathPolicy:
-    """Route using a single shortest path (returned as a RouteSplit)."""
+class SinglePathShortestPolicy:
+    """Route using a single weighted shortest path."""
 
     def __init__(self, *, weight: Optional[str] = "weight") -> None:
         self.weight = weight
@@ -195,6 +335,38 @@ class ShortestPathPolicy:
         if not paths:
             return RouteSplit(paths=[], weights=[])
         return _normalize_route_split(paths, [1.0])
+
+
+class ShortestPathPolicy(SinglePathShortestPolicy):
+    """Backward-compatible alias for single-path shortest routing."""
+
+
+class ECMPShortestPathPolicy:
+    """Route using equal-cost shortest paths with a uniform split."""
+
+    def __init__(self, *, max_paths: int = 8, weight: Optional[str] = "weight") -> None:
+        self.max_paths = max(1, int(max_paths))
+        self.weight = weight
+
+    def __call__(self, graph: "nx.Graph", source: int, target: int) -> RouteSplit:
+        paths = equal_cost_shortest_paths(
+            graph,
+            source,
+            target,
+            weight=self.weight,
+            max_paths=self.max_paths,
+        )
+        if not paths:
+            return RouteSplit(paths=[], weights=[])
+        return _normalize_route_split(paths, [1.0] * len(paths))
+
+
+class OSPFLikePolicy(ECMPShortestPathPolicy):
+    """Static link-state SPF with ECMP-style equal-cost splitting.
+
+    This models forwarding behavior after convergence. It does not simulate the
+    OSPF protocol itself.
+    """
 
 
 class KShortestSoftminPolicy:
@@ -212,7 +384,52 @@ class KShortestSoftminPolicy:
             return RouteSplit(paths=[], weights=[])
         split = split_for_paths_by_weight(graph, paths, weight=self.weight, temperature=self.temperature)
         return _normalize_route_split(split.paths, split.weights)
-    
+
+
+def build_routing_policy(
+    routing_baseline: str,
+    *,
+    metric_attr: str = DEFAULT_ROUTING_COST_ATTR,
+    ecmp_max_paths: int = 8,
+    softmin_k: int = 3,
+    softmin_temperature: float = 1.0,
+) -> Tuple[Callable[["nx.Graph", int, int], RouteSplit], Dict[str, object]]:
+    """Build a routing policy and return stable metadata about it."""
+    canonical = canonicalize_routing_baseline_name(routing_baseline)
+
+    if canonical == "min_hop_single_path":
+        return SinglePathShortestPolicy(weight=metric_attr), {
+            "routing_baseline": canonical,
+            "routing_forwarding_model": "single_shortest_path",
+            "routing_path_split": "single_path",
+            "routing_metric_attr": metric_attr,
+        }
+
+    if canonical == "ospf_ecmp":
+        return OSPFLikePolicy(max_paths=ecmp_max_paths, weight=metric_attr), {
+            "routing_baseline": canonical,
+            "routing_forwarding_model": "static_link_state_spf",
+            "routing_path_split": "ecmp",
+            "routing_metric_attr": metric_attr,
+            "routing_ecmp_max_paths": int(max(1, ecmp_max_paths)),
+        }
+
+    if canonical == "k_shortest_softmin":
+        return KShortestSoftminPolicy(
+            k=softmin_k,
+            temperature=softmin_temperature,
+            weight=metric_attr,
+        ), {
+            "routing_baseline": canonical,
+            "routing_forwarding_model": "k_shortest_softmin",
+            "routing_path_split": "softmin",
+            "routing_metric_attr": metric_attr,
+            "routing_k_paths": int(max(1, softmin_k)),
+            "routing_softmin_temperature": float(softmin_temperature),
+        }
+
+    raise ValueError(f"Unhandled routing baseline: {routing_baseline!r}")
+
 
 def _self_test() -> None:
     if nx is None:
@@ -222,13 +439,17 @@ def _self_test() -> None:
     G = nx.Graph()
     G.add_edge(0, 1, weight=1.0)
     G.add_edge(1, 3, weight=1.0)
-    G.add_edge(0, 2, weight=10.0)
-    G.add_edge(2, 3, weight=10.0)
+    G.add_edge(0, 2, weight=1.0)
+    G.add_edge(2, 3, weight=1.0)
 
-    # shortest path should be 0-1-3
+    # shortest path should be 0-1-3 after lexical tie-breaking
     sp = ShortestPathPolicy(weight="weight")(G, 0, 3)
     assert sp.paths and list(sp.paths[0]) == [0, 1, 3]
     assert abs(sum(sp.weights) - 1.0) < 1e-9
+
+    ecmp = OSPFLikePolicy(weight="weight", max_paths=4)(G, 0, 3)
+    assert len(ecmp.paths) == 2
+    assert abs(sum(ecmp.weights) - 1.0) < 1e-9
 
     # softmin split should sum to 1
     pol = KShortestSoftminPolicy(k=2, temperature=1.0, weight="weight")(G, 0, 3)

@@ -39,8 +39,8 @@ def _extract_run_dir(stdout: str, stderr: str) -> str:
 
 
 def render_launcher() -> None:
-    st.subheader("Live demo mode")
-    st.caption("One click: run an experiment and auto-open the results in the Single run page.")
+    st.subheader("Internal run launcher")
+    st.caption("Developer shortcut for kicking off one run and jumping straight to its result folder.")
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -117,8 +117,9 @@ def render_launcher() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="GreenNet Dashboard", layout="wide")
-    st.title("GreenNet Dashboard")
+    st.set_page_config(page_title="GreenNet Analyst Dashboard", layout="wide")
+    st.title("GreenNet Analyst Dashboard")
+    st.caption("Internal analyst/developer tooling. The official GreenNet demo UI lives in the React frontend.")
 
     # Apply any pending navigation request BEFORE the nav widget is created.
     if "nav_page_request" in st.session_state:

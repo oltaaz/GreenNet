@@ -22,6 +22,7 @@ else:
     _nx_import_error = None
 
 from greennet.routing import RouteSplit, ShortestPathPolicy
+from greennet.power import PowerSnapshot
 from greennet.topology import TopologyConfig, build_random_topology
 
 EdgeKey = Tuple[int, int]
@@ -56,6 +57,15 @@ class StepMetrics:
     avg_path_latency_ms: float = 0.0
     energy_kwh: float = 0.0
     carbon_g: float = 0.0
+    power_total_watts: float = 0.0
+    power_fixed_watts: float = 0.0
+    power_variable_watts: float = 0.0
+    power_device_watts: float = 0.0
+    power_link_watts: float = 0.0
+    active_devices: int = 0
+    inactive_devices: int = 0
+    active_links: int = 0
+    inactive_links: int = 0
 
 
 class Simulator:
@@ -72,7 +82,7 @@ class Simulator:
         congestion_alpha: float = 1.0,
         congestion_eps: float = 1e-6,
         congestion_mult_cap: float = 1000.0,
-        power_model_watts: Optional[Callable[["nx.Graph"], float]] = None,
+        power_model_watts: Optional[Callable[["nx.Graph"], float | PowerSnapshot]] = None,
         carbon_intensity_g_per_kwh: Optional[Callable[[float], float]] = None,
     ) -> None:
         if nx_runtime is None:
@@ -226,9 +236,30 @@ class Simulator:
 
         energy_kwh = 0.0
         carbon_g = 0.0
+        power_total_watts = 0.0
+        power_fixed_watts = 0.0
+        power_variable_watts = 0.0
+        power_device_watts = 0.0
+        power_link_watts = 0.0
+        active_devices = 0
+        inactive_devices = 0
+        active_links = 0
+        inactive_links = 0
         if self.power_model_watts is not None:
-            watts = _safe_float(self.power_model_watts(self.graph), 0.0)
-            energy_kwh = max(0.0, watts) * (self.dt_seconds / 3600.0) / 1000.0
+            power_result = self.power_model_watts(self.graph)
+            if isinstance(power_result, PowerSnapshot):
+                power_total_watts = _safe_float(power_result.total_watts, 0.0)
+                power_fixed_watts = _safe_float(power_result.fixed_watts, 0.0)
+                power_variable_watts = _safe_float(power_result.variable_watts, 0.0)
+                power_device_watts = _safe_float(power_result.device_watts, 0.0)
+                power_link_watts = _safe_float(power_result.link_watts, 0.0)
+                active_devices = max(0, int(power_result.active_devices))
+                inactive_devices = max(0, int(power_result.inactive_devices))
+                active_links = max(0, int(power_result.active_links))
+                inactive_links = max(0, int(power_result.inactive_links))
+            else:
+                power_total_watts = _safe_float(power_result, 0.0)
+            energy_kwh = max(0.0, power_total_watts) * (self.dt_seconds / 3600.0) / 1000.0
             if self.carbon_intensity_g_per_kwh is not None:
                 intensity = _safe_float(self.carbon_intensity_g_per_kwh(self.t), 0.0)
                 carbon_g = max(0.0, energy_kwh * intensity)
@@ -243,6 +274,15 @@ class Simulator:
             avg_path_latency_ms=avg_path_latency_ms,
             energy_kwh=energy_kwh,
             carbon_g=carbon_g,
+            power_total_watts=power_total_watts,
+            power_fixed_watts=power_fixed_watts,
+            power_variable_watts=power_variable_watts,
+            power_device_watts=power_device_watts,
+            power_link_watts=power_link_watts,
+            active_devices=active_devices,
+            inactive_devices=inactive_devices,
+            active_links=active_links,
+            inactive_links=inactive_links,
         )
 
     def _active_routing_graph(self) -> "nx.Graph":

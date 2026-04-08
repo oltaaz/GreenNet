@@ -6,7 +6,7 @@ type KpiCardProps = {
 };
 
 export default function KpiCard({ metric }: KpiCardProps) {
-  const digits = metric.unit === "kWh" ? 3 : metric.unit === "%" ? 1 : metric.unit === "steps" ? 0 : 2;
+  const digits = metric.digits ?? (metric.unit === "kWh" ? 3 : metric.unit === "%" ? 1 : 2);
 
   return (
     <article className="glass-card kpi-card">

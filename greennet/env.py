@@ -1,7 +1,7 @@
 """Gymnasium environment wrapper for GreenNet."""
 from __future__ import annotations
 import os
-from greennet.forecasting import DemandForecastConfig, EmaDemandForecaster
+from greennet.forecasting import DemandForecastConfig, DemandForecaster, build_demand_forecaster
 
 import math
 import random
@@ -13,17 +13,28 @@ import networkx as nx
 import numpy as np
 from gymnasium import spaces
 
+from greennet.carbon import CarbonModel
 from greennet.impact_predictor import ImpactPredictor
-from greennet.routing import ShortestPathPolicy
+from greennet.power import PowerModel
+from greennet.routing import (
+    DEFAULT_ROUTING_COST_ATTR,
+    annotate_routing_costs,
+    build_routing_policy,
+    canonicalize_routing_baseline_name,
+    canonicalize_routing_link_cost_model,
+)
 from greennet.simulator import Flow, Simulator
-from greennet.topology import TopologyConfig, build_random_topology
+from greennet.topology import TopologyConfig, build_topology
 from greennet.traffic import (
     ConstantTrafficGenerator,
+    ReplayTrafficGenerator,
     StochasticTrafficConfig,
     StochasticTrafficGenerator,
     TrafficBurst,
     TrafficGenerator,
     apply_traffic_scenario,
+    load_named_traffic_profile,
+    load_traffic_profile_from_file,
 )
 
 
@@ -35,12 +46,38 @@ class EnvConfig:
     topology_seed: int | None = 0
     topology_seeds: Tuple[int, ...] | None = None
     topology_randomize: bool = False
+    topology_name: str | None = None
+    topology_path: str | None = None
     node_count: int = 10
     edge_prob: float = 0.5
     directed: bool = False
 
     base_capacity: float = 10.0
     base_latency_ms: float = 10.0
+
+    # Lightweight power model assumptions.
+    # Devices are active if they have at least one active incident link; otherwise they sleep.
+    power_network_fixed_watts: float = 20.0
+    power_device_active_watts: float = 12.0
+    power_device_sleep_watts: float = 2.0
+    power_device_dynamic_watts: float = 3.0
+    power_link_active_watts: float = 6.0
+    power_link_sleep_watts: float = 0.2
+    power_link_dynamic_watts: float = 2.0
+
+    # Carbon profile used to convert energy into emissions.
+    carbon_base_intensity_g_per_kwh: float = 400.0
+    carbon_amplitude_g_per_kwh: float = 25.0
+    carbon_period_seconds: float = 24.0 * 3600.0
+
+    # Static routing baseline used by the simulator.
+    # This config models forwarding behavior only; it is not a full routing-protocol simulation.
+    routing_baseline: str = "min_hop_single_path"
+    routing_link_cost_model: str = "unit"
+    routing_ecmp_max_paths: int = 8
+    routing_k_paths: int = 3
+    routing_softmin_temperature: float = 1.0
+    routing_reference_bandwidth: float = 100.0
 
     flows_per_step: int = 6
     demand_min: float = 1.0
@@ -53,6 +90,8 @@ class EnvConfig:
 
     # Seed for traffic generator; if None, we derive it from env.reset(seed=...).
     traffic_seed: int | None = None
+    traffic_name: str | None = None
+    traffic_path: str | None = None
 
     # Canonical traffic scenarios (optional). If set, scenario presets override base traffic fields.
     traffic_scenario: str | None = None
@@ -142,13 +181,24 @@ class EnvConfig:
     cost_estimator_k: float = 1.0
     cost_estimator_w_drop: float = 1.0
     cost_estimator_w_energy: float = 0.2
+    cost_estimator_adaptive_enabled: bool = True
+    cost_estimator_relaxed_p_qos_max: float = 0.55
+    cost_estimator_relaxed_ddrop_max: float = 0.04
+    cost_estimator_relaxed_tau: float = 0.85
 
+    adaptive_toggle_budgets: bool = True
+    toggle_budget_reference_steps: int = 300
+    toggle_budget_scale_exponent: float = 0.5
 
-
-
-    #configs for forecasting
+    # Forecasting config.
     enable_forecasting: bool = True
+    forecast_model: str = "ema"
     forecast_alpha: float = 0.6
+    forecast_beta: float = 0.2
+    forecast_trend_damping: float = 0.9
+    forecast_adaptive_alphas: Tuple[float, ...] = (0.1, 0.2, 0.4, 0.6, 0.8, 0.95)
+    forecast_adaptive_error_alpha: float = 0.02
+    forecast_adaptive_temperature: float = 0.25
     forecast_horizon_steps: int = 3
     demand_norm_scale: float = 0.0  # scale factor to keep demand values in a reasonable range for the forecaster
 
@@ -197,7 +247,7 @@ class GreenNetEnv(gym.Env):
         self._traffic_by_step: Dict[int, List[TrafficBurst]] = {}
         self._active_bursts: List[Tuple[int, int, float, int]] = []  # (src, dst, demand, remaining_steps)
         # ---- Forecasting state ----
-        self._demand_forecaster: EmaDemandForecaster | None = None
+        self._demand_forecaster: DemandForecaster | None = None
         self._demand_norm_scale: float = 1.0
         self._last_demand_now_norm: float = 0.0
         self._last_demand_forecast_norm: float = 0.0
@@ -219,6 +269,8 @@ class GreenNetEnv(gym.Env):
         self._dbg_block_qos_off: int = 0
         self._dbg_block_qos_on: int = 0
         self._last_obs: Dict[str, Any] | np.ndarray | None = None
+        self._controller_cost_estimator_override_action: int = 0
+        self._routing_metadata: Dict[str, Any] = {}
         self._impact_predictor: ImpactPredictor | None = None
         self._cost_estimator_model_dir = str(self.config.cost_estimator_model_dir)
         self._cost_estimator_enabled = bool(getattr(self.config, "cost_estimator_enabled", False))
@@ -248,12 +300,17 @@ class GreenNetEnv(gym.Env):
         )
 
 
+        self._topology_uses_external_source = bool(self.config.topology_name or self.config.topology_path)
+
         # Build base topology once; action space is derived from toggleable (non-bridge) edges.
         topo_config = self._topology_config(self.config.topology_seed)
-        self._base_graph = build_random_topology(topo_config)
-        # Ensure the fixed base graph is connected so safety checks don't revert everything.
-        # Do this once here (before action_space is created) so action dimensions stay consistent for SB3.
-        if self._base_graph.number_of_nodes() > 0:
+        self._base_graph = build_topology(topo_config)
+        self.config.node_count = int(self._base_graph.number_of_nodes())
+        self.config.directed = bool(self._base_graph.is_directed())
+
+        # Ensure synthetic fixed topologies are connected so safety checks don't revert everything.
+        # File-backed topologies are validated before they reach the environment.
+        if (not self._topology_uses_external_source) and self._base_graph.number_of_nodes() > 0:
             und = self._base_graph.to_undirected()
             if not nx.is_connected(und):
                 components = list(nx.connected_components(und))
@@ -340,6 +397,7 @@ class GreenNetEnv(gym.Env):
         self._initial_off_applied = 0
         self._episode_initial_off_edges = 0
         self._edge_universe_size = int(len(self._edge_universe))
+        self._controller_cost_estimator_override_action = 0
 
         # ---- Traffic generator setup ----
         self._traffic_by_step = {}
@@ -350,8 +408,22 @@ class GreenNetEnv(gym.Env):
         if derived_seed is None and seed is not None:
             derived_seed = int(seed) + 10_000  # keep it separate from topology/model seeding
 
+        use_replay = self._traffic_uses_replay_input()
         use_stochastic = self.config.traffic_model.lower() == "stochastic" or bool(self.config.traffic_scenario)
-        if use_stochastic:
+        if use_replay:
+            if self.config.traffic_path:
+                replay_cfg = load_traffic_profile_from_file(
+                    self.config.traffic_path,
+                    node_count=int(self.config.node_count),
+                )
+            else:
+                replay_cfg = load_named_traffic_profile(
+                    str(self.config.traffic_name),
+                    node_count=int(self.config.node_count),
+                )
+            self._traffic_generator = ReplayTrafficGenerator(replay_cfg)
+            self._schedule_bursts(self._traffic_generator.generate(int(self.config.max_steps)))
+        elif use_stochastic:
             tcfg = StochasticTrafficConfig(
                 node_count=int(self.config.node_count),
                 avg_bursts_per_step=float(self.config.traffic_avg_bursts_per_step),
@@ -372,15 +444,9 @@ class GreenNetEnv(gym.Env):
                     duration=float(self.config.traffic_scenario_duration),
                     frequency=float(self.config.traffic_scenario_frequency),
                     version=int(self.config.traffic_scenario_version),
-                )
+            )
             self._traffic_generator = StochasticTrafficGenerator(tcfg, seed=derived_seed)
-
-            # Precompute bursts and bucket them by integer step.
-            for burst in self._traffic_generator.generate(int(self.config.max_steps)):
-                step_idx = int(burst.start_time)
-                if step_idx < 0 or step_idx >= int(self.config.max_steps):
-                    continue
-                self._traffic_by_step.setdefault(step_idx, []).append(burst)
+            self._schedule_bursts(self._traffic_generator.generate(int(self.config.max_steps)))
         else:
             # Keep old behavior by default.
             self._traffic_generator = ConstantTrafficGenerator(rate=1.0)
@@ -389,7 +455,9 @@ class GreenNetEnv(gym.Env):
         # Normalize demand features to [0,1] so they play nicely with other observations.
         scale = float(getattr(self.config, "demand_norm_scale", 0.0) or 0.0)
         if scale <= 0.0:
-            if use_stochastic:
+            if use_replay:
+                scale = self._estimate_burst_traffic_scale()
+            elif use_stochastic:
                 # Approximate a high-ish offered-demand scale from stochastic config.
                 mice_max = float(self.config.traffic_mice_size_range[1])
                 ele_max = float(self.config.traffic_elephant_size_range[1])
@@ -403,9 +471,26 @@ class GreenNetEnv(gym.Env):
         self._demand_norm_scale = float(scale)
 
         if bool(getattr(self.config, "enable_forecasting", True)):
-            self._demand_forecaster = EmaDemandForecaster(
+            adaptive_alphas_raw = getattr(
+                self.config,
+                "forecast_adaptive_alphas",
+                (0.1, 0.2, 0.4, 0.6, 0.8, 0.95),
+            )
+            if isinstance(adaptive_alphas_raw, str):
+                adaptive_alphas = tuple(
+                    float(part.strip()) for part in adaptive_alphas_raw.split(",") if str(part).strip()
+                )
+            else:
+                adaptive_alphas = tuple(float(value) for value in adaptive_alphas_raw)
+            self._demand_forecaster = build_demand_forecaster(
                 DemandForecastConfig(
+                    model=str(getattr(self.config, "forecast_model", "ema")),
                     alpha=float(getattr(self.config, "forecast_alpha", 0.3)),
+                    beta=float(getattr(self.config, "forecast_beta", 0.2)),
+                    trend_damping=float(getattr(self.config, "forecast_trend_damping", 0.9)),
+                    adaptive_expert_alphas=adaptive_alphas,
+                    adaptive_error_alpha=float(getattr(self.config, "forecast_adaptive_error_alpha", 0.02)),
+                    adaptive_temperature=float(getattr(self.config, "forecast_adaptive_temperature", 0.25)),
                     horizon_steps=int(getattr(self.config, "forecast_horizon_steps", 1)),
                 )
             )
@@ -425,17 +510,44 @@ class GreenNetEnv(gym.Env):
         # (Connectivity surgery removed: graph is now connected at __init__ for fixed topology;
         # for randomized topology, accept that action_space is fixed and edge_list may not match.)
 
-        # Set baseline edge attributes.
+        routing_baseline = canonicalize_routing_baseline_name(
+            getattr(self.config, "routing_baseline", "min_hop_single_path")
+        )
+        routing_link_cost_model = canonicalize_routing_link_cost_model(
+            getattr(self.config, "routing_link_cost_model", "unit")
+        )
+
+        # Set baseline edge attributes, preserving any explicit values loaded from topology files.
         for u, v in graph.edges():
-            graph.edges[u, v]["capacity"] = float(self.config.base_capacity)
-            graph.edges[u, v]["latency_ms"] = float(self.config.base_latency_ms)
-            graph.edges[u, v]["weight"] = 1.0
-            graph.edges[u, v]["active"] = True
-            graph.edges[u, v]["last_toggled"] = -self.config.toggle_cooldown_steps
+            self._apply_edge_defaults(graph, int(u), int(v))
 
         # Ensure action-edge universe exists in the topology graph so action index -> edge
         # mapping is stable and never "missing" during the episode.
         self._ensure_edge_universe_on_graph(graph)
+        annotate_routing_costs(
+            graph,
+            model=routing_link_cost_model,
+            cost_attr=DEFAULT_ROUTING_COST_ATTR,
+            mirror_weight_attr="weight",
+            default_capacity=float(self.config.base_capacity),
+            default_latency_ms=float(self.config.base_latency_ms),
+            reference_bandwidth=float(getattr(self.config, "routing_reference_bandwidth", 100.0)),
+        )
+
+        routing_policy, routing_meta = build_routing_policy(
+            routing_baseline,
+            metric_attr=DEFAULT_ROUTING_COST_ATTR,
+            ecmp_max_paths=int(getattr(self.config, "routing_ecmp_max_paths", 8) or 8),
+            softmin_k=int(getattr(self.config, "routing_k_paths", 3) or 3),
+            softmin_temperature=float(getattr(self.config, "routing_softmin_temperature", 1.0)),
+        )
+        self._routing_metadata = {
+            **routing_meta,
+            "routing_baseline": routing_baseline,
+            "routing_link_cost_model": routing_link_cost_model,
+            "routing_metric_attr": DEFAULT_ROUTING_COST_ATTR,
+            "routing_reference_bandwidth": float(getattr(self.config, "routing_reference_bandwidth", 100.0)),
+        }
 
         if self.debug_logs and not self._debug_logged:
             self._debug_logged = True
@@ -444,22 +556,21 @@ class GreenNetEnv(gym.Env):
                 f"energy_w={self.config.energy_weight} toggle_pen={self.config.toggle_penalty} "
                 f"normalize_drop={self.config.normalize_drop} cooldown={self.config.toggle_cooldown_steps} "
                 f"util_block_thr={self.config.util_block_threshold} global_cd={self.config.global_toggle_cooldown_steps}"
-                f" traffic_model={self.config.traffic_model}"
+                f" traffic_model={self._effective_traffic_mode()}"
+                f" routing_baseline={routing_baseline} routing_cost_model={routing_link_cost_model}"
             )
 
-        def _power_model_watts(g) -> float:
-            # Stronger signal so energy savings can beat toggle cost when OFF persists.
-            active_edges = sum(1 for (a, b) in g.edges() if g.edges[a, b].get("active", True))
-            return 40.0 + 200.0 * active_edges
+        power_model = self._build_power_model()
+        carbon_model = self._build_carbon_model()
 
         self.simulator = Simulator(
             graph,
-            routing_policy=ShortestPathPolicy(weight="weight"),
+            routing_policy=routing_policy,
             dt_seconds=1.0,
             default_capacity=self.config.base_capacity,
             default_latency_ms=self.config.base_latency_ms,
-            power_model_watts=_power_model_watts,
-            carbon_intensity_g_per_kwh=lambda t: 400.0 + 10.0 * math.sin(t),
+            power_model_watts=power_model.estimate_network,
+            carbon_intensity_g_per_kwh=carbon_model.intensity_at,
         )
 
         # Optional initial-condition random OFF edges while preserving connectivity.
@@ -581,13 +692,32 @@ class GreenNetEnv(gym.Env):
     def _ensure_edge_universe_on_graph(self, graph: nx.Graph) -> None:
         for (u, v) in self._edge_universe:
             if graph.has_edge(u, v):
+                self._apply_edge_defaults(graph, int(u), int(v))
                 continue
             graph.add_edge(u, v)
-            graph.edges[u, v]["capacity"] = float(self.config.base_capacity)
-            graph.edges[u, v]["latency_ms"] = float(self.config.base_latency_ms)
-            graph.edges[u, v]["weight"] = 1.0
-            graph.edges[u, v]["active"] = True
-            graph.edges[u, v]["last_toggled"] = -int(self.config.toggle_cooldown_steps)
+            self._apply_edge_defaults(graph, int(u), int(v))
+
+    def _build_power_model(self) -> PowerModel:
+        """Build the lightweight power model from explicit environment config."""
+        return PowerModel(
+            network_fixed_watts=float(self.config.power_network_fixed_watts),
+            device_active_watts=float(self.config.power_device_active_watts),
+            device_sleep_watts=float(self.config.power_device_sleep_watts),
+            device_dynamic_watts=float(self.config.power_device_dynamic_watts),
+            link_active_watts=float(self.config.power_link_active_watts),
+            link_sleep_watts=float(self.config.power_link_sleep_watts),
+            link_dynamic_watts=float(self.config.power_link_dynamic_watts),
+        )
+
+    def _build_carbon_model(self) -> CarbonModel:
+        return CarbonModel(
+            base_intensity=float(self.config.carbon_base_intensity_g_per_kwh),
+            amplitude=float(self.config.carbon_amplitude_g_per_kwh),
+            period=float(self.config.carbon_period_seconds),
+        )
+
+    def get_routing_metadata(self) -> Dict[str, Any]:
+        return dict(self._routing_metadata)
 
     def step(self, action: Any) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
         is_decision = self._is_decision_step()
@@ -655,19 +785,24 @@ class GreenNetEnv(gym.Env):
                 is_off_candidate = 0
         requested_action_int = int(action_int)
         cost_estimator_blocked_off = False
+        controller_cost_estimator_override = False
         cost_pred: Dict[str, float] | None = None
         mask_reason: str | None = None
+        controller_override_action_int = int(getattr(self, "_controller_cost_estimator_override_action", 0) or 0)
+        self._controller_cost_estimator_override_action = 0
         if action_int > 0 and not action_is_invalid and self._cost_estimator_enabled:
-            cost_estimator_blocked_off, cost_pred = self._cost_estimator_blocks_off_action(
-                self._last_obs, action_int
-            )
-            if cost_estimator_blocked_off:
-                action_int = 0
-                action_is_noop = True
-                if isinstance(cost_pred, dict):
-                    reason_value = cost_pred.get("mask_reason")
-                    if isinstance(reason_value, str) and reason_value:
-                        mask_reason = reason_value
+            controller_cost_estimator_override = bool(action_int == controller_override_action_int)
+            if not controller_cost_estimator_override:
+                cost_estimator_blocked_off, cost_pred = self._cost_estimator_blocks_off_action(
+                    self._last_obs, action_int
+                )
+                if cost_estimator_blocked_off:
+                    action_int = 0
+                    action_is_noop = True
+                    if isinstance(cost_pred, dict):
+                        reason_value = cost_pred.get("mask_reason")
+                        if isinstance(reason_value, str) and reason_value:
+                            mask_reason = reason_value
         if action_is_invalid and action_int > 0:
             action_int = 0
             action_is_noop = True
@@ -905,6 +1040,14 @@ class GreenNetEnv(gym.Env):
                 f"toggle_cost={float(toggle_cost):.6f}"
             )
             self._printed_toggle_debug = True
+        off_toggles_cap = self._scaled_toggle_cap(int(getattr(self.config, "max_off_toggles_per_episode", 0)))
+        total_toggles_cap = self._scaled_toggle_cap(int(getattr(self.config, "max_total_toggles_per_episode", 0)))
+        emergency_on_toggles_cap = self._scaled_toggle_cap(
+            int(getattr(self.config, "max_emergency_on_toggles_per_episode", 0))
+        )
+        cost_guard_p_qos_max, cost_guard_ddrop_max, cost_guard_tau, cost_guard_calm_factor = (
+            self._cost_estimator_guard_params()
+        )
         info: Dict[str, Any] = {
             "metrics": metrics,
             "flows": flows,
@@ -954,16 +1097,16 @@ class GreenNetEnv(gym.Env):
             "toggles_applied_count": toggles_applied_count,
             "emergency_on_applied_count": int(bool(emergency_on_applied)),
             "off_toggles_used": int(getattr(self, "_off_toggles_used", 0)),
-            "off_toggles_cap": int(getattr(self.config, "max_off_toggles_per_episode", 0)),
+            "off_toggles_cap": int(off_toggles_cap),
             "total_toggles_used": int(getattr(self, "_total_toggles_used", 0)),
-            "total_toggles_cap": int(getattr(self.config, "max_total_toggles_per_episode", 0)),
+            "total_toggles_cap": int(total_toggles_cap),
             "emergency_on_toggles_used": int(getattr(self, "_emergency_on_toggles_used", 0)),
-            "emergency_on_toggles_cap": int(getattr(self.config, "max_emergency_on_toggles_per_episode", 0)),
+            "emergency_on_toggles_cap": int(emergency_on_toggles_cap),
             "on_edges_count": int(sum(1 for e in self._edge_universe if bool(self.simulator.active.get(e, False)))),
             "off_edges_count": int(sum(1 for e in self._edge_universe if not bool(self.simulator.active.get(e, False)))),
             "toggle_budget_remaining": (
-                (int(getattr(self.config, "max_total_toggles_per_episode", 0)) - int(getattr(self, "_total_toggles_used", 0)))
-                if int(getattr(self.config, "max_total_toggles_per_episode", 0)) > 0
+                (int(total_toggles_cap) - int(getattr(self, "_total_toggles_used", 0)))
+                if int(total_toggles_cap) > 0
                 else None
             ),
             "edge_universe_size": int(getattr(self, "_edge_universe_size", len(self._edge_universe))),
@@ -971,6 +1114,15 @@ class GreenNetEnv(gym.Env):
             "initial_off_applied": int(getattr(self, "_initial_off_applied", 0)),
             "reward_energy": reward_energy,
             "reward_drop": reward_drop,
+            "power_total_watts": float(getattr(metrics, "power_total_watts", 0.0)),
+            "power_fixed_watts": float(getattr(metrics, "power_fixed_watts", 0.0)),
+            "power_variable_watts": float(getattr(metrics, "power_variable_watts", 0.0)),
+            "power_device_watts": float(getattr(metrics, "power_device_watts", 0.0)),
+            "power_link_watts": float(getattr(metrics, "power_link_watts", 0.0)),
+            "active_devices": int(getattr(metrics, "active_devices", 0)),
+            "inactive_devices": int(getattr(metrics, "inactive_devices", 0)),
+            "active_links": int(getattr(metrics, "active_links", 0)),
+            "inactive_links": int(getattr(metrics, "inactive_links", 0)),
             "delta_energy_kwh": float(delta_energy),
             "delta_delivered": float(delta_delivered),
             "delta_dropped": float(delta_dropped),
@@ -1014,8 +1166,29 @@ class GreenNetEnv(gym.Env):
             "noop_chosen": int(bool(action_is_noop)),
             "action_is_invalid": action_is_invalid,
             "forced_noop_by_cost_estimator": int(bool(cost_estimator_blocked_off)),
+            "controller_cost_estimator_override": int(bool(controller_cost_estimator_override)),
             "cost_estimator_risk": (
                 float(cost_pred.get("risk_score", 0.0)) if isinstance(cost_pred, dict) else 0.0
+            ),
+            "cost_estimator_p_qos_max": (
+                float(cost_pred.get("guard_p_qos_max", cost_guard_p_qos_max))
+                if isinstance(cost_pred, dict)
+                else float(cost_guard_p_qos_max)
+            ),
+            "cost_estimator_ddrop_max": (
+                float(cost_pred.get("guard_ddrop_max", cost_guard_ddrop_max))
+                if isinstance(cost_pred, dict)
+                else float(cost_guard_ddrop_max)
+            ),
+            "cost_estimator_tau": (
+                float(cost_pred.get("risk_tau", cost_guard_tau))
+                if isinstance(cost_pred, dict)
+                else float(cost_guard_tau)
+            ),
+            "cost_estimator_calm_factor": (
+                float(cost_pred.get("guard_calm_factor", cost_guard_calm_factor))
+                if isinstance(cost_pred, dict)
+                else float(cost_guard_calm_factor)
             ),
             "cost_estimator_blocked_off": bool(cost_estimator_blocked_off),
             "pred_cost_p_qos_mean": (
@@ -1108,17 +1281,104 @@ class GreenNetEnv(gym.Env):
             )
             self._cost_estimator_enabled = False
 
+    def _cost_estimator_guard_params(self) -> Tuple[float, float, float, float]:
+        base_p_qos_max = float(
+            getattr(self, "_cost_estimator_p_qos_max", getattr(self.config, "cost_estimator_p_qos_max", 0.11))
+        )
+        base_ddrop_max = float(
+            getattr(self, "_cost_estimator_ddrop_max", getattr(self.config, "cost_estimator_ddrop_max", 0.001))
+        )
+        base_tau = float(getattr(self, "_cost_estimator_tau", getattr(self.config, "cost_estimator_tau", 0.11)))
+        if not bool(getattr(self.config, "cost_estimator_adaptive_enabled", True)):
+            return base_p_qos_max, base_ddrop_max, base_tau, 0.0
+
+        relaxed_p_qos_max = max(
+            base_p_qos_max,
+            float(getattr(self.config, "cost_estimator_relaxed_p_qos_max", base_p_qos_max)),
+        )
+        relaxed_ddrop_max = max(
+            base_ddrop_max,
+            float(getattr(self.config, "cost_estimator_relaxed_ddrop_max", base_ddrop_max)),
+        )
+        relaxed_tau = max(
+            base_tau,
+            float(getattr(self.config, "cost_estimator_relaxed_tau", base_tau)),
+        )
+        qos_violation = bool(getattr(self, "_last_qos_viol_step", False))
+        qos_target = float(getattr(self.config, "qos_target_norm_drop", 0.0))
+        qos_margin_off = float(
+            getattr(self.config, "qos_guard_margin_off", getattr(self.config, "qos_guard_margin", 0.0))
+        )
+        norm_drop_signal = max(
+            0.0,
+            float(getattr(self, "_last_norm_drop_step", 0.0)),
+            float(getattr(self, "_last_norm_drop_total", 0.0)),
+        )
+        if qos_violation or (
+            qos_target > 0.0 and norm_drop_signal >= max(0.0, qos_target - qos_margin_off)
+        ):
+            return base_p_qos_max, base_ddrop_max, base_tau, 0.0
+
+        demand_signal = max(
+            0.0,
+            float(getattr(self, "_last_demand_now_norm", 0.0)),
+            float(getattr(self, "_last_demand_forecast_norm", 0.0)),
+        )
+        util_limit = max(
+            1e-6,
+            float(
+                getattr(
+                    self.config,
+                    "max_util_off_allow_threshold",
+                    getattr(self.config, "util_block_threshold", 0.80),
+                )
+            ),
+        )
+        max_util = max(0.0, float(getattr(self, "_last_max_util", 0.0)))
+        if qos_target > 0.0:
+            qos_headroom = float(np.clip((qos_target - norm_drop_signal) / max(qos_target, 1e-6), 0.0, 1.0))
+        else:
+            qos_headroom = 1.0
+        util_headroom = float(np.clip((util_limit - max_util) / util_limit, 0.0, 1.0))
+        demand_headroom = float(np.clip(1.0 - demand_signal, 0.0, 1.0))
+        calm_required = int(getattr(self.config, "off_calm_steps_required", 0))
+        if calm_required > 0:
+            calm_progress = float(
+                np.clip(float(getattr(self, "_calm_streak", 0)) / float(max(1, calm_required)), 0.0, 1.0)
+            )
+        else:
+            calm_progress = 1.0
+
+        calm_factor = min(qos_headroom, util_headroom, demand_headroom, calm_progress)
+        p_qos_max = base_p_qos_max + calm_factor * (relaxed_p_qos_max - base_p_qos_max)
+        ddrop_max = base_ddrop_max + calm_factor * (relaxed_ddrop_max - base_ddrop_max)
+        tau = base_tau + calm_factor * (relaxed_tau - base_tau)
+        return float(p_qos_max), float(ddrop_max), float(tau), float(calm_factor)
+
     def _cost_estimator_thresholds(self) -> Tuple[float, float]:
-        p_qos_max = float(getattr(self, "_cost_estimator_p_qos_max", getattr(self.config, "cost_estimator_p_qos_max", 0.11)))
-        ddrop_max = float(getattr(self, "_cost_estimator_ddrop_max", getattr(self.config, "cost_estimator_ddrop_max", 0.001)))
+        p_qos_max, ddrop_max, _tau, _calm_factor = self._cost_estimator_guard_params()
         return p_qos_max, ddrop_max
 
     def _cost_estimator_risk_params(self) -> Tuple[float, float, float, float]:
         k = float(getattr(self, "_cost_estimator_k", getattr(self.config, "cost_estimator_k", 1.0)))
         w_drop = float(getattr(self, "_cost_estimator_w_drop", getattr(self.config, "cost_estimator_w_drop", 1.0)))
         w_energy = float(getattr(self, "_cost_estimator_w_energy", getattr(self.config, "cost_estimator_w_energy", 0.2)))
-        tau = float(getattr(self, "_cost_estimator_tau", getattr(self.config, "cost_estimator_tau", 0.11)))
+        _p_qos_max, _ddrop_max, tau, _calm_factor = self._cost_estimator_guard_params()
         return k, w_drop, w_energy, tau
+
+    def _scaled_toggle_cap(self, base_cap: int) -> int:
+        cap = int(base_cap)
+        if cap <= 0:
+            return 0
+        if not bool(getattr(self.config, "adaptive_toggle_budgets", True)):
+            return cap
+        ref_steps = max(1, int(getattr(self.config, "toggle_budget_reference_steps", 300)))
+        exponent = max(0.0, float(getattr(self.config, "toggle_budget_scale_exponent", 0.5)))
+        scale = math.pow(
+            max(1.0, float(getattr(self.config, "max_steps", ref_steps)) / float(ref_steps)),
+            exponent,
+        )
+        return max(cap, int(math.ceil(float(cap) * max(1.0, scale))))
 
     def _obs_scalar(self, obs: Any, key: str, default: float = 0.0) -> float:
         if isinstance(obs, dict) and key in obs:
@@ -1126,6 +1386,13 @@ class GreenNetEnv(gym.Env):
             if arr.size > 0:
                 return float(arr[0])
         return float(default)
+
+    def set_controller_cost_estimator_override(self, action_int: int | None) -> None:
+        try:
+            action_value = int(action_int) if action_int is not None else 0
+        except Exception:
+            action_value = 0
+        self._controller_cost_estimator_override_action = max(0, int(action_value))
 
     def get_cost_estimator_graph_state(
         self, obs: Any | None = None
@@ -1280,7 +1547,7 @@ class GreenNetEnv(gym.Env):
         if self._impact_predictor is None:
             return False, None
 
-        p_qos_max, ddrop_max = self._cost_estimator_thresholds()
+        p_qos_max, ddrop_max, risk_tau, calm_factor = self._cost_estimator_guard_params()
         pred = self._predict_cost(
             obs,
             int(action_int),
@@ -1288,7 +1555,7 @@ class GreenNetEnv(gym.Env):
         )
         if pred is None:
             return False, None
-        k, _w_drop, _w_energy, risk_tau = self._cost_estimator_risk_params()
+        k, _w_drop, _w_energy, _ = self._cost_estimator_risk_params()
         p_upper = float(pred.get("p_qos_mean", 0.0) + float(k) * pred.get("p_qos_std", 0.0))
         ddrop_upper = float(pred.get("ddrop_mean", 0.0) + float(k) * pred.get("ddrop_std", 0.0))
         risk_score = float(pred.get("risk_score", 0.0))
@@ -1306,7 +1573,10 @@ class GreenNetEnv(gym.Env):
                 block_reason = "risk_tau"
         pred["p_qos_upper"] = float(p_upper)
         pred["ddrop_upper"] = float(ddrop_upper)
+        pred["guard_p_qos_max"] = float(p_qos_max)
+        pred["guard_ddrop_max"] = float(ddrop_max)
         pred["risk_tau"] = float(risk_tau)
+        pred["guard_calm_factor"] = float(calm_factor)
         pred["mask_reason"] = block_reason if block_reason is not None else ""
         return should_block, pred
 
@@ -1390,9 +1660,9 @@ class GreenNetEnv(gym.Env):
             self._last_valid_toggle_actions = 0
             return mask
 
-        total_cap = int(getattr(self.config, "max_total_toggles_per_episode", 0))
+        total_cap = self._scaled_toggle_cap(int(getattr(self.config, "max_total_toggles_per_episode", 0)))
         total_used = int(getattr(self, "_total_toggles_used", 0))
-        emerg_cap = int(getattr(self.config, "max_emergency_on_toggles_per_episode", 8))
+        emerg_cap = self._scaled_toggle_cap(int(getattr(self.config, "max_emergency_on_toggles_per_episode", 8)))
         emerg_used = int(getattr(self, "_emergency_on_toggles_used", 0))
         
         global_cd = int(getattr(self, "_global_toggle_cooldown_remaining", 0))
@@ -1511,7 +1781,7 @@ class GreenNetEnv(gym.Env):
                     continue
                 # OFF budget: if we've already used our allowed OFF toggles this episode,
                 # block further OFF actions.
-                cap = int(getattr(self.config, "max_off_toggles_per_episode", 0))
+                cap = self._scaled_toggle_cap(int(getattr(self.config, "max_off_toggles_per_episode", 0)))
                 used = int(getattr(self, "_off_toggles_used", 0))
                 if cap > 0 and used >= cap:
                     mask[a] = False
@@ -1607,13 +1877,13 @@ class GreenNetEnv(gym.Env):
         if self.simulator is None:
             return tuple()
 
-        # Stochastic traffic mode: convert scheduled bursts into flows.
-        if self.config.traffic_model.lower() == "stochastic":
+        # Scheduled-burst traffic mode: stochastic generation or replayed traces/matrices.
+        if self._traffic_uses_scheduled_bursts():
             step_idx = max(0, self._step_count - 1)  # step() increments before generating flows
 
             # Add newly starting bursts for this step.
             for b in self._traffic_by_step.get(step_idx, []):
-                demand = float(max(0, int(b.size)))
+                demand = float(max(0.0, float(b.size)))
                 remaining = max(1, int(b.duration))
                 self._active_bursts.append((int(b.source), int(b.destination), demand, remaining))
 
@@ -1716,11 +1986,16 @@ class GreenNetEnv(gym.Env):
             edge_prob=self.config.edge_prob,
             directed=self.config.directed,
             seed=seed,
+            topology_name=self.config.topology_name,
+            topology_path=self.config.topology_path,
         )
 
     def _build_topology(self):
         if not self.config.topology_randomize:
             return self._base_graph.copy()
+
+        if self._topology_uses_external_source:
+            return build_topology(self._topology_config(self.config.topology_seed))
 
         seed = self.config.topology_seed
         if self.config.topology_randomize:
@@ -1731,7 +2006,57 @@ class GreenNetEnv(gym.Env):
             else:
                 # Use env RNG to derive a seed for variety across episodes.
                 seed = int(self.np_random.integers(0, 1_000_000))
-        return build_random_topology(self._topology_config(seed))
+        return build_topology(self._topology_config(seed))
+
+    def _traffic_uses_replay_input(self) -> bool:
+        return bool(self.config.traffic_name or self.config.traffic_path)
+
+    def _traffic_uses_scheduled_bursts(self) -> bool:
+        return bool(
+            self._traffic_uses_replay_input()
+            or self.config.traffic_model.lower() == "stochastic"
+            or bool(self.config.traffic_scenario)
+        )
+
+    def _effective_traffic_mode(self) -> str:
+        if self._traffic_uses_replay_input():
+            return "replay"
+        if self.config.traffic_model.lower() == "stochastic" or bool(self.config.traffic_scenario):
+            return "stochastic"
+        return str(self.config.traffic_model)
+
+    def _schedule_bursts(self, bursts: Any) -> None:
+        for burst in bursts:
+            step_idx = int(burst.start_time)
+            if step_idx < 0 or step_idx >= int(self.config.max_steps):
+                continue
+            self._traffic_by_step.setdefault(step_idx, []).append(burst)
+
+    def _estimate_burst_traffic_scale(self) -> float:
+        max_step_demand = 0.0
+        active: list[tuple[float, int]] = []
+        for step_idx in range(int(self.config.max_steps)):
+            for burst in self._traffic_by_step.get(step_idx, []):
+                active.append((float(max(0.0, float(burst.size))), max(1, int(burst.duration))))
+
+            current_demand = 0.0
+            still_active: list[tuple[float, int]] = []
+            for demand, remaining in active:
+                if demand > 0.0:
+                    current_demand += demand
+                remaining -= 1
+                if remaining > 0:
+                    still_active.append((demand, remaining))
+            active = still_active
+            max_step_demand = max(max_step_demand, current_demand)
+        return max(1.0, max_step_demand)
+
+    def _apply_edge_defaults(self, graph: nx.Graph, u: int, v: int) -> None:
+        edge = graph.edges[u, v]
+        edge["capacity"] = float(edge.get("capacity", self.config.base_capacity))
+        edge["latency_ms"] = float(edge.get("latency_ms", self.config.base_latency_ms))
+        edge["active"] = bool(edge.get("active", True))
+        edge["last_toggled"] = int(edge.get("last_toggled", -int(self.config.toggle_cooldown_steps)))
 
     def _edge_key(self, u: int, v: int) -> Tuple[int, int]:
         if self.simulator and self.simulator.graph.is_directed():
@@ -1873,7 +2198,7 @@ class GreenNetEnv(gym.Env):
         emergency_on = bool(is_turning_on and qos_viol_step)
 
         # Total toggle budget hard gate: treat as NOOP if exhausted.
-        total_cap = int(getattr(self.config, "max_total_toggles_per_episode", 0))
+        total_cap = self._scaled_toggle_cap(int(getattr(self.config, "max_total_toggles_per_episode", 0)))
         total_used = int(getattr(self, "_total_toggles_used", 0))
         if (not emergency_on) and total_cap > 0 and total_used >= total_cap:
             total_budget_blocked = True
@@ -1881,7 +2206,7 @@ class GreenNetEnv(gym.Env):
             internal_noop_reason_hint = "other"
             return _finish()
         if emergency_on:
-            emerg_cap = int(getattr(self.config, "max_emergency_on_toggles_per_episode", 8))
+            emerg_cap = self._scaled_toggle_cap(int(getattr(self.config, "max_emergency_on_toggles_per_episode", 8)))
             emerg_used = int(getattr(self, "_emergency_on_toggles_used", 0))
             if emerg_cap > 0 and emerg_used >= emerg_cap:
                 total_budget_blocked = True
@@ -1893,7 +2218,7 @@ class GreenNetEnv(gym.Env):
 
         # OFF budget hard gate: if edge is currently ON, this action would turn it OFF.
         if prev_state:
-            cap = int(getattr(self.config, "max_off_toggles_per_episode", 0))
+            cap = self._scaled_toggle_cap(int(getattr(self.config, "max_off_toggles_per_episode", 0)))
             used = int(getattr(self, "_off_toggles_used", 0))
             if cap > 0 and used >= cap:
                 off_budget_blocked = True
