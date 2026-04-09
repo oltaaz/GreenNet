@@ -1,252 +1,73 @@
 # GreenNet
 
-## Frontend Strategy
+GreenNet is an energy- and QoS-aware routing simulator with a baseline-vs-controller evaluation pipeline, a FastAPI backend, and a React demo UI. The project is strongest as a reproducible research/software artifact: the simulator is real, the baselines are explicit, and the final evidence bundle shows a mixed but technically honest AI result rather than a fabricated win.
 
-GreenNet now has one official frontend path:
+## Official Path
 
-- Official demo/product UI: React/Vite app in `frontend/greennet-ui`
-- Internal analyst tooling only: Streamlit dashboard in `dashboard/`
+Use this path for the final submission workflow:
 
-Use the React app for demos, product walkthroughs, and the primary workflow across:
-
-- dashboard
-- results
-- simulator
-
-The Streamlit app remains available for analysts/developers who want a filesystem-oriented run inspector and internal launcher, but it is no longer the public-facing interface.
-
-### Run The Official Frontend
-
-Start the backend API first:
+1. Install the project with the tracked Python metadata:
 
 ```bash
-uvicorn api_app:app --reload --port 8000
+python3 -m pip install -e .[test,train]
 ```
 
-Then start the React frontend:
+2. Use the canonical training configs in `configs/`.
+
+3. Run experiments with `run_experiment.py`, `train.py`, or `experiments/run_matrix.py` as needed.
+
+4. Package and review the official evidence bundle in `experiments/official_matrix_v6/`, `artifacts/final_submission/matrix_v6/`, and `artifacts/traffic_verify/20260220_matrix/`.
+
+5. Use [docs/final_submission_overview.md](docs/final_submission_overview.md) for the final architecture, artifact glossary, and limitations summary.
+
+## Current Final Claim
+
+The official matrix does not support the claim that the AI policy clearly beats the routing baseline on energy. In the curated final evaluation:
+
+- `heuristic` is the best overall policy
+- `ppo` is the best AI policy
+- `ppo` is still about 4% worse than `heuristic` on energy in the final aggregate
+- QoS stays within the acceptance gates used in the final report
+
+The defensible submission claim is therefore:
+
+- GreenNet provides a credible routing simulation and evaluation framework for energy/QoS tradeoffs
+- the baseline is explicit and technically honest
+- the AI controller is measured against the baseline under the same scenarios and seeds
+- the final evidence explains a mixed outcome instead of overclaiming improvement
+
+## Canonical Workflow
+
+### 1. Train or rerun a policy
+
+Use the tracked scenario configs in `configs/`:
 
 ```bash
-cd frontend
-npm run dev
+python3 train.py --config configs/train_normal.json --timesteps 300000
+python3 train.py --config configs/train_burst.json --timesteps 300000
+python3 train.py --config configs/train_hotspot.json --timesteps 300000
 ```
 
-Notes:
-- `frontend/package.json` is the supported entrypoint for frontend commands.
-- The Vite source lives under `frontend/greennet-ui/`.
-- The UI uses canonical controller-policy names `all_on`, `heuristic`, and `ppo`. Legacy `noop`/`baseline` aliases are still normalized for older runs.
-
-## Routing Baselines
-
-GreenNet now records the routing baseline separately from the controller policy.
-
-- `min_hop_single_path` is the legacy default and matches the project’s earlier behavior: one deterministic shortest path over unit link cost, which is effectively minimum-hop routing.
-- `ospf_ecmp` is a clearer traditional baseline: static link-state SPF with equal splitting across equal-cost shortest paths. It approximates OSPF forwarding behavior after convergence; it does not simulate the OSPF control plane.
-- The existing `heuristic` policy is an edge-toggle controller baseline, not a routing protocol baseline.
-
-Example:
+### 2. Run a single experiment
 
 ```bash
-python3 run_experiment.py \
-  --policy heuristic \
-  --scenario normal \
-  --seed 0 \
-  --routing-baseline ospf_ecmp
+python3 run_experiment.py --policy heuristic --scenario normal --seed 0 --episodes 1 --steps 300
+python3 run_experiment.py --policy ppo --scenario hotspot --seed 0 --episodes 1 --steps 300
 ```
 
-### Run The Internal Streamlit Tool
+### 3. Run the official matrix
 
 ```bash
-streamlit run dashboard/app.py
-```
-
-Use this only for internal analyst/developer workflows such as manually browsing result folders or launching ad hoc runs from the repo.
-
-## Forecasting
-
-GreenNet keeps the existing EMA demand forecaster as the default runtime baseline and now supports two additional lightweight options:
-
-- `ema`: existing baseline behavior
-- `adaptive_ema`: adaptive ensemble over multiple EMA experts, recommended for current traffic traces
-- `holt`: damped Holt trend forecaster
-
-Environment config fields:
-
-```json
-{
-  "enable_forecasting": true,
-  "forecast_model": "adaptive_ema",
-  "forecast_alpha": 0.6,
-  "forecast_horizon_steps": 3,
-  "forecast_adaptive_alphas": [0.1, 0.2, 0.4, 0.6, 0.8, 0.95],
-  "forecast_adaptive_error_alpha": 0.02,
-  "forecast_adaptive_temperature": 0.25
-}
-```
-
-Notes:
-- Default behavior is unchanged because `forecast_model` defaults to `ema`.
-- `demand_forecast` remains the same observation key consumed by the environment and controller code.
-- `forecast_alpha`, `forecast_beta`, and `forecast_trend_damping` are still used by single-model forecasters.
-
-Run the forecasting comparison workflow:
-
-```bash
-.venv/bin/python scripts/eval_forecasters.py \
+python3 experiments/run_matrix.py \
+  --policies all_on,heuristic,ppo \
   --scenarios normal,burst,hotspot \
-  --seeds 0,1,2,3,4 \
-  --episodes-per-scenario 1 \
-  --max-steps 300 \
-  --baseline-model ema \
-  --improved-model adaptive_ema \
-  --output-dir artifacts/forecasting
+  --seeds 0,1,2,3,4,5,6,7,8,9 \
+  --episodes 50 \
+  --steps 300 \
+  --tag matrix_v6
 ```
 
-Generated artifacts:
-- `artifacts/forecasting/forecast_compare_summary.csv`
-- `artifacts/forecasting/forecast_compare_series_metrics.csv`
-- `artifacts/forecasting/forecast_compare_predictions.csv`
-- `artifacts/forecasting/forecast_compare_summary.json`
-- `artifacts/forecasting/forecast_compare_report.md`
-
-`MAE` and `RMSE` are the primary metrics for aggregate demand quality. `MAPE` is reported on non-zero-demand targets only because zero-demand steps make percentage error undefined.
-
-## Impact Predictor
-
-Impact Predictor is a graph-aware ensemble that predicts next-step OFF-action impact (QoS risk via latency/drop proxies, normalized drop change, and energy change). Runtime gating uses calibrated QoS probability + uncertainty bounds + risk score to block risky OFF toggles.
-
-```bash
-# 1) Build sweep dataset (multi-scenario + domain randomization)
-ml-env/.venv/bin/python scripts/build_cost_dataset_sweep.py \
-  --episodes-per-scenario 200 \
-  --topology-seeds 0,1,2,3,4,5,6,7,8,9 \
-  --traffic-seeds 0,1,2 \
-  --out artifacts/cost_estimator/ds_sweep.npz \
-  --qos-delay-ms 24 \
-  --qos-drop-max 2 \
-  --demand-scale-min 0.7 \
-  --demand-scale-max 1.6 \
-  --capacity-scale-min 0.7 \
-  --capacity-scale-max 1.3 \
-  --flows-scale-min 0.8 \
-  --flows-scale-max 1.5
-
-# 2) Train Impact Predictor ensemble (group split by topology_seed when available)
-ml-env/.venv/bin/python scripts/train_cost_estimator_torch.py \
-  --dataset artifacts/cost_estimator/ds_sweep.npz \
-  --out-dir models/impact_predictor \
-  --ensemble-size 3 \
-  --epochs 3
-
-# 3) Acceptance suite (done gate)
-ml-env/.venv/bin/python scripts/test_impact_predictor_suite.py \
-  --episodes 10 \
-  --max-steps 200 \
-  --p-off 0.30 \
-  --seed 0 \
-  --abs-tol-lat-ms 2.0 \
-  --tol-norm-drop 0.002 \
-  --tol-dropped 5.0 \
-  --lock-artifacts
-
-# 4) Optional quick smoke
-ml-env/.venv/bin/python scripts/smoke_impact_predictor.py
-```
-
-Impact Predictor is complete when `scripts/test_impact_predictor_suite.py` exits successfully and all rows pass.  
-The suite includes an OOD `extreme` bucket (`ood_bucket=1`) with conservative checks and stronger masking expectations.
-For thesis references, cite a locked acceptance run folder under `artifacts/locked/impact_predictor/<timestamp>/`.
-Locked acceptance example: `artifacts/locked/impact_predictor/20260221_121739/`.
-
-### Threshold presets
-
-Defaults remain strict in code for safety-first behavior. Use env vars to pick a runtime preset.
-
-```bash
-# Strict (safety-first, code defaults)
-export COST_ESTIMATOR_P_QOS_MAX=0.11
-export COST_ESTIMATOR_DDROP_MAX=0.001
-export COST_ESTIMATOR_TAU=0.11
-```
-
-```bash
-# Balanced (recommended)
-export COST_ESTIMATOR_P_QOS_MAX=0.55
-export COST_ESTIMATOR_DDROP_MAX=0.04
-export COST_ESTIMATOR_TAU=0.85
-```
-
-```bash
-# Aggressive (energy-first exploratory preset; validate with acceptance suite)
-export COST_ESTIMATOR_P_QOS_MAX=0.60
-export COST_ESTIMATOR_DDROP_MAX=0.05
-export COST_ESTIMATOR_TAU=0.90
-```
-
-Example output fields from the acceptance suite:
-
-```text
-scenario   bucket   ood off_cand off_mask %mask lat_off lat_on nd_off nd_on PASS
-normal     mild      0   ...
-normal     stress    0   ...
-normal     extreme   1   ...
-burst      extreme   1   ...
-hotspot    extreme   1   ...
-```
-
-## Energy Model
-
-GreenNet now uses a lightweight structured power model instead of a single `base + active_links` placeholder.
-
-- Each device (node) has an `active` draw, a `sleep` draw, and a small utilization-sensitive term.
-- Each link has an `active` draw, a `sleep` draw, and a small utilization-sensitive term.
-- A device is considered active when it has at least one active incident link.
-- `energy_kwh` is still computed per step from average power over `dt_seconds`, so reward and evaluation code remain compatible.
-- `carbon_g` is still derived from `energy_kwh`, but the carbon intensity profile is now exposed through explicit config fields.
-
-Relevant env config keys:
-- `power_network_fixed_watts`
-- `power_device_active_watts`
-- `power_device_sleep_watts`
-- `power_device_dynamic_watts`
-- `power_link_active_watts`
-- `power_link_sleep_watts`
-- `power_link_dynamic_watts`
-- `carbon_base_intensity_g_per_kwh`
-- `carbon_amplitude_g_per_kwh`
-- `carbon_period_seconds`
-
-Per-step reports now also include power breakdown fields such as `power_total_watts`, `power_fixed_watts`, `power_variable_watts`, and active/inactive link/device counts.
-
-## Metrics API
-
-Example calls:
-
-```bash
-curl "http://localhost:8000/api/runs?limit=3"
-curl "http://localhost:8000/api/runs_flat?limit=3"
-curl "http://localhost:8000/api/runs/<run_id>/summary"
-curl "http://localhost:8000/api/aggregate?tag=matrix_v4&group_by=policy,scenario"
-```
-
-Notes:
-- CORS allows Vite dev origins `http://localhost:5173` and `http://127.0.0.1:5173`.
-- `/api/runs_flat` is a compatibility endpoint for older/quick UIs expecting a plain array (same objects as `/api/runs.items`).
-- `/api/aggregate` computes `*_std` using population standard deviation (`statistics.pstdev`).
-
-## Custom Inputs
-
-GreenNet can now load predefined or file-backed topologies and replayable traffic inputs in addition to its original synthetic generation.
-
-- named bundled topologies: `metro_hub`, `regional_ring`
-- named bundled traffic profiles: `commuter_bursts`, `commuter_matrices`
-- runner support: `run_experiment.py --scenario custom --topology-name ... --traffic-name ...`
-- config support: `env.topology_name`, `env.topology_path`, `env.traffic_name`, `env.traffic_path`
-
-Format details and examples are documented in [docs/custom_inputs.md](docs/custom_inputs.md).
-
-## Final Thesis Evaluation
-
-Use the final evaluation layer to turn existing result artifacts into one thesis/reporting-ready baseline-vs-AI comparison bundle.
+### 4. Build the final evaluation bundle
 
 ```bash
 python3 experiments/final_evaluation.py \
@@ -256,99 +77,71 @@ python3 experiments/final_evaluation.py \
   --output-dir experiments/official_matrix_v6/final_evaluation
 ```
 
-Generated files:
-- `final_evaluation_summary.csv`
-- `final_evaluation_summary.json`
-- `final_evaluation_report.md`
+The canonical reviewer bundle is `artifacts/final_submission/matrix_v6/`.
+It contains `manifest.json` and `traceability.csv` so reviewers can map the submission claim back to the preserved artifacts.
 
-The script reads existing `run_meta.json`, `summary.json`, and `per_step.csv` artifacts, aggregates across seeds/runs, derives QoS violation metrics from per-step logs when available, and reports whether the `>=15%` energy-reduction hypothesis is met under configurable QoS thresholds.
-The exported evaluation bundle also carries routing-baseline metadata so baseline-vs-AI comparisons remain explicit about the forwarding assumptions used.
+If the raw historical run folders are absent, the command still rebuilds the aggregate comparison from the packaged summary CSV. The preserved report in `experiments/official_matrix_v6/final_evaluation/` remains the authoritative shipped artifact for the final thesis-facing QoS gate interpretation.
 
-## Final Thesis Pipeline
+## Architecture Overview
 
-Use the final pipeline runner when you want one repeatable command that:
-- runs the policy matrix when needed
-- re-aggregates authoritative results
-- builds by-seed tables and leaderboard tables
-- generates the final baseline-vs-AI evaluation bundle
-- exports plot-ready CSVs and optional PNG plots
-- writes a concise thesis-ready report
+GreenNet is organized around four layers:
 
-### Prerequisites
+- routing/simulation core in `greennet/`
+- baselines and experiment runners in `baselines.py`, `run_experiment.py`, `train.py`, `eval.py`, and `experiments/`
+- API and persistence in `api_app.py` and `greennet/persistence`
+- public demo and analyst tooling in `frontend/greennet-ui/` and `dashboard/`
 
-- Python 3.10+
-- project dependencies installed in an active virtual environment
-- a PPO checkpoint under `runs/*/ppo_greennet(.zip)` or passed explicitly with `--ppo-model` if you want to rerun evaluations
-- optional: `matplotlib` for PNG plot export; without it, the pipeline still writes plot-ready CSV files
+The controller stack is intentionally simple:
 
-Example setup from a fresh clone:
+- the simulator computes routing, load, delay, power, and carbon metrics
+- `all_on`, `heuristic`, and `ppo` are compared on the same scenario set
+- the heuristic is the explicit non-AI baseline
+- PPO is the learned controller, but it is not presented as universally superior
+
+## Artifact Glossary
+
+- `configs/` - canonical training configs used by the official workflow
+- `experiments/official_matrix_v6/` - curated final matrix summary and final evaluation bundle
+- `artifacts/traffic_verify/20260220_matrix/` - deterministic traffic verification evidence
+- `artifacts/locked/` - locked scenario evidence and retained run bundles
+- `runs/` - operational run directory used by the codebase and scripts
+- `models/` - saved checkpoints and compatibility artifacts
+- `docs/` - workflow notes, input formats, and submission guidance
+
+Not every historical raw result is bundled in one place. The official submission story should cite the curated summary tables and locked verification artifacts rather than trying to imply a single monolithic `results/` folder exists.
+
+## Canonical Config Family
+
+The canonical config family is `configs/train_*.json`.
+
+- use these files for current scenario training
+- treat top-level `train_*.json` files as historical or compatibility snapshots
+- do not mix root-level legacy configs into the final submission narrative unless you are explicitly discussing history
+
+See [configs/README.md](configs/README.md) for the tracked config set and format notes.
+
+## Legacy And Internal Tools
+
+The following paths are useful, but they are not the public-facing submission path:
+
+- `dashboard/` - internal analyst tooling
+- `COMMANDS.md` - legacy command sheet kept for reference
+- older experiment folders and ad hoc run folders under `runs/`
+
+The public demo path is the React app in `frontend/greennet-ui/`.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -e .
-python3 -m pip install matplotlib
+cd frontend/greennet-ui
+npm run dev
 ```
 
-### Full End-to-End Rerun
+## Responsible Design And Limitations
 
-This reruns the evaluation matrix with deterministic settings and then packages the final thesis bundle.
+GreenNet evaluates energy against QoS, not energy alone. The project should be described with those constraints visible:
 
-```bash
-python3 experiments/final_pipeline.py \
-  --tag matrix_v7 \
-  --policies all_on,heuristic,ppo \
-  --scenarios normal,burst,hotspot \
-  --seeds 0,1,2,3,4,5,6,7,8,9 \
-  --episodes 50 \
-  --steps 300 \
-  --ppo-model runs/<RUN_ID>/ppo_greennet.zip \
-  --output-dir artifacts/final_pipeline/matrix_v7
-```
+- energy savings are only meaningful if QoS remains acceptable
+- the final matrix does not prove a large AI win on energy
+- gating, thresholds, and scenario definitions matter to the result
+- the Impact Predictor and some experimental scripts are exploratory and should be described as such unless you have bundled and verified evidence for them
 
-### Rebuild From Existing Artifacts
-
-This is the fastest reproducible path when the matrix results already exist in the repo or have been shared separately.
-
-```bash
-python3 experiments/final_pipeline.py \
-  --summary-csv experiments/official_matrix_v6/results_summary_matrix_v6.csv \
-  --skip-eval \
-  --tag matrix_v6 \
-  --output-dir artifacts/final_pipeline/matrix_v6
-```
-
-### Output Layout
-
-The runner writes a predictable bundle:
-
-```text
-artifacts/final_pipeline/<name>/
-  logs/
-  metadata/
-    pipeline_config.json
-    pipeline_manifest.json
-  summary/
-    results_summary_<tag>.csv
-    results_summary_by_seed_<tag>.csv
-    leaderboard_<tag>.csv
-    leaderboard_source_<tag>.csv
-    research_question_summary.csv
-    final_evaluation/
-      final_evaluation_summary.csv
-      final_evaluation_summary.json
-      final_evaluation_report.md
-  plots/
-    policy_tradeoff_overall.csv
-    policy_tradeoff_by_scenario.csv
-    research_question_tradeoff.csv
-    *.png
-  report/
-    concise_report.md
-```
-
-### Notes
-
-- The pipeline keeps evaluation logic centralized in `experiments/run_matrix.py`, `experiments/aggregate_results.py`, `experiments/make_leaderboard.py`, and `greennet/evaluation/final_report.py`.
-- If a step fails, inspect the corresponding file under `logs/`; each step is isolated and logged separately.
-- Determinism comes from explicit seeds, deterministic policy evaluation, and fixed scenario/policy selection on the CLI.
+Further detail is documented in [docs/final_submission_overview.md](docs/final_submission_overview.md).

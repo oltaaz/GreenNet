@@ -11,8 +11,9 @@ import {
   getRunPerStep,
   getRunSummary,
   getTopology,
-  listRuns,
+  listRunsWithSource,
   startRun,
+  type RunCatalogSource,
 } from "../lib/api";
 import { isDemoRunId } from "../lib/demo";
 import {
@@ -65,6 +66,8 @@ export default function DashboardPage() {
   const [topology, setTopology] = useState<TopologyData>(fallbackTopology("dashboard"));
   const [policySeries, setPolicySeries] = useState<PolicySeries>({});
   const [linkState, setLinkState] = useState<LinkStateMap | null>(null);
+  const [runCatalogSource, setRunCatalogSource] = useState<RunCatalogSource>("backend");
+  const [topologyFallbackNotice, setTopologyFallbackNotice] = useState("");
 
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
@@ -83,22 +86,25 @@ export default function DashboardPage() {
     async function loadRuns() {
       setLoadingRuns(true);
       setError("");
+      setTopologyFallbackNotice("");
 
       try {
-        const runItems = await listRuns();
+        const catalog = await listRunsWithSource();
         if (!alive) {
           return;
         }
 
-        setRuns(runItems);
-        if (!selectedRunId && runItems.length > 0) {
-          setSelectedRunId(runItems[0].run_id);
-        } else if (selectedRunId && !runItems.find((run) => run.run_id === selectedRunId)) {
-          setSelectedRunId(runItems[0]?.run_id ?? "");
+        setRuns(catalog.runs);
+        setRunCatalogSource(catalog.source);
+        if (!selectedRunId && catalog.runs.length > 0) {
+          setSelectedRunId(catalog.runs[0].run_id);
+        } else if (selectedRunId && !catalog.runs.find((run) => run.run_id === selectedRunId)) {
+          setSelectedRunId(catalog.runs[0]?.run_id ?? "");
         }
       } catch (apiError) {
         if (alive) {
           setError(apiError instanceof Error ? apiError.message : "Failed to load runs");
+          setRunCatalogSource("backend");
         }
       } finally {
         if (alive) {
@@ -139,6 +145,7 @@ export default function DashboardPage() {
     async function loadRunData() {
       setLoadingData(true);
       setError("");
+      setTopologyFallbackNotice("");
 
       try {
         const [stepRows, topo, summary] = await Promise.all([
@@ -155,12 +162,18 @@ export default function DashboardPage() {
         setOverallSummary(summary);
         setTopology(topo ?? fallbackTopology(selectedRunId));
         setTopologyStepIndex(Math.max(0, normalized.length - 1));
+        if (topo == null && alive) {
+          setTopologyFallbackNotice(
+            "The backend did not return a topology for this run, so the dashboard is rendering a generated layout derived from the run identifier.",
+          );
+        }
       } catch (apiError) {
         if (alive) {
           setError(apiError instanceof Error ? apiError.message : "Failed to load run data");
           setRows([]);
           setOverallSummary(null);
           setTopology(fallbackTopology(selectedRunId));
+          setTopologyFallbackNotice("");
         }
       } finally {
         if (alive) {
@@ -289,7 +302,7 @@ export default function DashboardPage() {
   }, [previousRow, topology.edges]);
 
   const selectedRun = runs.find((run) => run.run_id === selectedRunId);
-  const demoMode = selectedRun ? isDemoRunId(selectedRun.run_id) : false;
+  const demoMode = runCatalogSource === "demo" || (selectedRun ? isDemoRunId(selectedRun.run_id) : false);
   const activeOfficialScenario = (selectedRun?.scenario ?? "").toLowerCase();
   const highlightedOfficialResult =
     officialResults.find((item) => item.scenario === activeOfficialScenario) ?? null;
@@ -350,7 +363,7 @@ export default function DashboardPage() {
 
     try {
       const started = await startRun({ policy, scenario, seed: seedValue, steps: stepsValue });
-      const refreshed = await listRuns();
+      const catalog = await listRunsWithSource();
       const startedRun: RunSummary = {
         run_id: started.run_id,
         policy,
@@ -360,7 +373,8 @@ export default function DashboardPage() {
         tag: "dashboard",
       };
 
-      setRuns(upsertRun(refreshed, startedRun));
+      setRuns(upsertRun(catalog.runs, startedRun));
+      setRunCatalogSource(catalog.source);
       setSelectedRunId(started.run_id);
     } catch (apiError) {
       setError(apiError instanceof Error ? apiError.message : "Unable to start run on backend");
@@ -405,9 +419,10 @@ export default function DashboardPage() {
       {demoMode ? (
         <InfoNotice
           title="Demo Data Mode"
-          description="Backend data is unavailable or empty. Showing generated simulation data so the dashboard remains fully interactive."
+          description="The backend run catalog or selected run data is unavailable, so the dashboard is showing generated simulation data."
         />
       ) : null}
+      {topologyFallbackNotice ? <InfoNotice title="Generated Topology Layout" description={topologyFallbackNotice} /> : null}
       {highlightedOfficialResult ? (
         <InfoNotice
           title="Scenario Validation Available"

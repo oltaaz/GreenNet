@@ -142,6 +142,13 @@ def _resolve_run_dir(path_text: str, *, repo_root: Path, context_dir: Path | Non
     return candidates[0]
 
 
+def _display_path(path: Path, *, repo_root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(repo_root.resolve())).replace("\\", "/")
+    except Exception:
+        return str(path)
+
+
 def _matches_filter(value: str | None, allowed: set[str]) -> bool:
     if not allowed:
         return True
@@ -197,7 +204,62 @@ def _choose_primary_baseline(
     )
 
 
-def _read_selection_from_summary_csv(
+def _build_run_row_from_summary_csv_row(
+    row: Mapping[str, Any],
+    *,
+    repo_root: Path,
+    context_dir: Path,
+    baseline_policies: set[str],
+    ai_policies: set[str],
+) -> Dict[str, Any]:
+    policy = str(row.get("policy") or "")
+    episodes = _to_int(row.get("episodes"))
+    max_steps = _to_int(row.get("max_steps"))
+    steps_total = None
+    if episodes is not None and max_steps is not None:
+        steps_total = int(episodes * max_steps)
+
+    results_dir_text = str(row.get("results_dir") or "").strip()
+    resolved_results_dir = (
+        _resolve_run_dir(results_dir_text, repo_root=repo_root, context_dir=context_dir)
+        if results_dir_text
+        else None
+    )
+
+    return {
+        "run_id": str(row.get("run_id") or results_dir_text or ""),
+        "policy": policy,
+        "policy_class": _policy_class(policy, baseline_policies=baseline_policies, ai_policies=ai_policies),
+        "controller_policy": str(row.get("controller_policy") or policy),
+        "controller_policy_class": str(
+            row.get("controller_policy_class")
+            or ("ai_enhanced" if policy in ai_policies else "traditional_baseline" if policy in baseline_policies else "other")
+        ),
+        "scenario": str(row.get("scenario") or ""),
+        "seed": _to_int(row.get("seed")),
+        "tag": str(row.get("tag") or ""),
+        "deterministic": _to_bool(row.get("deterministic")),
+        "episodes": episodes,
+        "max_steps": max_steps,
+        "results_dir": str(resolved_results_dir or results_dir_text or ""),
+        "created_at_utc": str(row.get("created_at_utc") or ""),
+        "routing_baseline": str(row.get("routing_baseline") or "min_hop_single_path"),
+        "routing_link_cost_model": str(row.get("routing_link_cost_model") or "unit"),
+        "routing_forwarding_model": str(row.get("routing_forwarding_model") or "single_shortest_path"),
+        "routing_path_split": str(row.get("routing_path_split") or "single_path"),
+        "steps_total": steps_total,
+        "energy_kwh": _to_float(row.get("energy_kwh_total_mean") or row.get("energy_kwh_mean")),
+        "delivered_traffic": _to_float(row.get("delivered_total_mean") or row.get("delivered_traffic_mean")),
+        "dropped_traffic": _to_float(row.get("dropped_total_mean") or row.get("dropped_traffic_mean")),
+        "avg_delay_ms": _to_float(row.get("avg_delay_ms_mean")),
+        "avg_path_latency_ms": _to_float(row.get("avg_path_latency_ms_mean")),
+        "qos_violation_rate": _to_float(row.get("qos_violation_rate_mean") or row.get("qos_violation_rate")),
+        "qos_violation_count": _to_float(row.get("qos_violation_count_mean") or row.get("qos_violation_count")),
+        "carbon_g": _to_float(row.get("carbon_g_total_mean") or row.get("carbon_g_mean")),
+    }
+
+
+def _load_run_rows_from_summary_csv(
     summary_csv: Path,
     *,
     repo_root: Path,
@@ -205,8 +267,10 @@ def _read_selection_from_summary_csv(
     scenario_filter: set[str],
     policy_filter: set[str],
     deterministic_filter: bool | None,
-) -> List[Path]:
-    selected: List[Path] = []
+    baseline_policies: set[str],
+    ai_policies: set[str],
+) -> List[Dict[str, Any]]:
+    run_rows: List[Dict[str, Any]] = []
     seen: set[str] = set()
     with summary_csv.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -223,16 +287,30 @@ def _read_selection_from_summary_csv(
             row_det = _to_bool(row.get("deterministic"))
             if deterministic_filter is not None and row_det is not None and row_det != deterministic_filter:
                 continue
+
             results_dir = str(row.get("results_dir") or "").strip()
-            if not results_dir:
+            resolved = (
+                _resolve_run_dir(results_dir, repo_root=repo_root, context_dir=summary_csv.parent)
+                if results_dir
+                else None
+            )
+            dedupe_key = str(resolved or row.get("run_id") or "")
+            if dedupe_key in seen:
                 continue
-            resolved = _resolve_run_dir(results_dir, repo_root=repo_root, context_dir=summary_csv.parent)
-            key = str(resolved)
-            if key in seen:
-                continue
-            seen.add(key)
-            selected.append(resolved)
-    return selected
+            seen.add(dedupe_key)
+
+            if resolved is not None and resolved.exists():
+                run_row = _extract_run_metrics(resolved, baseline_policies=baseline_policies, ai_policies=ai_policies)
+            else:
+                run_row = _build_run_row_from_summary_csv_row(
+                    row,
+                    repo_root=repo_root,
+                    context_dir=summary_csv.parent,
+                    baseline_policies=baseline_policies,
+                    ai_policies=ai_policies,
+                )
+            run_rows.append(run_row)
+    return run_rows
 
 
 def _scan_authoritative_run_dirs(
@@ -1041,16 +1119,18 @@ def main(argv: Sequence[str] | None = None) -> None:
         summary_csv = _resolve_run_dir(str(args.summary_csv), repo_root=repo_root)
         if not summary_csv.exists():
             raise SystemExit(f"--summary-csv does not exist: {summary_csv}")
-        selected_run_dirs = _read_selection_from_summary_csv(
+        run_rows = _load_run_rows_from_summary_csv(
             summary_csv,
             repo_root=repo_root,
             tag_filter=args.tag,
             scenario_filter=scenario_filter,
             policy_filter=policy_filter,
             deterministic_filter=args.deterministic,
+            baseline_policies=baseline_policies,
+            ai_policies=ai_policies,
         )
         source_mode = "summary_csv"
-        source_description = str(summary_csv)
+        source_description = _display_path(summary_csv, repo_root=repo_root)
     else:
         results_dir = _resolve_run_dir(str(args.results_dir), repo_root=repo_root)
         if not results_dir.exists():
@@ -1062,16 +1142,15 @@ def main(argv: Sequence[str] | None = None) -> None:
             policy_filter=policy_filter,
             deterministic_filter=args.deterministic,
         )
+        run_rows = [
+            _extract_run_metrics(run_dir, baseline_policies=baseline_policies, ai_policies=ai_policies)
+            for run_dir in selected_run_dirs
+        ]
         source_mode = "scan"
-        source_description = str(results_dir)
+        source_description = _display_path(results_dir, repo_root=repo_root)
 
-    if not selected_run_dirs:
+    if not run_rows:
         raise SystemExit("No runs matched the requested filters.")
-
-    run_rows = [
-        _extract_run_metrics(run_dir, baseline_policies=baseline_policies, ai_policies=ai_policies)
-        for run_dir in selected_run_dirs
-    ]
     run_rows = [row for row in run_rows if row.get("policy") and row.get("scenario")]
     if not run_rows:
         raise SystemExit("No valid run artifacts were found after loading run metadata.")

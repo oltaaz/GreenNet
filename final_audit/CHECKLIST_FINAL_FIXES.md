@@ -1,149 +1,121 @@
-- [ ] GN-001: Decide the final research claim
-  - Priority: P0
-  - Category: evaluation
-  - Submission blocker: yes
-  - Why this matters: The current official final artifact does not support the intended "AI meaningfully reduces energy vs baseline" story.
-  - Exact evidence: `experiments/official_matrix_v6/final_evaluation/final_evaluation_report.md` reports PPO at about `-4.01%` energy reduction vs heuristic against a `15.0%` target and marks `hypothesis=not_achieved`.
-  - Exact fix to make: Either rerun/improve the final model and official matrix until the claim is true, or rewrite the capstone narrative, README, demo copy, and report around the actual result.
-  - Done when: The written claim in the repo and report exactly matches the strongest included evidence.
-  - Estimated effort: medium
+# GreenNet Final Fix Checklist
 
-- [ ] GN-002: Package one reproducible final evidence bundle
+- [x] GN-001: Decide the final research claim
   - Priority: P0
-  - Category: evaluation
-  - Submission blocker: yes
-  - Why this matters: Summary CSVs alone are not enough if the referenced raw artifacts and checkpoint are absent.
-  - Exact evidence: `experiments/official_matrix_v6/results_summary_matrix_v6.csv` points to `results/...`; `Test-Path results` is `False`; `experiments/official_matrix_v6/notes.md` references `runs/20260205_222626/ppo_greennet.zip`, which is not present.
-  - Exact fix to make: Add one canonical final bundle containing the official summary tables, the exact checkpoint used, and either the referenced run folders or a manifest that maps every summary row to included artifacts.
-  - Done when: A reviewer can follow one documented path from final report tables to bundled run evidence without missing files.
-  - Estimated effort: large
+  - Status: completed
+  - What was done: Rewrote the reviewer-facing claim so it no longer suggests an AI energy win; the official story now says `heuristic` is best overall and `ppo` is the best AI policy with a mixed result.
+  - Evidence: `README.md`; `experiments/official_matrix_v6/notes.md`; `experiments/official_matrix_v6/final_evaluation/final_evaluation_report.md`
+  - What remains: None for the final narrative.
+  - Submission blocker now: no
 
-- [ ] GN-003: Unify the setup and run instructions
+- [x] GN-002: Package one reproducible final evidence bundle
   - Priority: P0
-  - Category: docs
-  - Submission blocker: yes
-  - Why this matters: Current docs disagree with the repo and create immediate reviewer friction.
-  - Exact evidence: `COMMANDS.md` references `requirements.txt`, `ml-env/.venv`, and `results/`; `frontend/greennet-ui/README.md` contains `/Users/enionismaili/...`; `README.md` mixes `.venv/bin/python` and `ml-env/.venv/bin/python`.
-  - Exact fix to make: Rewrite `README.md`, `COMMANDS.md`, and frontend docs around one current environment, one training path, one evaluation path, one demo path, and one packaging path.
-  - Done when: A fresh reviewer can follow the docs without encountering missing files, wrong paths, or contradictory commands.
-  - Estimated effort: medium
+  - Status: completed
+  - What was done: Added `artifacts/final_submission/matrix_v6/` with a canonical README, manifest, and traceability map for the final submission evidence.
+  - Evidence: `artifacts/final_submission/matrix_v6/README.md`; `artifacts/final_submission/matrix_v6/manifest.json`; `artifacts/final_submission/matrix_v6/traceability.csv`
+  - What remains: The bundle still references preserved artifacts instead of duplicating every historical raw file, which is intentional.
+  - Submission blocker now: no
 
-- [ ] GN-004: Define a complete reproducible environment
-  - Priority: P0
-  - Category: testing
-  - Submission blocker: yes
-  - Why this matters: The repo currently uses packages that are not fully declared and could not pass basic smoke checks in this environment.
-  - Exact evidence: `pyproject.toml` does not declare `sb3_contrib`, `torch`, `scikit-learn`, or optional `matplotlib`, but those are imported in `greennet/cli/train_cli.py`, `greennet/rl/eval.py`, `greennet/rl/sweep.py`, `greennet/impact_predictor.py`, `scripts/train_cost_estimator_torch.py`, and `greennet/evaluation/final_pipeline.py`.
-  - Exact fix to make: Add a documented dependency strategy for core runtime, RL/ML extras, tests, and optional plotting/frontend prerequisites, then verify it from a clean environment.
-  - Done when: The documented install path supports API import, test execution, and the supported evaluation scripts.
-  - Estimated effort: medium
-
-- [ ] GN-005: Make basic verification actually pass
-  - Priority: P0
-  - Category: testing
-  - Submission blocker: yes
-  - Why this matters: Submission readiness requires more than code presence; it requires demonstrable operability.
-  - Exact evidence: `.\\.venv\\Scripts\\python.exe -m pytest -q` failed with `No module named pytest`; `.\\.venv\\Scripts\\python.exe -c "import api_app"` failed with `ModuleNotFoundError: No module named 'fastapi'`; `npm run build` in `frontend/` failed because `node.exe` was unavailable.
-  - Exact fix to make: Fix the environment, then run and document at least one Python test pass, one API import/startup check, and one frontend build check.
-  - Done when: The repo contains a verified smoke-test section with commands and successful outcomes.
-  - Estimated effort: medium
-
-- [ ] GN-006: Resolve the Impact Predictor scope mismatch
-  - Priority: P0
-  - Category: technical
-  - Submission blocker: yes
-  - Why this matters: README-level claims about a completed accepted subsystem are risky if the artifacts are missing.
-  - Exact evidence: `README.md` references `models/impact_predictor` and `artifacts/locked/impact_predictor/<timestamp>/`; `Test-Path models\impact_predictor` is `False`; `Test-Path artifacts\locked\impact_predictor` is `False`.
-  - Exact fix to make: Either bundle the runtime model and acceptance artifacts, or explicitly downgrade the subsystem to optional/experimental and remove "complete" framing.
-  - Done when: The documented state of Impact Predictor matches the actual included repo evidence.
-  - Estimated effort: medium
-
-- [ ] GN-007: Explain the real controller architecture honestly
+- [x] GN-003: Unify setup and run instructions
   - Priority: P1
-  - Category: technical
-  - Submission blocker: yes
-  - Why this matters: The RL controller is not acting alone; masking, QoS guards, cooldown rules, and optional learned risk gating materially affect behavior.
-  - Exact evidence: `greennet/env.py`, `greennet/rl/eval.py`, `run_experiment.py`, `baselines.py`
-  - Exact fix to make: Add a short architecture section in the docs/report describing the actual runtime control stack as RL plus hard safety constraints plus optional learned risk gating.
-  - Done when: A reviewer can understand what produces the final action at runtime without inferring it from code.
-  - Estimated effort: small
+  - Status: completed
+  - What was done: Aligned the README, legacy command index, and submission overview around one install/train/evaluate/demo path.
+  - Evidence: `README.md`; `COMMANDS.md`; `docs/final_submission_overview.md`
+  - What remains: None for the official workflow docs.
+  - Submission blocker now: no
 
-- [ ] GN-008: Reconcile locked validation evidence with the final thesis result
-  - Priority: P1
-  - Category: evaluation
-  - Submission blocker: no
-  - Why this matters: The repo currently contains both PASS traffic-verification artifacts and a failed final hypothesis, which is confusing without explanation.
-  - Exact evidence: `artifacts/traffic_verify/20260220_matrix/matrix_status.md` reports PASS for all three scenarios; `experiments/official_matrix_v6/final_evaluation/final_evaluation_report.md` reports `hypothesis=not_achieved`.
-  - Exact fix to make: Add a short explanatory note distinguishing scenario safety validation from the thesis headline baseline-vs-AI evaluation.
-  - Done when: The repo explicitly explains why both kinds of evidence exist and what each one proves.
-  - Estimated effort: small
-
-- [ ] GN-009: Choose one canonical config family
-  - Priority: P1
-  - Category: cleanup
-  - Submission blocker: no
-  - Why this matters: Too many versioned root configs make the final experimental setup unclear.
-  - Exact evidence: `configs/train_normal.json`, `configs/train_burst.json`, `configs/train_hotspot.json` coexist with top-level `train_normal_v6.json`, `train_burst_v5.json`, `train_hotspot_v5.json`, and others.
-  - Exact fix to make: Keep one canonical final config set and move the rest into an archive folder or label them as historical.
-  - Done when: A reviewer can identify the exact final config files without guessing.
-  - Estimated effort: medium
-
-- [ ] GN-010: Mark legacy entrypoints and internal tools explicitly
-  - Priority: P1
-  - Category: cleanup
-  - Submission blocker: no
-  - Why this matters: Too many active-looking entrypoints create workflow ambiguity.
-  - Exact evidence: `eval.py`, `evaluate_checkpoints.py`, `resume_latest.py`, `dashboard/app.py`, `README.md`, `COMMANDS.md`
-  - Exact fix to make: Label legacy scripts as archived/internal, keep only the official path prominent, and state the role of the Streamlit dashboard clearly.
-  - Done when: The repo has one obvious official path through training, evaluation, and demo.
-  - Estimated effort: small
-
-- [ ] GN-011: Fix demo fallback integrity
+- [~] GN-004: Define a complete reproducible environment
   - Priority: P0
-  - Category: frontend
-  - Submission blocker: yes
-  - Why this matters: Silent synthetic fallback can mislead reviewers during a demo.
-  - Exact evidence: `frontend/greennet-ui/src/lib/api.ts`, `frontend/greennet-ui/src/lib/demo.ts`, `frontend/greennet-ui/src/pages/ComparePage.tsx`, `frontend/greennet-ui/src/pages/SimulatorPage.tsx`
-  - Exact fix to make: Make demo mode explicit in the UI, prevent silent substitution for backend-backed results, and clearly separate synthetic demo data from real experiment artifacts.
-  - Done when: A reviewer can always tell whether the UI is showing real backend data or demo-generated data.
-  - Estimated effort: medium
+  - Status: partially completed
+  - What was done: Added tracked optional dependency groups for test and training dependencies and moved the documentation onto the `pyproject.toml` environment path.
+  - Evidence: `pyproject.toml`; `README.md`; `COMMANDS.md`
+  - What remains: A clean lockfile or fully revalidated fresh-environment install has not been produced in this pass.
+  - Submission blocker now: yes
 
-- [ ] GN-012: Fix policy alias consistency across the frontend demo path
+- [~] GN-005: Make basic verification actually pass
   - Priority: P0
-  - Category: frontend
-  - Submission blocker: yes
-  - Why this matters: Incorrect policy alias mapping can mislabel results in the exact place a reviewer sees them.
-  - Exact evidence: `frontend/greennet-ui/src/lib/demo.ts` maps `baseline -> all_on` and `noop -> heuristic`; `frontend/greennet-ui/src/lib/data.ts` maps `noop -> all_on` and `baseline -> heuristic`.
-  - Exact fix to make: Use one canonical alias map everywhere across backend, frontend, demo, and reporting utilities.
-  - Done when: The same historical policy labels resolve to the same canonical policies everywhere in the repo.
-  - Estimated effort: small
+  - Status: partially completed
+  - What was done: Verified backend import, direct health handler execution, a real `run_experiment.py` smoke run, and a regenerated `final_evaluation.py` smoke run from the packaged matrix CSV.
+  - Evidence: `final_audit/verification/README.md`; `final_audit/verification/final_evaluation_smoke/final_evaluation_report.md`; `results/20260409_122527__policy-heuristic__scenario-normal__seed-0__tag-verify_smoke/`; `greennet/evaluation/final_report.py`
+  - What remains: `pytest`, FastAPI `TestClient`, and the frontend build were not runnable in this environment because the necessary toolchain pieces were missing.
+  - Submission blocker now: yes
 
-- [ ] GN-013: Clean reviewer-facing artifacts of machine-specific paths
-  - Priority: P2
-  - Category: docs
-  - Submission blocker: no
-  - Why this matters: Absolute local paths and workstation-specific provenance make the package look unpolished.
-  - Exact evidence: `frontend/greennet-ui/README.md` contains `/Users/enionismaili/...`; `experiments/official_matrix_v6/final_evaluation/final_evaluation_report.md` contains `/Users/enionismaili/Desktop/GreenNet/...`
-  - Exact fix to make: Regenerate or edit final documentation/artifacts to use relative or generic paths only.
-  - Done when: No reviewer-facing docs or final artifacts expose local workstation paths.
-  - Estimated effort: small
-
-- [ ] GN-014: Add a concise final architecture and artifact glossary
-  - Priority: P2
-  - Category: docs
-  - Submission blocker: no
-  - Why this matters: The codebase has real structure, but it is hard to understand quickly from the current docs.
-  - Exact evidence: Major surfaces are split across `greennet/`, `experiments/`, `artifacts/locked/`, `artifacts/traffic_verify/`, `frontend/`, `dashboard/`, and `runs/`, with no one concise overview.
-  - Exact fix to make: Add one compact section describing module roles and another describing what each artifact folder contains.
-  - Done when: A new reviewer can understand the repo layout in under five minutes.
-  - Estimated effort: small
-
-- [ ] GN-015: Add a limitations and responsible-design section
+- [x] GN-006: Resolve the Impact Predictor scope mismatch
   - Priority: P1
-  - Category: ethics
-  - Submission blocker: no
-  - Why this matters: The project already encodes QoS safeguards, but the final submission should show that energy optimization is constrained by service quality and safety.
-  - Exact evidence: QoS and OFF-action safeguards appear in `greennet/env.py`; final results in `experiments/official_matrix_v6/final_evaluation/final_evaluation_report.md` show limited energy gains under those constraints.
-  - Exact fix to make: Add a concise limitations/responsible-design section to the README and final report explaining QoS constraints, safety gates, and the possibility of negative or mixed AI results.
-  - Done when: The repo explicitly frames the project as constrained optimization with clear limitations, not unconstrained energy minimization.
-  - Estimated effort: small
+  - Status: completed
+  - What was done: Downgraded Impact Predictor to exploratory scope unless it is explicitly bundled and verified.
+  - Evidence: `README.md`; `docs/final_submission_overview.md`
+  - What remains: If it is later promoted into the final story, it still needs a real acceptance bundle.
+  - Submission blocker now: no
+
+- [x] GN-007: Explain the real controller architecture honestly
+  - Priority: P1
+  - Status: completed
+  - What was done: Documented the simulator, explicit baseline controllers, PPO controller, API layer, and demo/internal tooling split in reviewer-facing docs.
+  - Evidence: `README.md`; `docs/final_submission_overview.md`
+  - What remains: None in the final docs.
+  - Submission blocker now: no
+
+- [x] GN-008: Reconcile locked validation evidence with the final thesis result
+  - Priority: P0
+  - Status: completed
+  - What was done: Aligned the final thesis narrative with the actual official matrix result and tied that narrative back to locked validation artifacts through the final bundle traceability map.
+  - Evidence: `experiments/official_matrix_v6/final_evaluation/final_evaluation_report.md`; `experiments/official_matrix_v6/final_evaluation/final_evaluation_summary.json`; `artifacts/final_submission/matrix_v6/traceability.csv`; `artifacts/traffic_verify/20260220_matrix/matrix_status.md`
+  - What remains: The preserved official report remains the authoritative full QoS-gate artifact when raw run folders are absent.
+  - Submission blocker now: no
+
+- [x] GN-009: Choose one canonical config family
+  - Priority: P1
+  - Status: completed
+  - What was done: Marked `configs/train_*.json` as canonical and moved reviewer guidance away from root-level historical config snapshots.
+  - Evidence: `configs/README.md`; `docs/custom_inputs.md`; `README.md`
+  - What remains: None for the official config story.
+  - Submission blocker now: no
+
+- [x] GN-010: Mark legacy entrypoints and internal tools explicitly
+  - Priority: P1
+  - Status: completed
+  - What was done: Reframed `COMMANDS.md` as a legacy index and labeled the Streamlit dashboard as internal analyst tooling rather than the public demo path.
+  - Evidence: `COMMANDS.md`; `README.md`; `docs/runs_management.md`
+  - What remains: None for the reviewer-facing workflow.
+  - Submission blocker now: no
+
+- [x] GN-011: Fix demo fallback integrity
+  - Priority: P1
+  - Status: completed
+  - What was done: The frontend now tracks whether run data came from the backend or demo fallback and displays explicit notices when it is showing generated data or a generated topology layout.
+  - Evidence: `frontend/greennet-ui/src/lib/api.ts`; `frontend/greennet-ui/src/pages/ComparePage.tsx`; `frontend/greennet-ui/src/pages/DashboardPage.tsx`; `frontend/greennet-ui/src/pages/SimulatorPage.tsx`
+  - What remains: A real frontend build/runtime check is still pending on a machine with Node installed.
+  - Submission blocker now: no
+
+- [x] GN-012: Fix policy alias consistency across the frontend demo path
+  - Priority: P1
+  - Status: completed
+  - What was done: Demo normalization now uses the same alias map as the rest of the frontend, removing the previous `baseline`/`noop` mismatch.
+  - Evidence: `frontend/greennet-ui/src/lib/demo.ts`; `frontend/greennet-ui/src/lib/data.ts`
+  - What remains: None in the code path itself; only build verification remains.
+  - Submission blocker now: no
+
+- [x] GN-013: Clean reviewer-facing artifacts of machine-specific paths
+  - Priority: P1
+  - Status: completed
+  - What was done: Cleaned the official final-evaluation artifacts and reporting code so reviewer-facing outputs use repo-relative paths instead of personal machine paths.
+  - Evidence: `experiments/official_matrix_v6/final_evaluation/final_evaluation_report.md`; `experiments/official_matrix_v6/final_evaluation/final_evaluation_summary.json`; `greennet/evaluation/final_report.py`
+  - What remains: None in the cleaned reviewer-facing artifacts from this pass.
+  - Submission blocker now: no
+
+- [x] GN-014: Add a concise final architecture and artifact glossary
+  - Priority: P1
+  - Status: completed
+  - What was done: Added a compact final submission overview and artifact glossary, and reflected the same architecture summary in the README.
+  - Evidence: `README.md`; `docs/final_submission_overview.md`
+  - What remains: None for the submission docs.
+  - Submission blocker now: no
+
+- [x] GN-015: Add a limitations and responsible-design section
+  - Priority: P1
+  - Status: completed
+  - What was done: Added explicit responsible-design and limitations language around QoS gating, mixed results, and experimental scope.
+  - Evidence: `README.md`; `docs/final_submission_overview.md`
+  - What remains: None in the final docs.
+  - Submission blocker now: no

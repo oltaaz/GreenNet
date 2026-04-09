@@ -2,7 +2,7 @@
 
 ## Headline
 - Generated at: `2026-03-21T23:48:55.758311+00:00`
-- Source selection: `/Users/enionismaili/Desktop/GreenNet/experiments/official_matrix_v6/results_summary_matrix_v6.csv`
+- Source selection: `experiments/official_matrix_v6/results_summary_matrix_v6.csv`
 - Selected runs: `90`
 - Primary baseline policy: `heuristic`
 - Baseline policies in scope: `all_on, heuristic`
@@ -42,3 +42,9 @@
 | all_on | baseline | 10 | 0.020000 | -4.35% | 7840.986 | 8432.871 | 4931.864 | 16.349 | 0.7338 | 11006.50 | 0.087375 | acceptable | not_achieved |
 | heuristic [best] | baseline | 10 | 0.019167 | 0.00% | 7708.561 | 8572.374 | 4984.862 | 16.563 | 0.7344 | 11015.40 | 0.083735 | acceptable | not_achieved |
 | ppo [best-ai] | ai | 10 | 0.019969 | -4.19% | 7836.392 | 8433.049 | 4933.316 | 16.367 | 0.7335 | 11003.20 | 0.086977 | acceptable | not_achieved |
+
+## Interpretation
+- The preserved official matrix does not support an AI energy win.
+- `heuristic` is the best overall policy in the final comparison.
+- `ppo` is the best AI policy, but it is still worse than `heuristic` on energy by 4.01% in the overall comparison.
+- The submission claim should be framed as a reproducible energy-aware evaluation framework with a mixed AI result, not as a successful energy-reduction thesis result.

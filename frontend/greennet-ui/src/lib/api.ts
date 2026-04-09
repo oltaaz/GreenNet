@@ -680,6 +680,13 @@ type ListRunsOptions = {
   limit?: number;
 };
 
+export type RunCatalogSource = "backend" | "demo";
+
+export type RunCatalog = {
+  runs: RunSummary[];
+  source: RunCatalogSource;
+};
+
 function buildRunsQuery(options: ListRunsOptions): string {
   const params = new URLSearchParams();
   params.set("limit", String(options.limit ?? 200));
@@ -700,7 +707,7 @@ function buildRunsQuery(options: ListRunsOptions): string {
   return `?${params.toString()}`;
 }
 
-export async function listRuns(options: ListRunsOptions = {}): Promise<RunSummary[]> {
+export async function listRunsWithSource(options: ListRunsOptions = {}): Promise<RunCatalog> {
   const query = buildRunsQuery(options);
   const requests: Array<() => Promise<unknown>> = [
     () => requestJson<unknown>(`/api/runs${query}`),
@@ -713,14 +720,18 @@ export async function listRuns(options: ListRunsOptions = {}): Promise<RunSummar
       const payload = await load();
       const normalized = toArrayPayload(payload).map(normalizeRun).filter((run) => run.run_id);
       if (normalized.length > 0) {
-        return normalized;
+        return { runs: normalized, source: "backend" };
       }
     } catch {
       // Try the next source.
     }
   }
 
-  return listDemoRuns();
+  return { runs: listDemoRuns(), source: "demo" };
+}
+
+export async function listRuns(options: ListRunsOptions = {}): Promise<RunSummary[]> {
+  return (await listRunsWithSource(options)).runs;
 }
 
 export async function getOfficialLockedResults(scenarios: string[] = []): Promise<OfficialLockedResult[]> {

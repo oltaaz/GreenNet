@@ -1,6 +1,6 @@
 # Runs Management
 
-Greennet training is continuous, so we keep curated runs as thesis evidence while pruning bulk artifacts. The goal is to preserve configs, logs, and robustness outputs for traceability while safely removing large model files or tiny throwaway runs.
+GreenNet training is continuous, so we keep curated runs as thesis evidence while pruning bulk artifacts. The goal is to preserve configs, logs, and robustness outputs for traceability while safely removing large model files or tiny throwaway runs. For the final submission, cite the curated matrix and locked verification artifacts first, not ad hoc run folders.
 
 ## Locked scenario artifacts
 Use scenario-specific locked folders for reproducibility:
@@ -24,6 +24,8 @@ scripts/lock_run.sh --scenario normal --run-id <RUN_ID>
 scripts/eval_matrix.sh --model runs/<RUN_ID>/ppo_greennet.zip --lock-scenario normal --episodes 10
 ```
 
+If you need a reviewer-facing story, pair these locked folders with the official matrix in `experiments/official_matrix_v6/` and the traffic verification bundle in `artifacts/traffic_verify/20260220_matrix/`.
+
 ## Generate training history
 Create an evidence summary across all runs:
 
@@ -42,6 +44,15 @@ Core run persistence now also writes to SQLite.
 - backfill older artifact-only runs: `python3 -m greennet.persistence backfill --base both`
 
 See `docs/run_database.md` for schema scope, migration behavior, and backend integration notes.
+
+## Canonical submission bundle
+
+The final evidence bundle for this repository is not a single `results/` tree. Use:
+
+- `experiments/official_matrix_v6/results_summary_matrix_v6.csv`
+- `experiments/official_matrix_v6/final_evaluation/*`
+- `artifacts/traffic_verify/20260220_matrix/*`
+- locked run folders under `artifacts/locked/`
 
 ## Pruning runs safely
 The pruning script is dry-run by default and prints an action plan (KEEP / STRIP / DELETE). Use `--apply` to perform changes. STRIP removes model artifacts only; DELETE removes tiny empty runs (when enabled).

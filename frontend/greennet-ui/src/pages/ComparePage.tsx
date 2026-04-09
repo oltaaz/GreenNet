@@ -8,8 +8,9 @@ import {
   getOfficialLockedResults,
   getRunPerStep,
   getRunSummary,
-  listRuns,
+  listRunsWithSource,
   startRun,
+  type RunCatalogSource,
 } from "../lib/api";
 import {
   bestAiScenarioRows,
@@ -26,7 +27,6 @@ import {
   normalizePolicy,
   statusTone,
 } from "../lib/data";
-import { isDemoRunId } from "../lib/demo";
 import type {
   FinalEvaluationReport,
   FinalEvaluationSummaryRow,
@@ -62,6 +62,7 @@ export default function ComparePage() {
   const [scenario, setScenario] = useState("normal");
   const [loadingComparison, setLoadingComparison] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [runCatalogSource, setRunCatalogSource] = useState<RunCatalogSource>("backend");
   const [comparisonError, setComparisonError] = useState("");
   const [reportError, setReportError] = useState("");
   const [rowsByPolicy, setRowsByPolicy] = useState<Record<string, PerStepRow[]>>({});
@@ -69,19 +70,21 @@ export default function ComparePage() {
   const [finalReport, setFinalReport] = useState<FinalEvaluationReport | null>(null);
   const [officialResults, setOfficialResults] = useState<OfficialLockedResult[]>([]);
 
-  const demoMode = runs.length > 0 && runs.every((run) => isDemoRunId(run.run_id));
-
   useEffect(() => {
     let alive = true;
 
     async function loadRuns() {
       try {
-        const runItems = await listRuns();
+        const catalog = await listRunsWithSource();
         if (alive) {
-          setRuns(runItems);
+          setRuns(catalog.runs);
+          setRunCatalogSource(catalog.source);
         }
       } catch {
-        // Non-blocking in reporting mode.
+        if (alive) {
+          setRuns([]);
+          setRunCatalogSource("backend");
+        }
       }
     }
 
@@ -270,10 +273,10 @@ export default function ComparePage() {
 
       {loadingReport ? <LoadingNotice title="Loading reporting context" description="Reading final evaluation and scenario validation bundles." /> : null}
       {reportError ? <InfoNotice title="Final Evaluation Unavailable" description={reportError} /> : null}
-      {demoMode ? (
+      {runCatalogSource === "demo" ? (
         <InfoNotice
           title="Demo Data Mode"
-          description="Backend runs were not found, so live policy comparison falls back to generated traces. Final evaluation and official validation still use backend artifacts when available."
+          description="The backend run catalog was unavailable, so live policy comparison is using generated traces. Final evaluation and official validation still use backend artifacts when available."
         />
       ) : null}
 

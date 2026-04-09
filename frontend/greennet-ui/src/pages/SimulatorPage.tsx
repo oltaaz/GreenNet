@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import SimulatorCanvas from "../components/SimulatorCanvas";
 import { ErrorNotice, InfoNotice, LoadingNotice } from "../components/StatusState";
-import { getRunPerStep, getSteps, getTopology, listRuns, startRun } from "../lib/api";
+import { getRunPerStep, getSteps, getTopology, listRunsWithSource, startRun, type RunCatalogSource } from "../lib/api";
 import {
   fallbackTopology,
   formatPolicyLabel,
@@ -33,6 +33,7 @@ export default function SimulatorPage() {
   const [selectedRunId, setSelectedRunId] = useState("");
   const [topology, setTopology] = useState<TopologyData>(fallbackTopology("simulator"));
   const [timeline, setTimeline] = useState<StepState[]>([]);
+  const [runCatalogSource, setRunCatalogSource] = useState<RunCatalogSource>("backend");
 
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
@@ -42,19 +43,22 @@ export default function SimulatorPage() {
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  const [topologyFallbackNotice, setTopologyFallbackNotice] = useState("");
 
   useEffect(() => {
     let alive = true;
 
     async function loadRuns() {
       try {
-        const runItems = await listRuns();
+        const catalog = await listRunsWithSource();
         if (alive) {
-          setRuns(runItems);
+          setRuns(catalog.runs);
+          setRunCatalogSource(catalog.source);
         }
       } catch (apiError) {
         if (alive) {
           setError(apiError instanceof Error ? apiError.message : "Failed to load runs");
+          setRunCatalogSource("backend");
         }
       }
     }
@@ -87,6 +91,7 @@ export default function SimulatorPage() {
     async function loadTimeline() {
       setLoading(true);
       setError("");
+      setTopologyFallbackNotice("");
 
       try {
         const [rowsRaw, topo, stepsFromApi] = await Promise.all([
@@ -118,11 +123,17 @@ export default function SimulatorPage() {
         setTopology(graph);
         setTimeline(mergedTimeline);
         setCurrentStep(0);
+        if (topo == null && alive) {
+          setTopologyFallbackNotice(
+            "The backend did not return a topology for this run, so the simulator is showing a generated layout derived from the run identifier.",
+          );
+        }
       } catch (apiError) {
         if (alive) {
           setError(apiError instanceof Error ? apiError.message : "Failed to load simulator timeline");
           setTimeline([]);
           setTopology(fallbackTopology(`${selectedRunId}-${policy}-fallback`));
+          setTopologyFallbackNotice("");
         }
       } finally {
         if (alive) {
@@ -144,9 +155,9 @@ export default function SimulatorPage() {
 
     try {
       const started = await startRun({ policy, scenario: "normal", seed: 42, steps: 300 });
-      const refreshed = await listRuns();
+      const catalog = await listRunsWithSource();
       setRuns(
-        upsertRun(refreshed, {
+        upsertRun(catalog.runs, {
           run_id: started.run_id,
           policy,
           scenario: "normal",
@@ -154,6 +165,7 @@ export default function SimulatorPage() {
           tag: "dashboard",
         }),
       );
+      setRunCatalogSource(catalog.source);
       setSelectedRunId(started.run_id);
     } catch (apiError) {
       setError(apiError instanceof Error ? apiError.message : "Could not start run from simulator");
@@ -230,12 +242,13 @@ export default function SimulatorPage() {
 
       {loading ? <LoadingNotice title="Loading simulator" description="Fetching topology and per-step states." /> : null}
       {error ? <ErrorNotice title="Simulator Error" description={error} /> : null}
-      {demoMode ? (
+      {runCatalogSource === "demo" ? (
         <InfoNotice
           title="Demo Data Mode"
-          description="This run is generated locally because backend run data is missing or unavailable."
+          description="The backend run catalog was unavailable, so the simulator is using generated demo runs."
         />
       ) : null}
+      {topologyFallbackNotice ? <InfoNotice title="Generated Topology Layout" description={topologyFallbackNotice} /> : null}
 
       <section className="simulator-layout">
         <div className="glass-card simulator-canvas-card">

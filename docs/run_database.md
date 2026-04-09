@@ -52,6 +52,7 @@ python3 -m greennet.persistence backfill --db-path /tmp/greennet.sqlite3
 - after artifact write, it upserts the completed run into SQLite
 - if SQLite persistence fails, the artifact write still succeeds and the run can be repaired later with `backfill`
 - the FastAPI backend now prefers SQLite for core run reads and falls back to files when a run has not been indexed yet
+- the final submission evidence should still cite the curated matrix and verification bundles rather than assuming every historical run has been indexed
 
 ## Incremental migration notes
 

@@ -18,7 +18,7 @@
 - burst, hotspot, normal
 
 ## Seeds
-- 0–9 (10 seeds)
+- 0-9 (10 seeds)
 
 ## Episodes / Steps
 - episodes: 50
@@ -26,6 +26,12 @@
 
 ## PPO model path
 - runs/20260205_222626/ppo_greennet.zip
+- Historical reference from the original matrix run; the checkpoint is not bundled in this checkout.
+
+## Canonical final bundle
+- artifacts/final_submission/matrix_v6/
+- Reviewer-facing package for the preserved official matrix evidence.
+- Final claim: heuristic is best overall, PPO is best AI, and the hypothesis gate is not achieved.
 
 ## Headline result
-- burst: reward ↑31.433, drops ↓376.999, energy ↑0.000704 | hotspot: reward ↑53.754, drops ↓308.447, energy ↑0.000803 | normal: reward ↑23.037, drops ↓139.325, energy ↑0.000803 | overall: reward ↑36.075, drops ↓274.924, energy ↑0.000770
+- burst: reward +31.433, drops -376.999, energy +0.000704 | hotspot: reward +53.754, drops -308.447, energy +0.000803 | normal: reward +23.037, drops -139.325, energy +0.000803 | overall: reward +36.075, drops -274.924, energy +0.000770

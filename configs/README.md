@@ -1,6 +1,6 @@
 # Scenario Training Configs
 
-Use these tracked configs for scenario-specific training runs:
+Use these tracked configs for scenario-specific training runs. This directory is the canonical config family for the final submission:
 
 - `configs/train_normal.json`
 - `configs/train_burst.json`
@@ -12,7 +12,7 @@ Example:
 python3 train.py --config configs/train_normal.json --timesteps 300000
 ```
 
-These files define both PPO hyperparameters and training-time env overrides (`env.*`), including `traffic_scenario` and scenario-specific traffic/reward knobs.
+These files define both PPO hyperparameters and training-time env overrides (`env.*`), including `traffic_scenario` and scenario-specific traffic/reward knobs. Prefer these files over the historical root-level `train_*.json` snapshots when describing the official workflow.
 
 Additional env overrides now supported for realistic inputs:
 
@@ -50,3 +50,5 @@ ones are:
 - `carbon_period_seconds`
 
 If omitted, GreenNet uses the lightweight defaults from `EnvConfig`.
+
+The final evaluation narrative should stay aligned with this config family and with the official matrix artifacts under `experiments/official_matrix_v6/`.

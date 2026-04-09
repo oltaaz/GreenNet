@@ -29,6 +29,7 @@ Resolution rules:
 - `traffic_path` overrides `traffic_name`
 - explicit topology inputs override random topology generation
 - explicit traffic inputs override `traffic_model` / `traffic_scenario`
+- when documenting the final submission, keep `configs/` as the canonical config family and treat root-level `train_*.json` files as historical snapshots
 
 Relative `topology_path` and `traffic_path` values in config files are resolved relative to the config file location.
 
@@ -50,7 +51,7 @@ Direct CLI usage:
 
 ```bash
 python3 run_experiment.py \
-  --policy noop \
+  --policy all_on \
   --scenario custom \
   --seed 17 \
   --steps 50 \
