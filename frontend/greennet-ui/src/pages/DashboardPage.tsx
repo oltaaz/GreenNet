@@ -16,6 +16,7 @@ import {
   startRun,
   type RunCatalogSource,
 } from "../lib/api";
+import { useBackendStatus } from "../hooks/useBackendStatus";
 import { isDemoRunId } from "../lib/demo";
 import {
   chartRows,
@@ -65,6 +66,7 @@ function upsertRun(runs: RunSummary[], nextRun: RunSummary): RunSummary[] {
 }
 
 export default function DashboardPage() {
+  const { status: backendStatus, message: backendMessage } = useBackendStatus();
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string>("");
   const [rows, setRows] = useState<PerStepRow[]>([]);
@@ -310,6 +312,7 @@ export default function DashboardPage() {
 
   const selectedRun = runs.find((run) => run.run_id === selectedRunId);
   const demoMode = runCatalogSource === "demo" || (selectedRun ? isDemoRunId(selectedRun.run_id) : false);
+  const backendOnline = backendStatus === "online";
   const activeOfficialScenario = (selectedRun?.scenario ?? "").toLowerCase();
   const highlightedOfficialResult =
     officialResults.find((item) => item.scenario === activeOfficialScenario) ?? null;
@@ -364,6 +367,11 @@ export default function DashboardPage() {
   }, [policySeries, timeData]);
 
   async function handleRun(): Promise<void> {
+    if (!backendOnline) {
+      setError(backendMessage);
+      return;
+    }
+
     const seedValue = seed === "" ? Number.NaN : Number(seed);
     const stepsValue = steps === "" ? Number.NaN : Number(steps);
 
@@ -430,6 +438,12 @@ export default function DashboardPage() {
 
       {loadingRuns ? <LoadingNotice title="Loading runs" description="Fetching available simulation outputs." /> : null}
       {error ? <ErrorNotice title="Data Error" description={error} /> : null}
+      {!backendOnline ? (
+        <InfoNotice
+          title="Live backend controls disabled"
+          description={`${backendMessage} Existing generated/demo content can still render, but starting new runs is disabled.`}
+        />
+      ) : null}
       {demoMode ? (
         <InfoNotice
           title="Demo Data Mode"
@@ -553,6 +567,8 @@ export default function DashboardPage() {
             seed={seed}
             steps={steps}
             loading={running}
+            backendOnline={backendOnline}
+            backendMessage={backendMessage}
             runId={selectedRunId}
             runs={runs}
             onPolicyChange={setPolicy}

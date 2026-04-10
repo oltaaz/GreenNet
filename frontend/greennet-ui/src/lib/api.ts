@@ -6,6 +6,7 @@
   FinalEvaluationSummaryRow,
   FinalEvaluationThresholds,
   LinkStateMap,
+  BackendHealth,
   OfficialLockedDeltaSummary,
   OfficialLockedEvalRow,
   OfficialLockedResult,
@@ -31,6 +32,17 @@ import {
 } from "./demo";
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+export const EXPECTED_BACKEND_URL = API_BASE_URL || "http://127.0.0.1:8000";
+
+export class BackendUnavailableError extends Error {
+  expectedUrl: string;
+
+  constructor(expectedUrl = EXPECTED_BACKEND_URL) {
+    super(`Backend API unavailable. Expected GreenNet FastAPI at ${expectedUrl}. Start the backend first.`);
+    this.name = "BackendUnavailableError";
+    this.expectedUrl = expectedUrl;
+  }
+}
 
 function withBase(path: string): string {
   if (!API_BASE_URL) {
@@ -40,15 +52,24 @@ function withBase(path: string): string {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(withBase(path), {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(withBase(path), {
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+      ...init,
+    });
+  } catch (error) {
+    throw new BackendUnavailableError();
+  }
 
   if (!response.ok) {
+    if ([502, 503, 504].includes(response.status)) {
+      throw new BackendUnavailableError();
+    }
     throw new Error(`${response.status} ${response.statusText}`);
   }
 
@@ -57,6 +78,19 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+export function isBackendUnavailableError(error: unknown): error is BackendUnavailableError {
+  return error instanceof BackendUnavailableError;
+}
+
+export async function getBackendHealth(): Promise<BackendHealth> {
+  const payload = await requestJson<Record<string, unknown>>("/api/health");
+  return {
+    status: toStringSafe(payload.status, "ok"),
+    apiBaseUrl: API_BASE_URL,
+    expectedBackendUrl: EXPECTED_BACKEND_URL,
+  };
 }
 
 function toNumber(value: unknown, fallback = 0): number {

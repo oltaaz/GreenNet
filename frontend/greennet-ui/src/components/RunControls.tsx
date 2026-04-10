@@ -7,6 +7,8 @@ type RunControlsProps = {
   seed: string;
   steps: string;
   loading?: boolean;
+  backendOnline?: boolean;
+  backendMessage?: string;
   runId?: string;
   runs?: RunSummary[];
   onPolicyChange: (value: string) => void;
@@ -32,6 +34,8 @@ export default function RunControls({
   seed,
   steps,
   loading,
+  backendOnline = true,
+  backendMessage = "",
   runId,
   runs,
   onPolicyChange,
@@ -45,6 +49,7 @@ export default function RunControls({
   const parsedSteps = steps === "" ? Number.NaN : Number(steps);
   const showLongRunWarning = Number.isFinite(parsedSteps) && parsedSteps >= 4000;
   const canRun =
+    backendOnline &&
     seed !== "" &&
     steps !== "" &&
     Number.isFinite(parsedSteps) &&
@@ -144,6 +149,13 @@ export default function RunControls({
         <div className="control-warning" role="status" aria-live="polite">
           <strong>High step count selected</strong>
           <p>Runs near the current 5000-step limit can take a bit longer to finish in the live dashboard.</p>
+        </div>
+      ) : null}
+
+      {!backendOnline ? (
+        <div className="control-warning offline" role="status" aria-live="polite">
+          <strong>Backend API unavailable</strong>
+          <p>{backendMessage || "Start the local FastAPI backend first to run experiments from the UI."}</p>
         </div>
       ) : null}
 

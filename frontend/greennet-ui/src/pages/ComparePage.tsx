@@ -12,6 +12,7 @@ import {
   startRun,
   type RunCatalogSource,
 } from "../lib/api";
+import { useBackendStatus } from "../hooks/useBackendStatus";
 import {
   bestAiScenarioRows,
   chartRows,
@@ -61,6 +62,7 @@ function ReportStat({ label, value, hint }: { label: string; value: string; hint
 }
 
 export default function ComparePage() {
+  const { status: backendStatus, message: backendMessage } = useBackendStatus();
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [seed, setSeed] = useState(42);
   const [steps, setSteps] = useState(300);
@@ -162,6 +164,11 @@ export default function ComparePage() {
   }
 
   async function handleRunComparison(): Promise<void> {
+    if (!backendOnline) {
+      setComparisonError(backendMessage);
+      return;
+    }
+
     setLoadingComparison(true);
     setComparisonError("");
 
@@ -256,6 +263,8 @@ export default function ComparePage() {
     }
   }, [finalReport]);
 
+  const backendOnline = backendStatus === "online";
+
   const headline = useMemo(() => {
     if (!bestAiOverall || !bestBaselineOverall) {
       return null;
@@ -288,6 +297,12 @@ export default function ComparePage() {
 
       {loadingReport ? <LoadingNotice title="Loading reporting context" description="Reading final evaluation and scenario validation bundles." /> : null}
       {reportError ? <InfoNotice title="Final Evaluation Unavailable" description={reportError} /> : null}
+      {!backendOnline ? (
+        <InfoNotice
+          title="Live comparison disabled"
+          description={`${backendMessage} Stored reporting artifacts can still load, but starting comparison runs is disabled until the backend is available.`}
+        />
+      ) : null}
       {runCatalogSource === "demo" ? (
         <InfoNotice
           title="Demo Data Mode"
@@ -577,7 +592,7 @@ export default function ComparePage() {
           <input type="number" min={1} value={steps} onChange={(event) => setSteps(Number(event.target.value))} />
         </label>
 
-        <button className="btn-primary" onClick={handleRunComparison} disabled={loadingComparison}>
+        <button className="btn-primary" onClick={handleRunComparison} disabled={loadingComparison || !backendOnline}>
           {loadingComparison ? "Loading..." : "Load Live Comparison"}
         </button>
       </section>

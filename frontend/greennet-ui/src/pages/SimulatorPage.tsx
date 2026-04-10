@@ -2,6 +2,7 @@
 import SimulatorCanvas from "../components/SimulatorCanvas";
 import { ErrorNotice, InfoNotice, LoadingNotice } from "../components/StatusState";
 import { getRunPerStep, getSteps, getTopology, listRunsWithSource, startRun, type RunCatalogSource } from "../lib/api";
+import { useBackendStatus } from "../hooks/useBackendStatus";
 import {
   fallbackTopology,
   formatPolicyLabel,
@@ -27,6 +28,7 @@ function upsertRun(runs: RunSummary[], nextRun: RunSummary): RunSummary[] {
 }
 
 export default function SimulatorPage() {
+  const { status: backendStatus, message: backendMessage } = useBackendStatus();
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [policy, setPolicy] = useState("ppo");
   const [selectedRunId, setSelectedRunId] = useState("");
@@ -149,6 +151,11 @@ export default function SimulatorPage() {
   }, [policy, selectedRunId]);
 
   async function handleStartPolicyRun(): Promise<void> {
+    if (!backendOnline) {
+      setError(backendMessage);
+      return;
+    }
+
     setRunning(true);
     setError("");
 
@@ -183,6 +190,7 @@ export default function SimulatorPage() {
     const run = runs.find((item) => item.run_id === selectedRunId);
     return run ? inferPolicy(run) : policy;
   }, [policy, runs, selectedRunId]);
+  const backendOnline = backendStatus === "online";
 
   const linkTelemetry = useMemo(() => {
     if (!step) {
@@ -239,6 +247,12 @@ export default function SimulatorPage() {
 
       {loading ? <LoadingNotice title="Loading simulator" description="Fetching topology and per-step states." /> : null}
       {error ? <ErrorNotice title="Simulator Error" description={error} /> : null}
+      {!backendOnline ? (
+        <InfoNotice
+          title="Run controls disabled"
+          description={`${backendMessage} Playback remains available for existing data, but starting a new policy run is disabled.`}
+        />
+      ) : null}
       {runCatalogSource === "demo" ? (
         <InfoNotice
           title="Demo Data Mode"
@@ -290,7 +304,7 @@ export default function SimulatorPage() {
             <button className="btn-primary" onClick={() => setPlaying((prev) => !prev)}>
               {playing ? "Pause" : "Play"}
             </button>
-            <button className="btn-muted" onClick={handleStartPolicyRun} disabled={running}>
+            <button className="btn-muted" onClick={handleStartPolicyRun} disabled={running || !backendOnline}>
               {running ? "Starting..." : "Run Policy"}
             </button>
           </div>

@@ -1,4 +1,5 @@
-﻿import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
+import { useBackendStatus } from "../hooks/useBackendStatus";
 
 const navItems = [
   { to: "/", label: "Home" },
@@ -9,6 +10,10 @@ const navItems = [
 ];
 
 export default function Navbar() {
+  const { status } = useBackendStatus();
+  const indicatorLabel =
+    status === "online" ? "Backend connected" : status === "checking" ? "Checking backend" : "Backend offline";
+
   return (
     <header className="top-nav glass-card">
       <div className="top-nav-inner">
@@ -25,6 +30,10 @@ export default function Navbar() {
         </Link>
 
         <nav className="top-links" aria-label="Primary">
+          <span className={`backend-indicator ${status}`.trim()}>
+            <span className="backend-indicator-dot" aria-hidden />
+            {indicatorLabel}
+          </span>
           {navItems.map((item) => (
             <NavLink
               key={item.to}

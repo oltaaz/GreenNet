@@ -165,6 +165,12 @@ export type StartRunParams = {
   steps: number;
 };
 
+export type BackendHealth = {
+  status: string;
+  apiBaseUrl: string;
+  expectedBackendUrl: string;
+};
+
 export type TopologyNode = {
   id: string;
   label?: string;
