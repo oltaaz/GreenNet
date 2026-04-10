@@ -1,0 +1,622 @@
+[device] torch.mps_available=True torch.cuda_available=False sb3_device=mps
+[train] saved env_config keys: ['base_capacity', 'base_latency_ms', 'blocked_action_penalty', 'calm_toggle_multiplier_off', 'debug_logs', 'decision_interval_steps', 'demand_max', 'demand_min', 'demand_norm_scale', 'directed', 'disable_off_actions', 'drop_penalty_lambda', 'edge_prob', 'enable_forecasting', 'energy_weight', 'flows_per_step', 'forecast_alpha', 'forecast_horizon_steps', 'global_toggle_cooldown_steps', 'initial_off_edges', 'initial_off_seed', 'max_emergency_on_toggles_per_episode', 'max_off_toggles_per_episode', 'max_steps', 'max_total_toggles_per_episode', 'max_util_off_allow_threshold', 'node_count', 'noop_bonus', 'normalize_drop', 'off_calm_steps_required', 'off_start_guard_decision_steps', 'off_toggle_penalty_scale', 'qos_guard_margin', 'qos_guard_margin_off', 'qos_guard_margin_on', 'qos_guard_penalty_scale', 'qos_min_volume', 'qos_target_norm_drop', 'qos_toggle_discount_on', 'qos_violation_penalty_scale', 'revert_penalty_scale', 'saturation_util_threshold', 'toggle_apply_penalty', 'toggle_attempt_penalty', 'toggle_cooldown_steps', 'toggle_off_penalty_scale', 'toggle_on_penalty_scale', 'toggle_penalty', 'top_k_edge_utils', 'topology_randomize', 'topology_seed', 'topology_seeds', 'traffic_avg_bursts_per_step', 'traffic_duration_range', 'traffic_elephant_size_range', 'traffic_hotspots', 'traffic_mice_size_range', 'traffic_model', 'traffic_p_elephant', 'traffic_scenario', 'traffic_scenario_duration', 'traffic_scenario_frequency', 'traffic_scenario_intensity', 'traffic_scenario_version', 'traffic_seed', 'traffic_spike_duration_range', 'traffic_spike_multiplier_range', 'traffic_spike_prob', 'util_block_threshold', 'util_unblock_threshold']
+[train] saved train_config keys: ['env', 'eval_seed', 'ppo', 'seed', 'topology_seed', 'total_timesteps', 'traffic_seed', 'train_seed']
+Using mps device
+[device] training MaskablePPO on: mps:0
+Progress:   4.0% [=-----------------------------] 1999/50000----------------------------------
+| rollout/           |           |
+|    ep_len_mean     | 1e+03     |
+|    ep_rew_mean     | -6.01e+03 |
+| time/              |           |
+|    fps             | 166       |
+|    iterations      | 1         |
+|    time_elapsed    | 12        |
+|    total_timesteps | 2048      |
+----------------------------------
+Progress:   8.0% [==----------------------------] 3999/50000-------------------------------------------
+| rollout/                |               |
+|    ep_len_mean          | 1e+03         |
+|    ep_rew_mean          | -5.87e+03     |
+| time/                   |               |
+|    fps                  | 161           |
+|    iterations           | 2             |
+|    time_elapsed         | 25            |
+|    total_timesteps      | 4096          |
+| train/                  |               |
+|    approx_kl            | 1.8894789e-06 |
+|    clip_fraction        | 0             |
+|    clip_range           | 0.2           |
+|    entropy_loss         | -0.00533      |
+|    explained_variance   | -6.15e-05     |
+|    learning_rate        | 0.0003        |
+|    loss                 | 4.91e+03      |
+|    n_updates            | 10            |
+|    policy_gradient_loss | -5.43e-05     |
+|    value_loss           | 1.01e+04      |
+-------------------------------------------
+[action_stats] steps=5000 applied=0.003 reverted=0.000 noop=0.997 invalid=0.000 blocked=0.000 (blocked: global=0.00 util=0.00 cooldown=0.00)
+Progress:  12.0% [===---------------------------] 5999/50000---------------------------------------------
+| action_stats/             |               |
+|    applied_frac           | 0.003         |
+|    blocked_cooldown_share | 0             |
+|    blocked_frac           | 0             |
+|    blocked_global_share   | 0             |
+|    blocked_util_share     | 0             |
+|    invalid_frac           | 0             |
+|    noop_frac              | 0.997         |
+|    reverted_frac          | 0             |
+| rollout/                  |               |
+|    ep_len_mean            | 1e+03         |
+|    ep_rew_mean            | -5.75e+03     |
+| time/                     |               |
+|    fps                    | 160           |
+|    iterations             | 3             |
+|    time_elapsed           | 38            |
+|    total_timesteps        | 6144          |
+| train/                    |               |
+|    approx_kl              | 7.2992407e-07 |
+|    clip_fraction          | 0             |
+|    clip_range             | 0.2           |
+|    entropy_loss           | -0.00378      |
+|    explained_variance     | -0.000883     |
+|    learning_rate          | 0.0003        |
+|    loss                   | 4.47e+03      |
+|    n_updates              | 20            |
+|    policy_gradient_loss   | -2.23e-05     |
+|    value_loss             | 9.38e+03      |
+---------------------------------------------
+Progress:  16.0% [====--------------------------] 7999/50000-------------------------------------------
+| rollout/                |               |
+|    ep_len_mean          | 1e+03         |
+|    ep_rew_mean          | -5.75e+03     |
+| time/                   |               |
+|    fps                  | 159           |
+|    iterations           | 4             |
+|    time_elapsed         | 51            |
+|    total_timesteps      | 8192          |
+| train/                  |               |
+|    approx_kl            | 1.1554221e-06 |
+|    clip_fraction        | 0             |
+|    clip_range           | 0.2           |
+|    entropy_loss         | -0.00479      |
+|    explained_variance   | -0.000626     |
+|    learning_rate        | 0.0003        |
+|    loss                 | 4.22e+03      |
+|    n_updates            | 30            |
+|    policy_gradient_loss | -3.32e-05     |
+|    value_loss           | 8.66e+03      |
+-------------------------------------------
+Progress:  20.0% [=====-------------------------] 9999/50000[action_stats] steps=10000 applied=0.003 reverted=0.000 noop=0.997 invalid=0.000 blocked=0.000 (blocked: global=0.00 util=0.00 cooldown=0.00)
+---------------------------------------------
+| action_stats/             |               |
+|    applied_frac           | 0.003         |
+|    blocked_cooldown_share | 0             |
+|    blocked_frac           | 0             |
+|    blocked_global_share   | 0             |
+|    blocked_util_share     | 0             |
+|    invalid_frac           | 0             |
+|    noop_frac              | 0.997         |
+|    reverted_frac          | 0             |
+| rollout/                  |               |
+|    ep_len_mean            | 1e+03         |
+|    ep_rew_mean            | -5.72e+03     |
+| time/                     |               |
+|    fps                    | 159           |
+|    iterations             | 5             |
+|    time_elapsed           | 64            |
+|    total_timesteps        | 10240         |
+| train/                    |               |
+|    approx_kl              | 1.0797521e-07 |
+|    clip_fraction          | 0             |
+|    clip_range             | 0.2           |
+|    entropy_loss           | -0.00485      |
+|    explained_variance     | 0.000114      |
+|    learning_rate          | 0.0003        |
+|    loss                   | 4.32e+03      |
+|    n_updates              | 40            |
+|    policy_gradient_loss   | -6.16e-06     |
+|    value_loss             | 9.17e+03      |
+---------------------------------------------
+Progress:  24.0% [=======-----------------------] 11999/50000-------------------------------------------
+| rollout/                |               |
+|    ep_len_mean          | 1e+03         |
+|    ep_rew_mean          | -5.83e+03     |
+| time/                   |               |
+|    fps                  | 159           |
+|    iterations           | 6             |
+|    time_elapsed         | 76            |
+|    total_timesteps      | 12288         |
+| train/                  |               |
+|    approx_kl            | 1.9918662e-07 |
+|    clip_fraction        | 0             |
+|    clip_range           | 0.2           |
+|    entropy_loss         | -0.00417      |
+|    explained_variance   | -0.000257     |
+|    learning_rate        | 0.0003        |
+|    loss                 | 4.24e+03      |
+|    n_updates            | 50            |
+|    policy_gradient_loss | -5.34e-06     |
+|    value_loss           | 9.14e+03      |
+-------------------------------------------
+Progress:  28.0% [========----------------------] 13999/50000-------------------------------------------
+| rollout/                |               |
+|    ep_len_mean          | 1e+03         |
+|    ep_rew_mean          | -5.88e+03     |
+| time/                   |               |
+|    fps                  | 159           |
+|    iterations           | 7             |
+|    time_elapsed         | 89            |
+|    total_timesteps      | 14336         |
+| train/                  |               |
+|    approx_kl            | 7.8059384e-07 |
+|    clip_fraction        | 0             |
+|    clip_range           | 0.2           |
+|    entropy_loss         | -0.00377      |
+|    explained_variance   | -3.6e-05      |
+|    learning_rate        | 0.0003        |
+|    loss                 | 5.69e+03      |
+|    n_updates            | 60            |
+|    policy_gradient_loss | -2.13e-05     |
+|    value_loss           | 1.16e+04      |
+-------------------------------------------
+[action_stats] steps=15000 applied=0.003 reverted=0.000 noop=0.997 invalid=0.000 blocked=0.000 (blocked: global=0.00 util=0.00 cooldown=0.00)
+Progress:  32.0% [=========---------------------] 15999/50000--------------------------------------------
+| action_stats/             |              |
+|    applied_frac           | 0.003        |
+|    blocked_cooldown_share | 0            |
+|    blocked_frac           | 0            |
+|    blocked_global_share   | 0            |
+|    blocked_util_share     | 0            |
+|    invalid_frac           | 0            |
+|    noop_frac              | 0.997        |
+|    reverted_frac          | 0            |
+| rollout/                  |              |
+|    ep_len_mean            | 1e+03        |
+|    ep_rew_mean            | -5.89e+03    |
+| time/                     |              |
+|    fps                    | 159          |
+|    iterations             | 8            |
+|    time_elapsed           | 102          |
+|    total_timesteps        | 16384        |
+| train/                    |              |
+|    approx_kl              | 9.879004e-07 |
+|    clip_fraction          | 0            |
+|    clip_range             | 0.2          |
+|    entropy_loss           | -0.00411     |
+|    explained_variance     | -1.78e-05    |
+|    learning_rate          | 0.0003       |
+|    loss                   | 4.94e+03     |
+|    n_updates              | 70           |
+|    policy_gradient_loss   | -2.82e-05    |
+|    value_loss             | 1.06e+04     |
+--------------------------------------------
+Progress:  36.0% [==========--------------------] 17999/50000-------------------------------------------
+| rollout/                |               |
+|    ep_len_mean          | 1e+03         |
+|    ep_rew_mean          | -5.91e+03     |
+| time/                   |               |
+|    fps                  | 159           |
+|    iterations           | 9             |
+|    time_elapsed         | 115           |
+|    total_timesteps      | 18432         |
+| train/                  |               |
+|    approx_kl            | 2.7404167e-07 |
+|    clip_fraction        | 0             |
+|    clip_range           | 0.2           |
+|    entropy_loss         | -0.00309      |
+|    explained_variance   | -1.31e-05     |
+|    learning_rate        | 0.0003        |
+|    loss                 | 4.78e+03      |
+|    n_updates            | 80            |
+|    policy_gradient_loss | -1.2e-05      |
+|    value_loss           | 9.99e+03      |
+-------------------------------------------
+Progress:  40.0% [===========-------------------] 19999/50000[action_stats] steps=20000 applied=0.003 reverted=0.000 noop=0.997 invalid=0.000 blocked=0.000 (blocked: global=0.00 util=0.00 cooldown=0.00)
+--------------------------------------------
+| action_stats/             |              |
+|    applied_frac           | 0.003        |
+|    blocked_cooldown_share | 0            |
+|    blocked_frac           | 0            |
+|    blocked_global_share   | 0            |
+|    blocked_util_share     | 0            |
+|    invalid_frac           | 0            |
+|    noop_frac              | 0.997        |
+|    reverted_frac          | 0            |
+| rollout/                  |              |
+|    ep_len_mean            | 1e+03        |
+|    ep_rew_mean            | -5.89e+03    |
+| time/                     |              |
+|    fps                    | 159          |
+|    iterations             | 10           |
+|    time_elapsed           | 128          |
+|    total_timesteps        | 20480        |
+| train/                    |              |
+|    approx_kl              | 7.288181e-07 |
+|    clip_fraction          | 0            |
+|    clip_range             | 0.2          |
+|    entropy_loss           | -0.00498     |
+|    explained_variance     | -4.41e-06    |
+|    learning_rate          | 0.0003       |
+|    loss                   | 4.73e+03     |
+|    n_updates              | 90           |
+|    policy_gradient_loss   | -1.16e-05    |
+|    value_loss             | 9.89e+03     |
+--------------------------------------------
+Progress:  44.0% [=============-----------------] 21999/50000-------------------------------------------
+| rollout/                |               |
+|    ep_len_mean          | 1e+03         |
+|    ep_rew_mean          | -5.92e+03     |
+| time/                   |               |
+|    fps                  | 159           |
+|    iterations           | 11            |
+|    time_elapsed         | 141           |
+|    total_timesteps      | 22528         |
+| train/                  |               |
+|    approx_kl            | 2.0835723e-06 |
+|    clip_fraction        | 0             |
+|    clip_range           | 0.2           |
+|    entropy_loss         | -0.00647      |
+|    explained_variance   | -2.61e-05     |
+|    learning_rate        | 0.0003        |
+|    loss                 | 4.72e+03      |
+|    n_updates            | 100           |
+|    policy_gradient_loss | -2.7e-05      |
+|    value_loss           | 9.33e+03      |
+-------------------------------------------
+Progress:  48.0% [==============----------------] 23999/50000-------------------------------------------
+| rollout/                |               |
+|    ep_len_mean          | 1e+03         |
+|    ep_rew_mean          | -5.96e+03     |
+| time/                   |               |
+|    fps                  | 159           |
+|    iterations           | 12            |
+|    time_elapsed         | 154           |
+|    total_timesteps      | 24576         |
+| train/                  |               |
+|    approx_kl            | 2.1548476e-07 |
+|    clip_fraction        | 0             |
+|    clip_range           | 0.2           |
+|    entropy_loss         | -0.0031       |
+|    explained_variance   | -5.13e-06     |
+|    learning_rate        | 0.0003        |
+|    loss                 | 5.5e+03       |
+|    n_updates            | 110           |
+|    policy_gradient_loss | -1.02e-05     |
+|    value_loss           | 1.13e+04      |
+-------------------------------------------
+[action_stats] steps=25000 applied=0.003 reverted=0.000 noop=0.997 invalid=0.000 blocked=0.000 (blocked: global=0.00 util=0.00 cooldown=0.00)
+Progress:  52.0% [===============---------------] 25999/50000---------------------------------------------
+| action_stats/             |               |
+|    applied_frac           | 0.003         |
+|    blocked_cooldown_share | 0             |
+|    blocked_frac           | 0             |
+|    blocked_global_share   | 0             |
+|    blocked_util_share     | 0             |
+|    invalid_frac           | 0             |
+|    noop_frac              | 0.997         |
+|    reverted_frac          | 0             |
+| rollout/                  |               |
+|    ep_len_mean            | 1e+03         |
+|    ep_rew_mean            | -5.95e+03     |
+| time/                     |               |
+|    fps                    | 159           |
+|    iterations             | 13            |
+|    time_elapsed           | 167           |
+|    total_timesteps        | 26624         |
+| train/                    |               |
+|    approx_kl              | 5.0043163e-06 |
+|    clip_fraction          | 0             |
+|    clip_range             | 0.2           |
+|    entropy_loss           | -0.00552      |
+|    explained_variance     | 2.8e-06       |
+|    learning_rate          | 0.0003        |
+|    loss                   | 5.36e+03      |
+|    n_updates              | 120           |
+|    policy_gradient_loss   | -7.28e-05     |
+|    value_loss             | 1.06e+04      |
+---------------------------------------------
+Progress:  56.0% [================--------------] 27999/50000-------------------------------------------
+| rollout/                |               |
+|    ep_len_mean          | 1e+03         |
+|    ep_rew_mean          | -5.93e+03     |
+| time/                   |               |
+|    fps                  | 159           |
+|    iterations           | 14            |
+|    time_elapsed         | 180           |
+|    total_timesteps      | 28672         |
+| train/                  |               |
+|    approx_kl            | 3.6868732e-07 |
+|    clip_fraction        | 0             |
+|    clip_range           | 0.2           |
+|    entropy_loss         | -0.00445      |
+|    explained_variance   | -1.36e-05     |
+|    learning_rate        | 0.0003        |
+|    loss                 | 4.31e+03      |
+|    n_updates            | 130           |
+|    policy_gradient_loss | -9.04e-06     |
+|    value_loss           | 8.94e+03      |
+-------------------------------------------
+Progress:  60.0% [=================-------------] 29999/50000[action_stats] steps=30000 applied=0.003 reverted=0.000 noop=0.997 invalid=0.000 blocked=0.000 (blocked: global=0.00 util=0.00 cooldown=0.00)
+--------------------------------------------
+| action_stats/             |              |
+|    applied_frac           | 0.003        |
+|    blocked_cooldown_share | 0            |
+|    blocked_frac           | 0            |
+|    blocked_global_share   | 0            |
+|    blocked_util_share     | 0            |
+|    invalid_frac           | 0            |
+|    noop_frac              | 0.997        |
+|    reverted_frac          | 0            |
+| rollout/                  |              |
+|    ep_len_mean            | 1e+03        |
+|    ep_rew_mean            | -5.92e+03    |
+| time/                     |              |
+|    fps                    | 158          |
+|    iterations             | 15           |
+|    time_elapsed           | 193          |
+|    total_timesteps        | 30720        |
+| train/                    |              |
+|    approx_kl              | 2.614688e-07 |
+|    clip_fraction          | 0            |
+|    clip_range             | 0.2          |
+|    entropy_loss           | -0.0031      |
+|    explained_variance     | -1.01e-05    |
+|    learning_rate          | 0.0003       |
+|    loss                   | 4.24e+03     |
+|    n_updates              | 140          |
+|    policy_gradient_loss   | -1.32e-05    |
+|    value_loss             | 8.9e+03      |
+--------------------------------------------
+Progress:  64.0% [===================-----------] 31999/50000-------------------------------------------
+| rollout/                |               |
+|    ep_len_mean          | 1e+03         |
+|    ep_rew_mean          | -5.89e+03     |
+| time/                   |               |
+|    fps                  | 158           |
+|    iterations           | 16            |
+|    time_elapsed         | 206           |
+|    total_timesteps      | 32768         |
+| train/                  |               |
+|    approx_kl            | 5.1478855e-07 |
+|    clip_fraction        | 0             |
+|    clip_range           | 0.2           |
+|    entropy_loss         | -0.00411      |
+|    explained_variance   | -5.48e-06     |
+|    learning_rate        | 0.0003        |
+|    loss                 | 4.16e+03      |
+|    n_updates            | 150           |
+|    policy_gradient_loss | -2.1e-05      |
+|    value_loss           | 8.65e+03      |
+-------------------------------------------
+Progress:  68.0% [====================----------] 33999/50000-------------------------------------------
+| rollout/                |               |
+|    ep_len_mean          | 1e+03         |
+|    ep_rew_mean          | -5.88e+03     |
+| time/                   |               |
+|    fps                  | 158           |
+|    iterations           | 17            |
+|    time_elapsed         | 218           |
+|    total_timesteps      | 34816         |
+| train/                  |               |
+|    approx_kl            | 5.4601696e-07 |
+|    clip_fraction        | 0             |
+|    clip_range           | 0.2           |
+|    entropy_loss         | -0.00465      |
+|    explained_variance   | -1.19e-07     |
+|    learning_rate        | 0.0003        |
+|    loss                 | 3.88e+03      |
+|    n_updates            | 160           |
+|    policy_gradient_loss | -1.84e-05     |
+|    value_loss           | 8.39e+03      |
+-------------------------------------------
+[action_stats] steps=35000 applied=0.003 reverted=0.000 noop=0.997 invalid=0.000 blocked=0.000 (blocked: global=0.00 util=0.00 cooldown=0.00)
+Progress:  72.0% [=====================---------] 35999/50000---------------------------------------------
+| action_stats/             |               |
+|    applied_frac           | 0.003         |
+|    blocked_cooldown_share | 0             |
+|    blocked_frac           | 0             |
+|    blocked_global_share   | 0             |
+|    blocked_util_share     | 0             |
+|    invalid_frac           | 0             |
+|    noop_frac              | 0.997         |
+|    reverted_frac          | 0             |
+| rollout/                  |               |
+|    ep_len_mean            | 1e+03         |
+|    ep_rew_mean            | -5.86e+03     |
+| time/                     |               |
+|    fps                    | 158           |
+|    iterations             | 18            |
+|    time_elapsed           | 231           |
+|    total_timesteps        | 36864         |
+| train/                    |               |
+|    approx_kl              | 1.9965228e-07 |
+|    clip_fraction          | 0             |
+|    clip_range             | 0.2           |
+|    entropy_loss           | -0.0043       |
+|    explained_variance     | -3.46e-06     |
+|    learning_rate          | 0.0003        |
+|    loss                   | 4.21e+03      |
+|    n_updates              | 170           |
+|    policy_gradient_loss   | -8.98e-06     |
+|    value_loss             | 8.16e+03      |
+---------------------------------------------
+Progress:  76.0% [======================--------] 37999/50000-------------------------------------------
+| rollout/                |               |
+|    ep_len_mean          | 1e+03         |
+|    ep_rew_mean          | -5.85e+03     |
+| time/                   |               |
+|    fps                  | 158           |
+|    iterations           | 19            |
+|    time_elapsed         | 244           |
+|    total_timesteps      | 38912         |
+| train/                  |               |
+|    approx_kl            | 1.1724187e-06 |
+|    clip_fraction        | 0             |
+|    clip_range           | 0.2           |
+|    entropy_loss         | -0.00444      |
+|    explained_variance   | 9.83e-06      |
+|    learning_rate        | 0.0003        |
+|    loss                 | 4.1e+03       |
+|    n_updates            | 180           |
+|    policy_gradient_loss | -2.69e-05     |
+|    value_loss           | 8.23e+03      |
+-------------------------------------------
+Progress:  80.0% [=======================-------] 39999/50000[action_stats] steps=40000 applied=0.003 reverted=0.000 noop=0.997 invalid=0.000 blocked=0.000 (blocked: global=0.00 util=0.00 cooldown=0.00)
+--------------------------------------------
+| action_stats/             |              |
+|    applied_frac           | 0.003        |
+|    blocked_cooldown_share | 0            |
+|    blocked_frac           | 0            |
+|    blocked_global_share   | 0            |
+|    blocked_util_share     | 0            |
+|    invalid_frac           | 0            |
+|    noop_frac              | 0.997        |
+|    reverted_frac          | 0            |
+| rollout/                  |              |
+|    ep_len_mean            | 1e+03        |
+|    ep_rew_mean            | -5.86e+03    |
+| time/                     |              |
+|    fps                    | 158          |
+|    iterations             | 20           |
+|    time_elapsed           | 257          |
+|    total_timesteps        | 40960        |
+| train/                    |              |
+|    approx_kl              | 1.238077e-07 |
+|    clip_fraction          | 0            |
+|    clip_range             | 0.2          |
+|    entropy_loss           | -0.0047      |
+|    explained_variance     | 2.26e-06     |
+|    learning_rate          | 0.0003       |
+|    loss                   | 4.36e+03     |
+|    n_updates              | 190          |
+|    policy_gradient_loss   | -6.09e-06    |
+|    value_loss             | 8.53e+03     |
+--------------------------------------------
+Progress:  84.0% [=========================-----] 41999/50000------------------------------------------
+| rollout/                |              |
+|    ep_len_mean          | 1e+03        |
+|    ep_rew_mean          | -5.88e+03    |
+| time/                   |              |
+|    fps                  | 158          |
+|    iterations           | 21           |
+|    time_elapsed         | 270          |
+|    total_timesteps      | 43008        |
+| train/                  |              |
+|    approx_kl            | 7.295399e-06 |
+|    clip_fraction        | 0            |
+|    clip_range           | 0.2          |
+|    entropy_loss         | -0.00673     |
+|    explained_variance   | 2.03e-06     |
+|    learning_rate        | 0.0003       |
+|    loss                 | 4.98e+03     |
+|    n_updates            | 200          |
+|    policy_gradient_loss | -8.39e-05    |
+|    value_loss           | 1.03e+04     |
+------------------------------------------
+Progress:  88.0% [==========================----] 43999/50000[action_stats] steps=45000 applied=0.003 reverted=0.000 noop=0.997 invalid=0.000 blocked=0.000 (blocked: global=0.00 util=0.00 cooldown=0.00)
+---------------------------------------------
+| action_stats/             |               |
+|    applied_frac           | 0.003         |
+|    blocked_cooldown_share | 0             |
+|    blocked_frac           | 0             |
+|    blocked_global_share   | 0             |
+|    blocked_util_share     | 0             |
+|    invalid_frac           | 0             |
+|    noop_frac              | 0.997         |
+|    reverted_frac          | 0             |
+| rollout/                  |               |
+|    ep_len_mean            | 1e+03         |
+|    ep_rew_mean            | -5.89e+03     |
+| time/                     |               |
+|    fps                    | 158           |
+|    iterations             | 22            |
+|    time_elapsed           | 283           |
+|    total_timesteps        | 45056         |
+| train/                    |               |
+|    approx_kl              | 4.0530693e-05 |
+|    clip_fraction          | 0             |
+|    clip_range             | 0.2           |
+|    entropy_loss           | -0.00813      |
+|    explained_variance     | 4.05e-06      |
+|    learning_rate          | 0.0003        |
+|    loss                   | 4.76e+03      |
+|    n_updates              | 210           |
+|    policy_gradient_loss   | -0.000292     |
+|    value_loss             | 9.67e+03      |
+---------------------------------------------
+Progress:  92.0% [===========================---] 45999/50000------------------------------------------
+| rollout/                |              |
+|    ep_len_mean          | 1e+03        |
+|    ep_rew_mean          | -5.88e+03    |
+| time/                   |              |
+|    fps                  | 158          |
+|    iterations           | 23           |
+|    time_elapsed         | 296          |
+|    total_timesteps      | 47104        |
+| train/                  |              |
+|    approx_kl            | 8.722709e-07 |
+|    clip_fraction        | 0            |
+|    clip_range           | 0.2          |
+|    entropy_loss         | -0.00498     |
+|    explained_variance   | 7.93e-06     |
+|    learning_rate        | 0.0003       |
+|    loss                 | 5.21e+03     |
+|    n_updates            | 220          |
+|    policy_gradient_loss | -2.24e-05    |
+|    value_loss           | 9.6e+03      |
+------------------------------------------
+Progress:  96.0% [============================--] 47999/50000-------------------------------------------
+| rollout/                |               |
+|    ep_len_mean          | 1e+03         |
+|    ep_rew_mean          | -5.88e+03     |
+| time/                   |               |
+|    fps                  | 158           |
+|    iterations           | 24            |
+|    time_elapsed         | 309           |
+|    total_timesteps      | 49152         |
+| train/                  |               |
+|    approx_kl            | 2.3489702e-07 |
+|    clip_fraction        | 0             |
+|    clip_range           | 0.2           |
+|    entropy_loss         | -0.00364      |
+|    explained_variance   | -1.07e-06     |
+|    learning_rate        | 0.0003        |
+|    loss                 | 3.96e+03      |
+|    n_updates            | 230           |
+|    policy_gradient_loss | -5.9e-06      |
+|    value_loss           | 8.21e+03      |
+-------------------------------------------
+Progress: 100.0% [=============================-] 49999/50000[action_stats] steps=50000 applied=0.003 reverted=0.000 noop=0.997 invalid=0.000 blocked=0.000 (blocked: global=0.00 util=0.00 cooldown=0.00)
+Progress: 100.0% [==============================] 50000/50000---------------------------------------------
+| action_stats/             |               |
+|    applied_frac           | 0.003         |
+|    blocked_cooldown_share | 0             |
+|    blocked_frac           | 0             |
+|    blocked_global_share   | 0             |
+|    blocked_util_share     | 0             |
+|    invalid_frac           | 0             |
+|    noop_frac              | 0.997         |
+|    reverted_frac          | 0             |
+| rollout/                  |               |
+|    ep_len_mean            | 1e+03         |
+|    ep_rew_mean            | -5.9e+03      |
+| time/                     |               |
+|    fps                    | 158           |
+|    iterations             | 25            |
+|    time_elapsed           | 322           |
+|    total_timesteps        | 51200         |
+| train/                    |               |
+|    approx_kl              | 1.0284421e-06 |
+|    clip_fraction          | 0             |
+|    clip_range             | 0.2           |
+|    entropy_loss           | -0.00342      |
+|    explained_variance     | 1.01e-06      |
+|    learning_rate          | 0.0003        |
+|    loss                   | 4.55e+03      |
+|    n_updates              | 240           |
+|    policy_gradient_loss   | -3.25e-05     |
+|    value_loss             | 9.16e+03      |
+---------------------------------------------
+Progress: 100.0% [==============================] 50000/50000
+[algo] MaskablePPO
+Saved to runs/20260220_174015

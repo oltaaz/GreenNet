@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" fill="none" preserveAspectRatio="none">
+  <defs>
+    <filter id="lineGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1.8" result="blur" />
+      <feColorMatrix
+        in="blur"
+        type="matrix"
+        values="0 0 0 0 0.2 0 0 0 0 0.95 0 0 0 0 1 0 0 0 1 0"
+        result="cyanGlow"
+      />
+      <feMerge>
+        <feMergeNode in="cyanGlow" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g opacity="0.42" stroke="#145f88" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M66 0V160L98 194V350" />
+    <path d="M242 0V250" />
+    <path d="M418 0V130L456 168V365" />
+    <path d="M618 0V500" />
+    <path d="M834 0V112L868 146V300" />
+    <path d="M1030 0V420" />
+    <path d="M1248 0V150L1284 186V388" />
+    <path d="M1462 0V338" />
+    <path d="M1660 0V160L1694 194V430" />
+    <path d="M1838 0V286" />
+  </g>
+
+  <g filter="url(#lineGlow)" stroke="#47f0ff" stroke-width="1.72" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M104 0V122L138 156V346" />
+    <path d="M360 0V190L396 226V478" />
+    <path d="M664 0V680" />
+    <path d="M942 0V108L978 144V534" />
+    <path d="M1268 0V172L1304 208V468" />
+    <path d="M1546 0V298" />
+    <path d="M1746 0V138L1782 172V442" />
+  </g>
+
+  <g filter="url(#lineGlow)" fill="#57f2ff">
+    <circle cx="138" cy="156" r="3.1" />
+    <circle cx="138" cy="346" r="5" />
+    <circle cx="396" cy="226" r="3.1" />
+    <circle cx="396" cy="478" r="5.1" />
+    <circle cx="664" cy="680" r="5.6" />
+    <circle cx="978" cy="144" r="3.1" />
+    <circle cx="978" cy="534" r="5.2" />
+    <circle cx="1304" cy="208" r="3.1" />
+    <circle cx="1304" cy="468" r="5.2" />
+    <circle cx="1546" cy="298" r="4.9" />
+    <circle cx="1782" cy="172" r="3.1" />
+    <circle cx="1782" cy="442" r="5.1" />
+  </g>
+
+  <g fill="#2f7aa0" opacity="0.34">
+    <circle cx="98" cy="194" r="3.3" />
+    <circle cx="456" cy="168" r="3.3" />
+    <circle cx="868" cy="146" r="3.3" />
+    <circle cx="1284" cy="186" r="3.3" />
+    <circle cx="1694" cy="194" r="3.3" />
+  </g>
+</svg>

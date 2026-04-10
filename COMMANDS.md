@@ -93,9 +93,16 @@ python3 -m greennet.persistence export-summary --base both --output /tmp/results
 ### Start The API And Frontend
 
 ```bash
-uvicorn api_app:app --reload --port 8000
-cd frontend/greennet-ui
 npm run dev
+```
+
+This is the official local demo command from the repo root. It uses a small root `package.json` wrapper to run the existing backend and frontend dev commands together.
+
+Fallback direct commands:
+
+```bash
+uvicorn api_app:app --reload --port 8000
+npm --prefix frontend run dev
 ```
 
 ### Start The Internal Dashboard

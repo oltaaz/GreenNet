@@ -1,4 +1,0 @@
-scenario,off_level,PASS,Δenergy,Δdropped,Δreward,on_edges_mean,toggles_applied_mean,blocked_on_actions_mean,cap_used,seeds,episodes,log_file
-burst,off0,PASS,+0.000000,+0.000,+0.000,18.00,0.00,0.00,16,10-19,100,artifacts/traffic_verify/20260220_matrix/full_off0_burst_cap16_s10-19_e100.log
-burst,off2,PASS,-0.000778,+0.355,-1.240,15.99,2.81,77.60,16,10-19,100,artifacts/traffic_verify/20260220_matrix/full_off2_burst_cap16_s10-19_e100.log
-burst,off4,PASS,+0.108882,-268.608,+311.126,15.96,3.60,50.75,16,10-19,100,artifacts/traffic_verify/20260220_matrix/full_off4_burst_cap16_s10-19_e100.log

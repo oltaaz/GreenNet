@@ -1,7 +1,0 @@
-topology_seed,energy_noop_kwh,energy_trained_kwh,energy_saved_kwh,energy_saved_pct,norm_drop_noop,norm_drop_trained,delta_norm_drop,dropped_noop,dropped_trained,delta_dropped,toggles_trained_mean,qos_pass,verdict
-0,0.066667,0.066127,0.000540,0.81,0.070425,0.070425,0.000000,774.300,774.300,0.000,38.70,True,"Better (energy↓, QoS ok)"
-1,0.091667,0.091667,0.000000,0.00,0.063007,0.063007,0.000000,692.467,692.467,0.000,0.00,True,Same as NOOP
-2,0.066667,0.066667,0.000000,0.00,0.069545,0.069545,0.000000,764.803,764.803,0.000,0.00,True,Same as NOOP
-3,0.069444,0.068845,0.000599,0.86,0.067563,0.068078,0.000515,741.960,747.553,5.592,43.03,True,"Tradeoff (energy↓, drop↑)"
-4,0.072222,0.072222,0.000000,0.00,0.062343,0.062343,0.000000,685.375,685.375,0.000,0.00,True,Same as NOOP
-MEAN,0.073333,0.073106,0.000228,0.31,0.066576,0.066679,0.000103,731.781,732.899,1.118,16.35,True,Overall

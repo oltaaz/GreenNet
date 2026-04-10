@@ -1,5 +1,0 @@
-{
-  "missing": true,
-  "note": "Train with updated scripts/train_cost_estimator_torch.py to produce this file.",
-  "source": "models/impact_predictor/report.json"
-}

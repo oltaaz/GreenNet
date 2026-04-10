@@ -1,0 +1,18 @@
+{
+  "name": "greennet-dev-shell",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "frontend/greennet-ui"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n backend,frontend -c green,blue \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "uvicorn api_app:app --reload --port 8000",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:frontend": "npm --prefix frontend run build",
+    "lint:frontend": "npm --prefix frontend run lint"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

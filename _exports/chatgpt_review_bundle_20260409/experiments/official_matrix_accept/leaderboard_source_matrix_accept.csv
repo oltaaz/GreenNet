@@ -1,2 +1,0 @@
-run_id,policy,scenario,seed,tag,created_at_utc,episodes,max_steps,deterministic,reward_total_mean,delivered_total_mean,dropped_total_mean,energy_kwh_total_mean,carbon_g_total_mean,avg_utilization_mean,active_ratio_mean,avg_delay_ms_mean,results_dir,status,error
-20260206_002805,all_on,normal,0,matrix_accept,2026-02-06T00:28:05.183795+00:00,1,10,True,-38.821387115444494,154.8014705882353,104.1985294117647,0.0006666666666666,0.0285717199654081,0.1856427792121305,1.0,4797.8850444906975,results/20260206_002805__policy-all_on__scenario-normal__seed-0__tag-matrix_accept,ok,

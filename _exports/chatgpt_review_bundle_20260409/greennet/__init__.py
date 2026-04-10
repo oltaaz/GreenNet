@@ -1,1 +1,0 @@
-"""GreenNet simulation package."""

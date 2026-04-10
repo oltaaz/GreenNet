@@ -1,0 +1,91 @@
+# Runs Management
+
+GreenNet training is continuous, so we keep curated runs as thesis evidence while pruning bulk artifacts. The goal is to preserve configs, logs, and robustness outputs for traceability while safely removing large model files or tiny throwaway runs. For the final submission, cite the curated matrix and locked verification artifacts first, not ad hoc run folders.
+
+## Locked scenario artifacts
+Use scenario-specific locked folders for reproducibility:
+
+- `artifacts/locked/normal/<RUN_ID>/`
+- `artifacts/locked/burst/<RUN_ID>/`
+- `artifacts/locked/hotspot/<RUN_ID>/`
+
+Each locked folder should include:
+
+- `ppo_greennet.zip`
+- `env_config.json`
+- `train_config.json`
+- `eval_*.txt` logs (e.g. off0/off2/off4 matrix outputs)
+- optional robustness CSV/plots
+
+Helper commands:
+
+```bash
+scripts/lock_run.sh --scenario normal --run-id <RUN_ID>
+scripts/eval_matrix.sh --model runs/<RUN_ID>/ppo_greennet.zip --lock-scenario normal --episodes 10
+```
+
+If you need a reviewer-facing story, pair these locked folders with the official matrix in `experiments/official_matrix_v6/` and the traffic verification bundle in `artifacts/traffic_verify/20260220_matrix/`.
+
+## Generate training history
+Create an evidence summary across all runs:
+
+```bash
+python experiments/summarize_runs.py
+```
+
+This writes `experiments/training_history.csv` with one row per run and prints a short summary to the terminal.
+
+## Run database
+
+Core run persistence now also writes to SQLite.
+
+- default DB file: `artifacts/db/greennet.sqlite3`
+- manual init: `python3 -m greennet.persistence init`
+- backfill older artifact-only runs: `python3 -m greennet.persistence backfill --base both`
+- export a DB-backed summary CSV: `python3 -m greennet.persistence export-summary --base both --output /tmp/results_summary.csv`
+
+The DB now stores:
+
+- run metadata and matrix identity
+- policy, topology, traffic, energy-model, QoS-policy, and stability-policy identity
+- full summary payloads and key flattened summary metrics
+- per-step metrics including transition/flap and power breakdown fields
+- persisted final-evaluation bundle payloads for the official pipeline
+
+See `docs/run_database.md` for schema scope, migration behavior, and backend integration notes.
+
+## Canonical submission bundle
+
+The final evidence bundle for this repository is not a single `results/` tree. Use:
+
+- `experiments/official_matrix_v6/results_summary_matrix_v6.csv`
+- `experiments/official_matrix_v6/final_evaluation/*`
+- `artifacts/traffic_verify/20260220_matrix/*`
+- locked run folders under `artifacts/locked/`
+
+For the current canonical runnable path, also treat `artifacts/db/greennet.sqlite3` as the structured source of truth for indexed official runs and persisted final-evaluation payloads. The CSV/JSON/Markdown files remain the shipped compatibility and reviewer-facing export layer.
+
+## Pruning runs safely
+The pruning script is dry-run by default and prints an action plan (KEEP / STRIP / DELETE). Use `--apply` to perform changes. STRIP removes model artifacts only; DELETE removes tiny empty runs (when enabled).
+
+Example commands:
+
+1) Summarize:
+```bash
+python experiments/summarize_runs.py
+```
+
+2) Dry-run prune keeping final run:
+```bash
+python experiments/prune_runs.py --keep 20260123_125047 --keep-latest 5 --keep-robustness
+```
+
+3) Apply stripping models (recommended):
+```bash
+python experiments/prune_runs.py --keep 20260123_125047 --keep-latest 8 --keep-robustness --strip-only --apply
+```
+
+4) Apply delete empty:
+```bash
+python experiments/prune_runs.py --keep 20260123_125047 --keep-latest 8 --keep-robustness --strip-only --delete-empty --apply
+```

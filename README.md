@@ -2,6 +2,31 @@
 
 GreenNet is an energy- and QoS-aware routing simulator with a baseline-vs-controller evaluation pipeline, a FastAPI backend, and a React demo UI. The project is strongest as a reproducible research/software artifact: the simulator is real, the baselines are explicit, and the final evidence bundle shows a mixed but technically honest AI result rather than a fabricated win.
 
+## Demo Startup
+
+For the local demo, the official repo-root command is:
+
+```bash
+npm run dev
+```
+
+This root script is intentionally lightweight: it reuses the existing backend command (`uvicorn api_app:app --reload --port 8000`) and the existing frontend command (`npm --prefix frontend run dev`) and starts them together for reviewers from one place.
+
+One-time setup before that command:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -e '.[test,train]'
+npm install
+```
+
+If the root `npm run dev` flow is not available in your shell or platform, use the original commands separately:
+
+```bash
+uvicorn api_app:app --reload --port 8000
+npm --prefix frontend run dev
+```
+
 ## Official Path
 
 Use this path for the final submission workflow:
@@ -26,9 +51,8 @@ python3.12 -m venv .venv
 
 ```bash
 .venv/bin/python -m pytest -q
-cd frontend/greennet-ui
-npm ci
-npm run build
+npm --prefix frontend/greennet-ui ci
+npm --prefix frontend/greennet-ui run build
 ```
 
 ## Current Final Claim
@@ -312,11 +336,17 @@ The following paths are useful, but they are not the public-facing submission pa
 - `COMMANDS.md` - legacy command sheet kept for reference
 - older experiment folders and ad hoc run folders under `runs/`
 
-The public demo path is the React app in `frontend/greennet-ui/`.
+The public demo path is the React app in `frontend/greennet-ui/`, but the official reviewer startup entrypoint is now the repo root.
 
 ```bash
-cd frontend/greennet-ui
 npm run dev
+```
+
+Fallback if you want to run the pieces directly:
+
+```bash
+uvicorn api_app:app --reload --port 8000
+npm --prefix frontend run dev
 ```
 
 ## Responsible Design And Limitations
