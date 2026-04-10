@@ -14,6 +14,7 @@
   PerStepRow,
   RunOverallSummary,
   RunSummary,
+  StabilityThresholds,
   StartRunParams,
   StepState,
   TopologyData,
@@ -94,6 +95,47 @@ function toStringSafe(value: unknown, fallback = ""): string {
   return fallback;
 }
 
+function normalizeQosAcceptanceThresholds(payload: unknown): FinalEvaluationThresholds | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+
+  const item = payload as Record<string, unknown>;
+  return {
+    energy_target_pct: toNumber(item.energy_target_pct, 0),
+    max_delivered_loss_pct: toNumber(item.max_delivered_loss_pct, 0),
+    max_dropped_increase_pct: toNumber(item.max_dropped_increase_pct, 0),
+    max_delay_increase_pct: toNumber(item.max_delay_increase_pct, 0),
+    max_path_latency_increase_pct: toNumber(item.max_path_latency_increase_pct, 0),
+    max_qos_violation_rate_increase_abs: toNumber(item.max_qos_violation_rate_increase_abs, 0),
+  };
+}
+
+function normalizeStabilityThresholds(payload: unknown): StabilityThresholds | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+
+  const item = payload as Record<string, unknown>;
+  return {
+    decision_interval_steps: toOptionalNumber(item.decision_interval_steps),
+    toggle_cooldown_steps: toOptionalNumber(item.toggle_cooldown_steps),
+    global_toggle_cooldown_steps: toOptionalNumber(item.global_toggle_cooldown_steps),
+    off_calm_steps_required: toOptionalNumber(item.off_calm_steps_required),
+    max_off_toggles_per_episode: toOptionalNumber(item.max_off_toggles_per_episode),
+    max_total_toggles_per_episode: toOptionalNumber(item.max_total_toggles_per_episode),
+    max_emergency_on_toggles_per_episode: toOptionalNumber(item.max_emergency_on_toggles_per_episode),
+    emergency_on_bypasses_cooldown:
+      item.emergency_on_bypasses_cooldown == null ? undefined : Boolean(item.emergency_on_bypasses_cooldown),
+    reversal_window_steps: toOptionalNumber(item.reversal_window_steps),
+    reversal_penalty: toOptionalNumber(item.reversal_penalty),
+    min_steps_for_assessment: toOptionalNumber(item.min_steps_for_assessment),
+    max_transition_rate: toOptionalNumber(item.max_transition_rate),
+    max_flap_rate: toOptionalNumber(item.max_flap_rate),
+    max_flap_count: toOptionalNumber(item.max_flap_count),
+  };
+}
+
 function edgeId(source: string, target: string): string {
   return source < target ? `${source}__${target}` : `${target}__${source}`;
 }
@@ -129,6 +171,18 @@ function normalizeRun(row: unknown): RunSummary {
     reward_total_mean: toOptionalNumber(item.reward_total_mean ?? highlights.reward_total_mean),
     dropped_total_mean: toOptionalNumber(item.dropped_total_mean ?? highlights.dropped_total_mean),
     energy_kwh_total_mean: toOptionalNumber(item.energy_kwh_total_mean ?? highlights.energy_kwh_total_mean),
+    transition_rate_mean: toOptionalNumber(item.transition_rate_mean ?? highlights.transition_rate_mean),
+    flap_rate_mean: toOptionalNumber(item.flap_rate_mean ?? highlights.flap_rate_mean),
+    qos_acceptance_status: toStringSafe(
+      item.qos_acceptance_status ?? highlights.qos_acceptance_status ?? item.qos_acceptability_status ?? highlights.qos_acceptability_status,
+      "",
+    ),
+    qos_acceptance_missing: toStringSafe(
+      item.qos_acceptance_missing ?? highlights.qos_acceptance_missing ?? item.qos_acceptability_missing ?? highlights.qos_acceptability_missing,
+      "",
+    ),
+    stability_status: toStringSafe(item.stability_status, ""),
+    stability_missing: toStringSafe(item.stability_missing, ""),
   };
 }
 
@@ -136,6 +190,10 @@ function normalizeOverallSummary(payload: unknown): RunOverallSummary {
   const root = (payload ?? {}) as Record<string, unknown>;
   const item = (root.overall && typeof root.overall === "object" ? root.overall : root) as Record<string, unknown>;
   const avgPathLatency = item.avg_path_latency_ms_mean ?? item.avg_path_latency_ms;
+  const qosThresholds = normalizeQosAcceptanceThresholds(
+    item.qos_thresholds ?? item.qos_acceptance_thresholds ?? item.qos_acceptability_thresholds ?? item.hypothesis_thresholds,
+  );
+  const stabilityThresholds = normalizeStabilityThresholds(item.stability_thresholds);
 
   return {
     reward_total_mean: toNumber(item.reward_total_mean ?? item.reward_total, 0),
@@ -148,6 +206,30 @@ function normalizeOverallSummary(payload: unknown): RunOverallSummary {
     avg_delay_ms_mean: toNumber(item.avg_delay_ms_mean ?? item.avg_delay_ms, 0),
     avg_path_latency_ms_mean: avgPathLatency == null ? undefined : toNumber(avgPathLatency, 0),
     steps_mean: item.steps_mean == null ? undefined : toNumber(item.steps_mean, 0),
+    transition_count_total_mean: toOptionalNumber(item.transition_count_total_mean),
+    transition_rate_mean: toOptionalNumber(item.transition_rate_mean),
+    flap_event_count_total_mean: toOptionalNumber(item.flap_event_count_total_mean),
+    flap_rate_mean: toOptionalNumber(item.flap_rate_mean),
+    qos_acceptance_status: toStringSafe(
+      item.qos_acceptance_status ?? item.qos_acceptability_status ?? root.qos_acceptance_status ?? root.qos_acceptability_status,
+      "",
+    ),
+    qos_acceptance_missing: toStringSafe(
+      item.qos_acceptance_missing ?? item.qos_acceptability_missing ?? root.qos_acceptance_missing ?? root.qos_acceptability_missing,
+      "",
+    ),
+    stability_status: toStringSafe(item.stability_status ?? root.stability_status, ""),
+    stability_missing: toStringSafe(item.stability_missing ?? root.stability_missing, ""),
+    qos_acceptance_thresholds: qosThresholds,
+    qos_thresholds: qosThresholds,
+    stability_thresholds: stabilityThresholds,
+    qos_violation_rate_mean: toOptionalNumber(item.qos_violation_rate_mean ?? root.qos_violation_rate_mean),
+    qos_violation_rate_std: toOptionalNumber(item.qos_violation_rate_std ?? root.qos_violation_rate_std),
+    qos_violation_rate_count: toOptionalNumber(item.qos_violation_rate_count ?? root.qos_violation_rate_count),
+    qos_violation_count_mean: toOptionalNumber(item.qos_violation_count_mean ?? root.qos_violation_count_mean),
+    qos_violation_count_std: toOptionalNumber(item.qos_violation_count_std ?? root.qos_violation_count_std),
+    qos_violation_count_count: toOptionalNumber(item.qos_violation_count_count ?? root.qos_violation_count_count),
+    qos_violation_count_total: toOptionalNumber(item.qos_violation_count_total ?? root.qos_violation_count_total),
   };
 }
 
@@ -171,6 +253,8 @@ function normalizeOfficialEvalRow(payload: unknown): OfficialLockedEvalRow | nul
     seeds: (item.seeds as string | null | undefined) ?? null,
     episodes: item.episodes == null ? null : toNumber(item.episodes, 0),
     log_file: (item.log_file as string | null | undefined) ?? null,
+    qos_acceptance_status: toStringSafe(item.qos_acceptance_status ?? item.qos_acceptability_status, ""),
+    qos_acceptance_missing: toStringSafe(item.qos_acceptance_missing ?? item.qos_acceptability_missing, ""),
   };
 }
 
@@ -224,6 +308,8 @@ function normalizeOfficialResult(payload: unknown): OfficialLockedResult | null 
     bundle_id: toStringSafe(item.bundle_id, ""),
     bundle_path: (item.bundle_path as string | null | undefined) ?? null,
     pass_all: item.pass_all == null ? null : Boolean(item.pass_all),
+    qos_acceptance_status: toStringSafe(item.qos_acceptance_status ?? item.qos_acceptability_status, ""),
+    qos_acceptance_missing: toStringSafe(item.qos_acceptance_missing ?? item.qos_acceptability_missing, ""),
     summary,
     eval_rows: evalRows,
     trained_det: normalizeOfficialStats(item.trained_det),
@@ -266,6 +352,8 @@ function normalizeFinalEvaluationClassification(payload: unknown): FinalEvaluati
   const item = payload as Record<string, unknown>;
   return {
     primary_baseline_policy: toStringSafe(item.primary_baseline_policy, ""),
+    official_traditional_baseline_policy: toStringSafe(item.official_traditional_baseline_policy, ""),
+    strongest_heuristic_baseline_policy: toStringSafe(item.strongest_heuristic_baseline_policy, ""),
     baseline_policies: normalizeStringList(item.baseline_policies),
     ai_policies: normalizeStringList(item.ai_policies),
   };
@@ -297,40 +385,66 @@ type FinalEvaluationNumberField =
   | "energy_kwh_count"
   | "energy_kwh_delta_vs_baseline"
   | "energy_reduction_pct_vs_baseline"
+  | "energy_kwh_delta_vs_heuristic_baseline"
+  | "energy_reduction_pct_vs_heuristic_baseline"
   | "delivered_traffic_mean"
   | "delivered_traffic_std"
   | "delivered_traffic_count"
   | "delivered_traffic_delta_vs_baseline"
   | "delivered_traffic_change_pct_vs_baseline"
+  | "delivered_traffic_delta_vs_heuristic_baseline"
+  | "delivered_traffic_change_pct_vs_heuristic_baseline"
   | "dropped_traffic_mean"
   | "dropped_traffic_std"
   | "dropped_traffic_count"
   | "dropped_traffic_delta_vs_baseline"
   | "dropped_traffic_change_pct_vs_baseline"
+  | "dropped_traffic_delta_vs_heuristic_baseline"
+  | "dropped_traffic_change_pct_vs_heuristic_baseline"
   | "avg_delay_ms_mean"
   | "avg_delay_ms_std"
   | "avg_delay_ms_count"
   | "avg_delay_ms_delta_vs_baseline"
   | "avg_delay_ms_change_pct_vs_baseline"
+  | "avg_delay_ms_delta_vs_heuristic_baseline"
+  | "avg_delay_ms_change_pct_vs_heuristic_baseline"
   | "avg_path_latency_ms_mean"
   | "avg_path_latency_ms_std"
   | "avg_path_latency_ms_count"
   | "avg_path_latency_ms_delta_vs_baseline"
   | "avg_path_latency_ms_change_pct_vs_baseline"
+  | "avg_path_latency_ms_delta_vs_heuristic_baseline"
+  | "avg_path_latency_ms_change_pct_vs_heuristic_baseline"
   | "qos_violation_rate_mean"
   | "qos_violation_rate_std"
   | "qos_violation_rate_count"
   | "qos_violation_rate_delta_vs_baseline"
+  | "qos_violation_rate_delta_vs_heuristic_baseline"
   | "qos_violation_count_mean"
   | "qos_violation_count_std"
   | "qos_violation_count_count"
   | "qos_violation_count_total"
   | "qos_violation_count_delta_vs_baseline"
+  | "qos_violation_count_delta_vs_heuristic_baseline"
+  | "transition_count_total_mean"
+  | "transition_count_total_std"
+  | "transition_count_total_count"
+  | "transition_rate_mean"
+  | "transition_rate_std"
+  | "transition_rate_count"
+  | "flap_event_count_total_mean"
+  | "flap_event_count_total_std"
+  | "flap_event_count_total_count"
+  | "flap_rate_mean"
+  | "flap_rate_std"
+  | "flap_rate_count"
   | "carbon_g_mean"
   | "carbon_g_std"
   | "carbon_g_count"
   | "carbon_g_delta_vs_baseline"
-  | "carbon_reduction_pct_vs_baseline";
+  | "carbon_reduction_pct_vs_baseline"
+  | "carbon_g_delta_vs_heuristic_baseline"
+  | "carbon_reduction_pct_vs_heuristic_baseline";
 
 const FINAL_EVALUATION_NUMBER_FIELDS: FinalEvaluationNumberField[] = [
   "run_count",
@@ -342,40 +456,66 @@ const FINAL_EVALUATION_NUMBER_FIELDS: FinalEvaluationNumberField[] = [
   "energy_kwh_count",
   "energy_kwh_delta_vs_baseline",
   "energy_reduction_pct_vs_baseline",
+  "energy_kwh_delta_vs_heuristic_baseline",
+  "energy_reduction_pct_vs_heuristic_baseline",
   "delivered_traffic_mean",
   "delivered_traffic_std",
   "delivered_traffic_count",
   "delivered_traffic_delta_vs_baseline",
   "delivered_traffic_change_pct_vs_baseline",
+  "delivered_traffic_delta_vs_heuristic_baseline",
+  "delivered_traffic_change_pct_vs_heuristic_baseline",
   "dropped_traffic_mean",
   "dropped_traffic_std",
   "dropped_traffic_count",
   "dropped_traffic_delta_vs_baseline",
   "dropped_traffic_change_pct_vs_baseline",
+  "dropped_traffic_delta_vs_heuristic_baseline",
+  "dropped_traffic_change_pct_vs_heuristic_baseline",
   "avg_delay_ms_mean",
   "avg_delay_ms_std",
   "avg_delay_ms_count",
   "avg_delay_ms_delta_vs_baseline",
   "avg_delay_ms_change_pct_vs_baseline",
+  "avg_delay_ms_delta_vs_heuristic_baseline",
+  "avg_delay_ms_change_pct_vs_heuristic_baseline",
   "avg_path_latency_ms_mean",
   "avg_path_latency_ms_std",
   "avg_path_latency_ms_count",
   "avg_path_latency_ms_delta_vs_baseline",
   "avg_path_latency_ms_change_pct_vs_baseline",
+  "avg_path_latency_ms_delta_vs_heuristic_baseline",
+  "avg_path_latency_ms_change_pct_vs_heuristic_baseline",
   "qos_violation_rate_mean",
   "qos_violation_rate_std",
   "qos_violation_rate_count",
   "qos_violation_rate_delta_vs_baseline",
+  "qos_violation_rate_delta_vs_heuristic_baseline",
   "qos_violation_count_mean",
   "qos_violation_count_std",
   "qos_violation_count_count",
   "qos_violation_count_total",
   "qos_violation_count_delta_vs_baseline",
+  "qos_violation_count_delta_vs_heuristic_baseline",
+  "transition_count_total_mean",
+  "transition_count_total_std",
+  "transition_count_total_count",
+  "transition_rate_mean",
+  "transition_rate_std",
+  "transition_rate_count",
+  "flap_event_count_total_mean",
+  "flap_event_count_total_std",
+  "flap_event_count_total_count",
+  "flap_rate_mean",
+  "flap_rate_std",
+  "flap_rate_count",
   "carbon_g_mean",
   "carbon_g_std",
   "carbon_g_count",
   "carbon_g_delta_vs_baseline",
   "carbon_reduction_pct_vs_baseline",
+  "carbon_g_delta_vs_heuristic_baseline",
+  "carbon_reduction_pct_vs_heuristic_baseline",
 ];
 
 function normalizeFinalEvaluationRow(payload: unknown): FinalEvaluationSummaryRow | null {
@@ -393,14 +533,32 @@ function normalizeFinalEvaluationRow(payload: unknown): FinalEvaluationSummaryRo
     seed_list: toStringSafe(item.seed_list, ""),
     comparison_baseline_policy: toStringSafe(item.comparison_baseline_policy, ""),
     comparison_available: item.comparison_available == null ? undefined : Boolean(item.comparison_available),
+    comparison_official_baseline_policy: toStringSafe(item.comparison_official_baseline_policy, ""),
+    comparison_official_baseline_available:
+      item.comparison_official_baseline_available == null ? undefined : Boolean(item.comparison_official_baseline_available),
+    comparison_heuristic_baseline_policy: toStringSafe(item.comparison_heuristic_baseline_policy, ""),
+    comparison_heuristic_baseline_available:
+      item.comparison_heuristic_baseline_available == null ? undefined : Boolean(item.comparison_heuristic_baseline_available),
     is_primary_baseline: item.is_primary_baseline == null ? undefined : Boolean(item.is_primary_baseline),
+    is_official_traditional_baseline:
+      item.is_official_traditional_baseline == null ? undefined : Boolean(item.is_official_traditional_baseline),
+    is_heuristic_baseline: item.is_heuristic_baseline == null ? undefined : Boolean(item.is_heuristic_baseline),
     is_best_policy_for_scope:
       item.is_best_policy_for_scope == null ? undefined : Boolean(item.is_best_policy_for_scope),
     is_best_ai_policy_for_scope:
       item.is_best_ai_policy_for_scope == null ? undefined : Boolean(item.is_best_ai_policy_for_scope),
     qos_acceptability_status: toStringSafe(item.qos_acceptability_status, ""),
     qos_acceptability_missing: toStringSafe(item.qos_acceptability_missing, ""),
+    qos_acceptance_status: toStringSafe(item.qos_acceptance_status ?? item.qos_acceptability_status, ""),
+    qos_acceptance_missing: toStringSafe(item.qos_acceptance_missing ?? item.qos_acceptability_missing, ""),
+    stability_status: toStringSafe(item.stability_status, ""),
+    stability_missing: toStringSafe(item.stability_missing, ""),
     hypothesis_status: toStringSafe(item.hypothesis_status, ""),
+    stability_qualified_hypothesis_status: toStringSafe(item.stability_qualified_hypothesis_status, ""),
+    qos_thresholds: normalizeQosAcceptanceThresholds(
+      item.qos_thresholds ?? item.qos_acceptance_thresholds ?? item.qos_acceptability_thresholds ?? item.hypothesis_thresholds,
+    ),
+    stability_thresholds: normalizeStabilityThresholds(item.stability_thresholds),
   };
 
   for (const field of FINAL_EVALUATION_NUMBER_FIELDS) {
@@ -453,6 +611,14 @@ function normalizeFinalEvaluationReport(payload: unknown): FinalEvaluationReport
     source: normalizeFinalEvaluationSource(item.source),
     classification: normalizeFinalEvaluationClassification(item.classification),
     hypothesis_thresholds: normalizeFinalEvaluationThresholds(item.hypothesis_thresholds),
+    qos_thresholds: normalizeQosAcceptanceThresholds(
+      item.qos_thresholds ?? item.qos_acceptance_thresholds ?? item.qos_acceptability_thresholds ?? item.hypothesis_thresholds,
+    ),
+    qos_acceptance_status: toStringSafe(item.qos_acceptance_status ?? item.qos_acceptability_status ?? item.overall_qos_status, ""),
+    qos_acceptance_missing: toStringSafe(item.qos_acceptance_missing ?? item.qos_acceptability_missing, ""),
+    stability_thresholds: normalizeStabilityThresholds(item.stability_thresholds),
+    overall_stability_status: toStringSafe(item.overall_stability_status, "") || null,
+    overall_operational_status: toStringSafe(item.overall_operational_status, "") || null,
     best_policy: normalizeFinalEvaluationRow(item.best_policy),
     best_ai_policy: normalizeFinalEvaluationRow(item.best_ai_policy),
     overall_hypothesis_status: toStringSafe(item.overall_hypothesis_status, "") || null,

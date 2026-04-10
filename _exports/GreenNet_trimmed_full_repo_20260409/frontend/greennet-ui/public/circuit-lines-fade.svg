@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" fill="none" preserveAspectRatio="none">
+  <defs>
+    <filter id="fadeGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1.4" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g filter="url(#fadeGlow)" stroke="#72fbff" stroke-width="1.82" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M244 0V108L280 142V448" />
+    <path d="M1188 0V124L1222 158V566" />
+    <path d="M1624 0V96L1658 132V336" />
+  </g>
+
+  <g fill="#89ffff" filter="url(#fadeGlow)">
+    <circle cx="280" cy="142" r="3" />
+    <circle cx="280" cy="448" r="5" />
+    <circle cx="1222" cy="158" r="3" />
+    <circle cx="1222" cy="566" r="5.2" />
+    <circle cx="1658" cy="132" r="3" />
+    <circle cx="1658" cy="336" r="4.8" />
+  </g>
+</svg>

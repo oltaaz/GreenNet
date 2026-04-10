@@ -14,6 +14,10 @@ from itertools import product
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from greennet.evaluation.acceptance_matrix import acceptance_matrix_metadata, load_acceptance_matrix
+from greennet.persistence import persist_final_evaluation_bundle
+from greennet.qos import QoSAcceptanceThresholds
+
 try:
     import matplotlib.pyplot as plt
 except Exception:  # pragma: no cover - optional dependency
@@ -23,9 +27,10 @@ except Exception:  # pragma: no cover - optional dependency
 DEFAULT_POLICIES = "all_on,heuristic,ppo"
 DEFAULT_SCENARIOS = "normal,burst,hotspot"
 DEFAULT_SEEDS = "0,1,2,3,4,5,6,7,8,9"
-DEFAULT_BASELINE_POLICIES = "heuristic,utilization_threshold,baseline,all_on,noop"
+DEFAULT_BASELINE_POLICIES = "all_on,noop,heuristic,baseline,utilization_threshold"
 DEFAULT_AI_POLICIES = "ppo"
 DEFAULT_TAG = "final_pipeline"
+DEFAULT_QOS_THRESHOLDS = QoSAcceptanceThresholds()
 
 
 class PipelineError(RuntimeError):
@@ -86,6 +91,13 @@ def _bool_from_csv(value: Any) -> bool | None:
     if text in {"0", "false", "no", "n"}:
         return False
     return None
+
+
+def _parse_bool_arg(value: str) -> bool:
+    parsed = _bool_from_csv(value)
+    if parsed is None:
+        raise argparse.ArgumentTypeError(f"Expected a boolean value, got: {value!r}")
+    return parsed
 
 
 def _quote_cmd(cmd: Sequence[str]) -> str:
@@ -272,25 +284,80 @@ def _filter_summary_csv(
     seed_filter: set[str],
     scenario_filter: set[str],
     policy_filter: set[str],
+    matrix_id_filter: str | None,
+    matrix_case_filter: set[str],
     deterministic_filter: bool | None,
+    topology_seed_filter: str | None,
+    topology_name_filter: str | None,
+    topology_path_filter: str | None,
+    traffic_seed_filter: str | None,
+    traffic_model_filter: str | None,
+    traffic_name_filter: str | None,
+    traffic_path_filter: str | None,
+    traffic_scenario_filter: str | None,
+    traffic_scenario_version_filter: str | None,
+    stability_reversal_window_steps_filter: str | None,
+    stability_reversal_penalty_filter: str | None,
+    stability_max_transition_rate_filter: str | None,
+    stability_max_flap_rate_filter: str | None,
+    stability_max_flap_count_filter: str | None,
+    power_utilization_sensitive_filter: str | None,
+    power_transition_on_joules_filter: str | None,
+    power_transition_off_joules_filter: str | None,
 ) -> dict[str, Any]:
+    def _selection_key(row: Mapping[str, Any]) -> tuple[str, str, str]:
+        policy = str(row.get("policy") or "").strip()
+        seed = str(row.get("seed") or "").strip()
+        matrix_case_id = str(row.get("matrix_case_id") or "").strip()
+        scenario = str(row.get("scenario") or "").strip()
+        case_key = matrix_case_id if matrix_case_filter else scenario
+        return (policy, case_key, seed)
+
+    def _row_rank(row: Mapping[str, Any]) -> tuple[str, str]:
+        run_id = str(row.get("run_id") or "").strip()
+        results_dir = str(row.get("results_dir") or "").strip()
+        return (run_id, results_dir)
+
     with source_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         fieldnames = list(reader.fieldnames or [])
         if not fieldnames:
             raise PipelineError(f"Summary CSV has no header: {source_path}")
 
-        kept_rows: list[dict[str, Any]] = []
+        kept_rows: dict[tuple[str, str, str], dict[str, Any]] = {}
         non_ok_rows: list[dict[str, str]] = []
         observed_ok: set[tuple[str, str, str]] = set()
 
         for row in reader:
             policy = str(row.get("policy") or "").strip()
+            matrix_id = str(row.get("matrix_id") or "").strip()
+            matrix_case_id = str(row.get("matrix_case_id") or "").strip()
             scenario = str(row.get("scenario") or "").strip()
             seed = str(row.get("seed") or "").strip()
             status = str(row.get("status") or "").strip().lower()
             deterministic = _bool_from_csv(row.get("deterministic"))
+            topology_seed = str(row.get("topology_seed") or "").strip()
+            topology_name = str(row.get("topology_name") or "").strip()
+            topology_path = str(row.get("topology_path") or "").strip()
+            traffic_seed = str(row.get("traffic_seed") or "").strip()
+            traffic_model = str(row.get("traffic_model") or "").strip()
+            traffic_name = str(row.get("traffic_name") or "").strip()
+            traffic_path = str(row.get("traffic_path") or "").strip()
+            traffic_scenario = str(row.get("traffic_scenario") or "").strip()
+            traffic_scenario_version = str(row.get("traffic_scenario_version") or "").strip()
+            stability_reversal_window_steps = str(row.get("stability_reversal_window_steps") or "").strip()
+            stability_reversal_penalty = str(row.get("stability_reversal_penalty") or "").strip()
+            stability_max_transition_rate = str(row.get("stability_max_transition_rate") or "").strip()
+            stability_max_flap_rate = str(row.get("stability_max_flap_rate") or "").strip()
+            stability_max_flap_count = str(row.get("stability_max_flap_count") or "").strip()
+            power_utilization_sensitive = str(row.get("power_utilization_sensitive") or "").strip().lower()
+            power_transition_on_joules = str(row.get("power_transition_on_joules") or "").strip()
+            power_transition_off_joules = str(row.get("power_transition_off_joules") or "").strip()
 
+            if matrix_id_filter is not None and matrix_id != matrix_id_filter:
+                continue
+            if matrix_case_filter and matrix_case_id not in matrix_case_filter:
+                continue
             if policy_filter and policy not in policy_filter:
                 continue
             if scenario_filter and scenario not in scenario_filter:
@@ -298,6 +365,46 @@ def _filter_summary_csv(
             if seed_filter and seed not in seed_filter:
                 continue
             if deterministic_filter is not None and deterministic is not None and deterministic != deterministic_filter:
+                continue
+            if topology_seed_filter is not None and topology_seed != topology_seed_filter:
+                continue
+            if topology_name_filter is not None and topology_name != topology_name_filter:
+                continue
+            if topology_path_filter is not None and topology_path != topology_path_filter:
+                continue
+            if traffic_seed_filter is not None and traffic_seed != traffic_seed_filter:
+                continue
+            if traffic_model_filter is not None and traffic_model != traffic_model_filter:
+                continue
+            if traffic_name_filter is not None and traffic_name != traffic_name_filter:
+                continue
+            if traffic_path_filter is not None and traffic_path != traffic_path_filter:
+                continue
+            if traffic_scenario_filter is not None and traffic_scenario != traffic_scenario_filter:
+                continue
+            if traffic_scenario_version_filter is not None and traffic_scenario_version != traffic_scenario_version_filter:
+                continue
+            if (
+                stability_reversal_window_steps_filter is not None
+                and stability_reversal_window_steps != stability_reversal_window_steps_filter
+            ):
+                continue
+            if stability_reversal_penalty_filter is not None and stability_reversal_penalty != stability_reversal_penalty_filter:
+                continue
+            if (
+                stability_max_transition_rate_filter is not None
+                and stability_max_transition_rate != stability_max_transition_rate_filter
+            ):
+                continue
+            if stability_max_flap_rate_filter is not None and stability_max_flap_rate != stability_max_flap_rate_filter:
+                continue
+            if stability_max_flap_count_filter is not None and stability_max_flap_count != stability_max_flap_count_filter:
+                continue
+            if power_utilization_sensitive_filter is not None and power_utilization_sensitive != power_utilization_sensitive_filter:
+                continue
+            if power_transition_on_joules_filter is not None and power_transition_on_joules != power_transition_on_joules_filter:
+                continue
+            if power_transition_off_joules_filter is not None and power_transition_off_joules != power_transition_off_joules_filter:
                 continue
 
             if status and status != "ok":
@@ -312,8 +419,12 @@ def _filter_summary_csv(
                 )
                 continue
 
-            kept_rows.append(dict(row))
-            observed_ok.add((policy, scenario, seed))
+            selected_key = _selection_key(row)
+            current_row = dict(row)
+            existing_row = kept_rows.get(selected_key)
+            if existing_row is None or _row_rank(current_row) >= _row_rank(existing_row):
+                kept_rows[selected_key] = current_row
+            observed_ok.add(selected_key)
 
     if not kept_rows:
         raise PipelineError(
@@ -321,26 +432,40 @@ def _filter_summary_csv(
             f"source={source_path}"
         )
 
-    expected = {
-        (policy, scenario, seed)
-        for policy, scenario, seed in product(
-            sorted(policy_filter),
-            sorted(scenario_filter),
-            sorted(seed_filter),
-        )
-    }
+    if matrix_case_filter:
+        expected = {
+            (policy, case_id, seed)
+            for policy, case_id, seed in product(
+                sorted(policy_filter),
+                sorted(matrix_case_filter),
+                sorted(seed_filter),
+            )
+        }
+    else:
+        expected = {
+            (policy, scenario, seed)
+            for policy, scenario, seed in product(
+                sorted(policy_filter),
+                sorted(scenario_filter),
+                sorted(seed_filter),
+            )
+        }
     missing = sorted(expected.difference(observed_ok))
     if missing:
-        preview = ", ".join(f"{policy}/{scenario}/seed={seed}" for policy, scenario, seed in missing[:10])
+        if matrix_case_filter:
+            preview = ", ".join(f"{policy}/{case_id}/seed={seed}" for policy, case_id, seed in missing[:10])
+        else:
+            preview = ", ".join(f"{policy}/{scenario}/seed={seed}" for policy, scenario, seed in missing[:10])
         suffix = "" if len(missing) <= 10 else f" ... (+{len(missing) - 10} more)"
         raise PipelineError(
             "The selected summary is incomplete for the requested matrix. "
             f"Missing successful rows: {preview}{suffix}"
         )
 
-    _copy_rows_to_csv(output_path, kept_rows, fieldnames=fieldnames)
+    selected_rows = [kept_rows[key] for key in sorted(kept_rows)]
+    _copy_rows_to_csv(output_path, selected_rows, fieldnames=fieldnames)
     return {
-        "rows_written": len(kept_rows),
+        "rows_written": len(selected_rows),
         "non_ok_rows": non_ok_rows,
         "expected_combinations": len(expected),
     }
@@ -376,7 +501,7 @@ def _build_research_question_rows(payload: Mapping[str, Any]) -> list[dict[str, 
         baseline_row = next((row for row in bucket if bool(row.get("is_primary_baseline"))), None)
         ai_row = next((row for row in bucket if bool(row.get("is_best_ai_policy_for_scope"))), None)
         if ai_row is None:
-            ai_candidates = [row for row in bucket if str(row.get("policy_class") or "") == "ai"]
+            ai_candidates = [row for row in bucket if str(row.get("policy_class") or "") == "ai_policy"]
             ai_row = ai_candidates[0] if ai_candidates else None
 
         if baseline_row is None or ai_row is None:
@@ -420,6 +545,8 @@ def _build_research_question_rows(payload: Mapping[str, Any]) -> list[dict[str, 
                 "avg_path_latency_ms_change_pct_vs_baseline": ai_row.get("avg_path_latency_ms_change_pct_vs_baseline"),
                 "qos_violation_rate_delta_vs_baseline": ai_row.get("qos_violation_rate_delta_vs_baseline"),
                 "qos_acceptability_status": ai_row.get("qos_acceptability_status"),
+                "stability_status": ai_row.get("stability_status"),
+                "stability_qualified_hypothesis_status": ai_row.get("stability_qualified_hypothesis_status"),
                 "hypothesis_status": ai_row.get("hypothesis_status"),
                 "comparison_available": ai_row.get("comparison_available"),
                 "status": "ok",
@@ -453,11 +580,13 @@ def _direct_answer(row: Mapping[str, Any] | None) -> str:
     baseline = str(row.get("baseline_policy") or "baseline")
     ai = str(row.get("ai_policy") or "ai")
     hypothesis = str(row.get("hypothesis_status") or "insufficient_data")
+    operational = str(row.get("stability_qualified_hypothesis_status") or hypothesis)
     qos_status = str(row.get("qos_acceptability_status") or "insufficient_data")
+    stability_status = str(row.get("stability_status") or "insufficient_data")
 
-    if hypothesis == "achieved":
+    if operational == "achieved":
         prefix = "Yes."
-    elif hypothesis == "not_achieved":
+    elif operational == "not_achieved":
         prefix = "No."
     else:
         prefix = "Inconclusive."
@@ -469,20 +598,20 @@ def _direct_answer(row: Mapping[str, Any] | None) -> str:
         f"delay {_fmt_pct(row.get('avg_delay_ms_change_pct_vs_baseline'))}, "
         f"path latency {_fmt_pct(row.get('avg_path_latency_ms_change_pct_vs_baseline'))}, "
         f"QoS rate delta {_fmt_delta(row.get('qos_violation_rate_delta_vs_baseline'))}, "
-        f"QoS={qos_status}, hypothesis={hypothesis}."
+        f"QoS={qos_status}, stability={stability_status}, operational={operational}, hypothesis={hypothesis}."
     )
 
 
 def _research_question_markdown(rows: Sequence[Mapping[str, Any]]) -> str:
     header = (
         "| Scope | Baseline | AI | Energy vs baseline | Delivered delta | Dropped delta | Delay delta | "
-        "Path latency delta | QoS rate delta | QoS status | Hypothesis |\n"
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |"
+        "Path latency delta | QoS rate delta | QoS status | Stability | Operational | Hypothesis |\n"
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- |"
     )
     lines = [header]
     for row in rows:
         lines.append(
-            "| {scope} | {baseline} | {ai} | {energy} | {delivered} | {dropped} | {delay} | {path} | {qos} | {qos_status} | {hypothesis} |".format(
+            "| {scope} | {baseline} | {ai} | {energy} | {delivered} | {dropped} | {delay} | {path} | {qos} | {qos_status} | {stability} | {operational} | {hypothesis} |".format(
                 scope=row.get("scope", "n/a"),
                 baseline=row.get("baseline_policy", "n/a"),
                 ai=row.get("ai_policy", "n/a"),
@@ -493,6 +622,8 @@ def _research_question_markdown(rows: Sequence[Mapping[str, Any]]) -> str:
                 path=_fmt_pct(row.get("avg_path_latency_ms_change_pct_vs_baseline")),
                 qos=_fmt_delta(row.get("qos_violation_rate_delta_vs_baseline")),
                 qos_status=row.get("qos_acceptability_status", "n/a"),
+                stability=row.get("stability_status", "n/a"),
+                operational=row.get("stability_qualified_hypothesis_status", "n/a"),
                 hypothesis=row.get("hypothesis_status", "n/a"),
             )
         )
@@ -519,8 +650,10 @@ def _write_concise_report(
         "## Direct Answer",
         f"- {_direct_answer(overall_row)}",
         f"- Source: `{source.get('description', summary_csv_path)}`",
+        f"- Acceptance matrix: `{source.get('matrix_id', 'n/a')}` ({source.get('matrix_name', 'n/a')})",
         f"- Selected runs: `{source.get('selected_run_count', 'n/a')}`",
-        f"- Primary baseline policy: `{classification.get('primary_baseline_policy', 'n/a')}`",
+        f"- Official traditional baseline policy: `{classification.get('official_traditional_baseline_policy', classification.get('primary_baseline_policy', 'n/a'))}`",
+        f"- Strongest heuristic baseline policy: `{classification.get('strongest_heuristic_baseline_policy', 'n/a')}`",
         "",
         "## Thesis Table",
         _research_question_markdown(research_rows),
@@ -673,6 +806,12 @@ def build_pipeline(argv: Sequence[str] | None = None) -> dict[str, Any]:
         description="Run the GreenNet final thesis pipeline: matrix evaluation, aggregation, leaderboard, final report, and plots."
     )
     parser.add_argument("--summary-csv", type=Path, default=None, help="Optional existing results_summary*.csv to package instead of scanning results.")
+    parser.add_argument(
+        "--matrix-manifest",
+        type=Path,
+        default=None,
+        help="Optional acceptance-matrix JSON manifest. When provided, it becomes the authoritative final benchmark definition.",
+    )
     parser.add_argument("--skip-eval", action="store_true", help="Do not run experiments/run_matrix.py before packaging.")
     parser.add_argument("--results-dir", type=Path, default=Path("results"))
     parser.add_argument("--runs-dir", type=Path, default=Path("runs"))
@@ -685,34 +824,87 @@ def build_pipeline(argv: Sequence[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--steps", type=int, default=300)
     parser.add_argument("--ppo-model", type=Path, default=None, help="Optional PPO checkpoint for policy=ppo runs.")
     parser.add_argument("--topology-seed", type=int, default=None)
+    parser.add_argument("--topology-name", type=str, default=None)
+    parser.add_argument("--topology-path", type=Path, default=None)
+    parser.add_argument("--traffic-seed", type=int, default=None)
+    parser.add_argument("--traffic-model", type=str, default=None)
+    parser.add_argument("--traffic-name", type=str, default=None)
+    parser.add_argument("--traffic-path", type=Path, default=None)
+    parser.add_argument("--traffic-scenario", type=str, default=None)
+    parser.add_argument("--traffic-scenario-version", type=int, default=None)
+    parser.add_argument("--traffic-scenario-intensity", type=float, default=None)
+    parser.add_argument("--traffic-scenario-duration", type=float, default=None)
+    parser.add_argument("--traffic-scenario-frequency", type=float, default=None)
+    parser.add_argument("--stability-reversal-window-steps", type=int, default=None)
+    parser.add_argument("--stability-reversal-penalty", type=float, default=None)
+    parser.add_argument("--stability-min-steps-for-assessment", type=int, default=None)
+    parser.add_argument("--stability-max-transition-rate", type=float, default=None)
+    parser.add_argument("--stability-max-flap-rate", type=float, default=None)
+    parser.add_argument("--stability-max-flap-count", type=int, default=None)
+    parser.add_argument("--power-utilization-sensitive", type=_parse_bool_arg, default=None)
+    parser.add_argument("--power-transition-on-joules", type=float, default=None)
+    parser.add_argument("--power-transition-off-joules", type=float, default=None)
     parser.add_argument("--deterministic", dest="deterministic", action="store_true", default=True)
     parser.add_argument("--stochastic", dest="deterministic", action="store_false")
     parser.add_argument("--baseline-policies", type=str, default=DEFAULT_BASELINE_POLICIES)
     parser.add_argument("--ai-policies", type=str, default=DEFAULT_AI_POLICIES)
-    parser.add_argument("--primary-baseline-policy", type=str, default="heuristic")
+    parser.add_argument("--primary-baseline-policy", type=str, default="all_on")
     parser.add_argument("--energy-target-pct", type=float, default=15.0)
-    parser.add_argument("--max-qos-violation-rate-increase", type=float, default=0.02)
-    parser.add_argument("--max-delivered-loss-pct", type=float, default=2.0)
-    parser.add_argument("--max-dropped-increase-pct", type=float, default=5.0)
-    parser.add_argument("--max-delay-increase-pct", type=float, default=10.0)
-    parser.add_argument("--max-path-latency-increase-pct", type=float, default=10.0)
+    parser.add_argument(
+        "--max-qos-violation-rate-increase",
+        type=float,
+        default=DEFAULT_QOS_THRESHOLDS.max_qos_violation_rate_increase_abs,
+    )
+    parser.add_argument("--max-delivered-loss-pct", type=float, default=DEFAULT_QOS_THRESHOLDS.max_delivered_loss_pct)
+    parser.add_argument("--max-dropped-increase-pct", type=float, default=DEFAULT_QOS_THRESHOLDS.max_dropped_increase_pct)
+    parser.add_argument("--max-delay-increase-pct", type=float, default=DEFAULT_QOS_THRESHOLDS.max_delay_increase_pct)
+    parser.add_argument(
+        "--max-path-latency-increase-pct",
+        type=float,
+        default=DEFAULT_QOS_THRESHOLDS.max_path_latency_increase_pct,
+    )
     parser.add_argument("--skip-plots", action="store_true", help="Only emit plot-ready CSV data.")
     args = parser.parse_args(argv)
 
+    matrix_manifest = load_acceptance_matrix(args.matrix_manifest) if args.matrix_manifest is not None else None
+
     repo_root = _repo_root()
-    output_dir = _resolve_path(args.output_dir)
+    output_dir_arg = args.output_dir
+    if matrix_manifest is not None and str(output_dir_arg) == "artifacts/final_pipeline/latest":
+        output_dir_arg = Path(f"artifacts/final_pipeline/{matrix_manifest.tag}")
+    output_dir = _resolve_path(output_dir_arg)
     results_dir = _resolve_path(args.results_dir)
     runs_dir = _resolve_path(args.runs_dir)
     summary_csv = _resolve_path(args.summary_csv) if args.summary_csv is not None else None
     ppo_model = _resolve_path(args.ppo_model) if args.ppo_model is not None else None
+    topology_path = _resolve_path(args.topology_path) if args.topology_path is not None else None
+    traffic_path = _resolve_path(args.traffic_path) if args.traffic_path is not None else None
 
-    scenario_filter = set(_clean_csv_list(args.scenarios))
-    policy_filter = set(_clean_csv_list(args.policies))
-    seed_filter = {str(seed) for seed in _parse_seed_csv(args.seeds)}
-    baseline_policies = _clean_csv_list(args.baseline_policies)
-    ai_policies = _clean_csv_list(args.ai_policies)
+    scenario_filter = (
+        {case.scenario for case in matrix_manifest.cases}
+        if matrix_manifest is not None
+        else set(_clean_csv_list(args.scenarios))
+    )
+    policy_filter = set(matrix_manifest.policies) if matrix_manifest is not None else set(_clean_csv_list(args.policies))
+    seed_filter = (
+        {str(seed) for seed in matrix_manifest.seeds}
+        if matrix_manifest is not None
+        else {str(seed) for seed in _parse_seed_csv(args.seeds)}
+    )
+    matrix_case_filter = (
+        {case.case_id for case in matrix_manifest.cases}
+        if matrix_manifest is not None
+        else set()
+    )
+    baseline_policies = (
+        list(matrix_manifest.baseline_policies)
+        if matrix_manifest is not None
+        else _clean_csv_list(args.baseline_policies)
+    )
+    ai_policies = list(matrix_manifest.ai_policies) if matrix_manifest is not None else _clean_csv_list(args.ai_policies)
+    tag_value = matrix_manifest.tag if matrix_manifest is not None else args.tag
 
-    if summary_csv is None and args.skip_eval and not args.tag:
+    if summary_csv is None and args.skip_eval and not tag_value:
         raise PipelineError("--skip-eval requires --tag or --summary-csv so result selection stays authoritative.")
     if summary_csv is not None and not summary_csv.exists():
         raise PipelineError(f"--summary-csv does not exist: {summary_csv}")
@@ -730,19 +922,41 @@ def build_pipeline(argv: Sequence[str] | None = None) -> dict[str, Any]:
         "runs_dir": str(runs_dir),
         "output_dir": str(output_dir),
         "summary_csv": None if summary_csv is None else str(summary_csv),
-        "tag": args.tag,
+        "tag": tag_value,
         "skip_eval": bool(args.skip_eval),
         "seeds": sorted(seed_filter, key=lambda value: int(value)),
         "scenarios": sorted(scenario_filter),
         "policies": sorted(policy_filter),
-        "episodes": int(args.episodes),
-        "steps": int(args.steps),
+        "episodes": int(matrix_manifest.episodes if matrix_manifest is not None else args.episodes),
+        "steps": int(matrix_manifest.steps if matrix_manifest is not None else args.steps),
         "ppo_model": None if ppo_model is None else str(ppo_model),
         "topology_seed": args.topology_seed,
-        "deterministic": args.deterministic,
+        "topology_name": args.topology_name,
+        "topology_path": None if topology_path is None else str(topology_path),
+        "traffic_seed": args.traffic_seed,
+        "traffic_model": args.traffic_model,
+        "traffic_name": args.traffic_name,
+        "traffic_path": None if traffic_path is None else str(traffic_path),
+        "traffic_scenario": args.traffic_scenario,
+        "traffic_scenario_version": args.traffic_scenario_version,
+        "traffic_scenario_intensity": args.traffic_scenario_intensity,
+        "traffic_scenario_duration": args.traffic_scenario_duration,
+        "traffic_scenario_frequency": args.traffic_scenario_frequency,
+        "stability_reversal_window_steps": args.stability_reversal_window_steps,
+        "stability_reversal_penalty": args.stability_reversal_penalty,
+        "stability_min_steps_for_assessment": args.stability_min_steps_for_assessment,
+        "stability_max_transition_rate": args.stability_max_transition_rate,
+        "stability_max_flap_rate": args.stability_max_flap_rate,
+        "stability_max_flap_count": args.stability_max_flap_count,
+        "power_utilization_sensitive": args.power_utilization_sensitive,
+        "power_transition_on_joules": args.power_transition_on_joules,
+        "power_transition_off_joules": args.power_transition_off_joules,
+        "deterministic": matrix_manifest.deterministic if matrix_manifest is not None else args.deterministic,
         "baseline_policies": baseline_policies,
         "ai_policies": ai_policies,
-        "primary_baseline_policy": args.primary_baseline_policy,
+        "primary_baseline_policy": (
+            matrix_manifest.primary_baseline_policy if matrix_manifest is not None else args.primary_baseline_policy
+        ),
         "thresholds": {
             "energy_target_pct": args.energy_target_pct,
             "max_qos_violation_rate_increase_abs": args.max_qos_violation_rate_increase,
@@ -751,15 +965,26 @@ def build_pipeline(argv: Sequence[str] | None = None) -> dict[str, Any]:
             "max_delay_increase_pct": args.max_delay_increase_pct,
             "max_path_latency_increase_pct": args.max_path_latency_increase_pct,
         },
+        "qos_thresholds": {
+            "max_qos_violation_rate_increase_abs": args.max_qos_violation_rate_increase,
+            "max_delivered_loss_pct": args.max_delivered_loss_pct,
+            "max_dropped_increase_pct": args.max_dropped_increase_pct,
+            "max_delay_increase_pct": args.max_delay_increase_pct,
+            "max_path_latency_increase_pct": args.max_path_latency_increase_pct,
+        },
         "skip_plots": bool(args.skip_plots),
     }
+    if matrix_manifest is not None:
+        config_payload["acceptance_matrix"] = acceptance_matrix_metadata(matrix_manifest)
     _write_json(dirs["metadata"] / "pipeline_config.json", config_payload)
+    if matrix_manifest is not None:
+        _write_json(dirs["metadata"] / "acceptance_matrix_manifest.json", json.loads(Path(matrix_manifest.manifest_path).read_text(encoding="utf-8")))
 
-    authoritative_summary_path = dirs["summary"] / f"results_summary_{args.tag}.csv"
-    raw_summary_path = dirs["summary"] / f"results_summary_{args.tag}_raw.csv"
-    by_seed_path = dirs["summary"] / f"results_summary_by_seed_{args.tag}.csv"
-    leaderboard_path = dirs["summary"] / f"leaderboard_{args.tag}.csv"
-    leaderboard_source_path = dirs["summary"] / f"leaderboard_source_{args.tag}.csv"
+    authoritative_summary_path = dirs["summary"] / f"results_summary_{tag_value}.csv"
+    raw_summary_path = dirs["summary"] / f"results_summary_{tag_value}_raw.csv"
+    by_seed_path = dirs["summary"] / f"results_summary_by_seed_{tag_value}.csv"
+    leaderboard_path = dirs["summary"] / f"leaderboard_{tag_value}.csv"
+    leaderboard_source_path = dirs["summary"] / f"leaderboard_source_{tag_value}.csv"
     research_question_path = dirs["summary"] / "research_question_summary.csv"
     concise_report_path = dirs["report"] / "concise_report.md"
     final_eval_paths = _final_eval_paths(dirs["final_eval"])
@@ -769,30 +994,78 @@ def build_pipeline(argv: Sequence[str] | None = None) -> dict[str, Any]:
             sys.executable,
             str(repo_root / "experiments" / "run_matrix.py"),
             "--seeds",
-            args.seeds,
+            ",".join(sorted(seed_filter, key=lambda value: int(value))),
             "--scenarios",
-            args.scenarios,
+            ",".join(sorted(scenario_filter)),
             "--policies",
-            args.policies,
+            ",".join(sorted(policy_filter)),
             "--episodes",
-            str(args.episodes),
+            str(matrix_manifest.episodes if matrix_manifest is not None else args.episodes),
             "--steps",
-            str(args.steps),
+            str(matrix_manifest.steps if matrix_manifest is not None else args.steps),
             "--out-dir",
             str(results_dir),
             "--runs-dir",
             str(runs_dir),
             "--tag",
-            args.tag,
+            tag_value,
         ]
-        if args.deterministic:
+        if matrix_manifest is not None:
+            cmd.extend(["--matrix-manifest", str(matrix_manifest.manifest_path)])
+        if matrix_manifest.deterministic if matrix_manifest is not None else args.deterministic:
             cmd.append("--deterministic")
         else:
             cmd.append("--stochastic")
         if ppo_model is not None:
             cmd.extend(["--ppo-model", str(ppo_model)])
-        if args.topology_seed is not None:
+        if args.topology_seed is not None and matrix_manifest is None:
             cmd.extend(["--topology-seed", str(args.topology_seed)])
+        if args.topology_name is not None and matrix_manifest is None:
+            cmd.extend(["--topology-name", str(args.topology_name)])
+        if topology_path is not None and matrix_manifest is None:
+            cmd.extend(["--topology-path", str(topology_path)])
+        if args.traffic_seed is not None:
+            cmd.extend(["--traffic-seed", str(args.traffic_seed)])
+        if args.traffic_model is not None:
+            cmd.extend(["--traffic-model", str(args.traffic_model)])
+        if args.traffic_name is not None and matrix_manifest is None:
+            cmd.extend(["--traffic-name", str(args.traffic_name)])
+        if traffic_path is not None and matrix_manifest is None:
+            cmd.extend(["--traffic-path", str(traffic_path)])
+        if args.traffic_scenario is not None:
+            cmd.extend(["--traffic-scenario", str(args.traffic_scenario)])
+        if args.traffic_scenario_version is not None:
+            cmd.extend(["--traffic-scenario-version", str(args.traffic_scenario_version)])
+        if args.traffic_scenario_intensity is not None:
+            cmd.extend(["--traffic-scenario-intensity", str(args.traffic_scenario_intensity)])
+        if args.traffic_scenario_duration is not None:
+            cmd.extend(["--traffic-scenario-duration", str(args.traffic_scenario_duration)])
+        if args.traffic_scenario_frequency is not None:
+            cmd.extend(["--traffic-scenario-frequency", str(args.traffic_scenario_frequency)])
+        if args.stability_reversal_window_steps is not None:
+            cmd.extend(["--stability-reversal-window-steps", str(args.stability_reversal_window_steps)])
+        if args.stability_reversal_penalty is not None:
+            cmd.extend(["--stability-reversal-penalty", str(args.stability_reversal_penalty)])
+        if args.stability_min_steps_for_assessment is not None:
+            cmd.extend(["--stability-min-steps-for-assessment", str(args.stability_min_steps_for_assessment)])
+        if args.stability_max_transition_rate is not None:
+            cmd.extend(["--stability-max-transition-rate", str(args.stability_max_transition_rate)])
+        if args.stability_max_flap_rate is not None:
+            cmd.extend(["--stability-max-flap-rate", str(args.stability_max_flap_rate)])
+        if args.stability_max_flap_count is not None:
+            cmd.extend(["--stability-max-flap-count", str(args.stability_max_flap_count)])
+        if args.power_utilization_sensitive is not None:
+            cmd.extend(["--power-utilization-sensitive", str(args.power_utilization_sensitive).lower()])
+        if args.power_transition_on_joules is not None:
+            cmd.extend(["--power-transition-on-joules", str(args.power_transition_on_joules)])
+        if args.power_transition_off_joules is not None:
+            cmd.extend(["--power-transition-off-joules", str(args.power_transition_off_joules)])
+        routing_baseline_value = matrix_manifest.routing_baseline if matrix_manifest is not None else None
+        routing_link_cost_model_value = matrix_manifest.routing_link_cost_model if matrix_manifest is not None else None
+        if routing_baseline_value:
+            cmd.extend(["--routing-baseline", str(routing_baseline_value)])
+        if routing_link_cost_model_value:
+            cmd.extend(["--routing-link-cost-model", str(routing_link_cost_model_value)])
         _run_command(
             name="run_matrix",
             cmd=cmd,
@@ -810,8 +1083,8 @@ def build_pipeline(argv: Sequence[str] | None = None) -> dict[str, Any]:
             "--output",
             str(raw_summary_path),
         ]
-        if args.tag:
-            aggregate_cmd.extend(["--tag", args.tag])
+        if tag_value:
+            aggregate_cmd.extend(["--tag", tag_value])
         _run_command(
             name="aggregate_results",
             cmd=aggregate_cmd,
@@ -830,7 +1103,42 @@ def build_pipeline(argv: Sequence[str] | None = None) -> dict[str, Any]:
             seed_filter=seed_filter,
             scenario_filter=scenario_filter,
             policy_filter=policy_filter,
-            deterministic_filter=args.deterministic,
+            matrix_id_filter=matrix_manifest.matrix_id if matrix_manifest is not None else None,
+            matrix_case_filter=matrix_case_filter,
+            deterministic_filter=matrix_manifest.deterministic if matrix_manifest is not None else args.deterministic,
+            topology_seed_filter=None if args.topology_seed is None else str(args.topology_seed),
+            topology_name_filter=str(args.topology_name).strip() if args.topology_name else None,
+            topology_path_filter=None if topology_path is None else str(topology_path),
+            traffic_seed_filter=None if args.traffic_seed is None else str(args.traffic_seed),
+            traffic_model_filter=str(args.traffic_model).strip() if args.traffic_model else None,
+            traffic_name_filter=str(args.traffic_name).strip() if args.traffic_name else None,
+            traffic_path_filter=None if traffic_path is None else str(traffic_path),
+            traffic_scenario_filter=str(args.traffic_scenario).strip() if args.traffic_scenario else None,
+            traffic_scenario_version_filter=None if args.traffic_scenario_version is None else str(args.traffic_scenario_version),
+            stability_reversal_window_steps_filter=(
+                None if args.stability_reversal_window_steps is None else str(args.stability_reversal_window_steps)
+            ),
+            stability_reversal_penalty_filter=(
+                None if args.stability_reversal_penalty is None else str(args.stability_reversal_penalty)
+            ),
+            stability_max_transition_rate_filter=(
+                None if args.stability_max_transition_rate is None else str(args.stability_max_transition_rate)
+            ),
+            stability_max_flap_rate_filter=(
+                None if args.stability_max_flap_rate is None else str(args.stability_max_flap_rate)
+            ),
+            stability_max_flap_count_filter=(
+                None if args.stability_max_flap_count is None else str(args.stability_max_flap_count)
+            ),
+            power_utilization_sensitive_filter=(
+                None if args.power_utilization_sensitive is None else str(args.power_utilization_sensitive).lower()
+            ),
+            power_transition_on_joules_filter=(
+                None if args.power_transition_on_joules is None else str(args.power_transition_on_joules)
+            ),
+            power_transition_off_joules_filter=(
+                None if args.power_transition_off_joules is None else str(args.power_transition_off_joules)
+            ),
         )
         log_path = dirs["logs"] / "03_filter_summary.log"
         log_path.write_text(json.dumps(details, indent=2), encoding="utf-8")
@@ -880,7 +1188,7 @@ def build_pipeline(argv: Sequence[str] | None = None) -> dict[str, Any]:
         "--ai-policies",
         ",".join(ai_policies),
         "--primary-baseline-policy",
-        args.primary_baseline_policy,
+        matrix_manifest.primary_baseline_policy if matrix_manifest is not None else args.primary_baseline_policy,
         "--energy-target-pct",
         str(args.energy_target_pct),
         "--max-qos-violation-rate-increase",
@@ -952,6 +1260,17 @@ def build_pipeline(argv: Sequence[str] | None = None) -> dict[str, Any]:
         ),
         description=f"Write {concise_report_path}",
     )
+
+    try:
+        persist_final_evaluation_bundle(
+            output_dir=dirs["final_eval"],
+            payload=final_payload,
+            summary_path=final_eval_paths["json"],
+            report_path=final_eval_paths["report"],
+            source_summary_csv=authoritative_summary_path,
+        )
+    except Exception:
+        pass
 
     manifest = {
         "generated_at_utc": timestamp,

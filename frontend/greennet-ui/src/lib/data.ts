@@ -1,6 +1,7 @@
 ﻿import type {
   FinalEvaluationReport,
   FinalEvaluationSummaryRow,
+  FinalEvaluationThresholds,
   KpiMetric,
   LinkStateMap,
   OfficialLockedResult,
@@ -44,6 +45,86 @@ function toNumber(value: unknown, fallback = 0): number {
     }
   }
   return fallback;
+}
+
+type QosAcceptanceSource = {
+  qos_acceptance_status?: string;
+  qos_acceptability_status?: string;
+  qos_status?: string;
+  qos_acceptance_missing?: string;
+  qos_acceptability_missing?: string;
+  qos_missing?: string;
+  qos_thresholds?: Partial<FinalEvaluationThresholds>;
+  qos_acceptance_thresholds?: Partial<FinalEvaluationThresholds>;
+  qos_acceptability_thresholds?: Partial<FinalEvaluationThresholds>;
+  hypothesis_thresholds?: Partial<FinalEvaluationThresholds>;
+};
+
+type StabilitySource = {
+  stability_status?: string;
+  stability_missing?: string;
+};
+
+function firstNonEmptyString(...values: Array<string | null | undefined>): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim() !== "") {
+      return value;
+    }
+  }
+  return "";
+}
+
+export function selectQosAcceptanceStatus(source: QosAcceptanceSource | null | undefined): string {
+  if (!source) {
+    return "";
+  }
+
+  return firstNonEmptyString(
+    source.qos_acceptance_status,
+    source.qos_acceptability_status,
+    source.qos_status,
+  );
+}
+
+export function selectQosAcceptanceMissing(source: QosAcceptanceSource | null | undefined): string {
+  if (!source) {
+    return "";
+  }
+
+  return firstNonEmptyString(
+    source.qos_acceptance_missing,
+    source.qos_acceptability_missing,
+    source.qos_missing,
+  );
+}
+
+export function selectQosAcceptanceThresholds(
+  source: QosAcceptanceSource | null | undefined,
+): Partial<FinalEvaluationThresholds> | undefined {
+  if (!source) {
+    return undefined;
+  }
+
+  return (
+    source.qos_thresholds ??
+    source.qos_acceptance_thresholds ??
+    source.qos_acceptability_thresholds ??
+    source.hypothesis_thresholds
+  );
+}
+
+export function selectStabilityStatus(source: StabilitySource | null | undefined): string {
+  if (!source) {
+    return "";
+  }
+  return firstNonEmptyString(source.stability_status);
+}
+
+export function selectStabilityMissing(source: StabilitySource | null | undefined): string {
+  if (!source) {
+    return "";
+  }
+  return firstNonEmptyString(source.stability_missing);
 }
 
 function seeded(seed: number): () => number {
@@ -371,8 +452,8 @@ export function officialLockedScenarioMetrics(result: OfficialLockedResult): Kpi
     { label: "Dropped Traffic", value: toNumber(trained.dropped_mean, 0), unit: "pkts", digits: 0 },
     { label: "Drop Rate", value: toNumber(trained.drop_rate, 0) * 100, unit: "%", digits: 1 },
     { label: "Total Energy", value: toNumber(trained.energy_kwh_mean, 0), unit: "kWh", digits: 3 },
-    { label: "Dropped vs All-On", value: toNumber(delta?.delta_dropped, 0), unit: "pkts", digits: 0 },
-    { label: "Energy vs All-On", value: toNumber(delta?.delta_energy_kwh, 0), unit: "kWh", digits: 3 },
+    { label: "Dropped vs Traditional", value: toNumber(delta?.delta_dropped, 0), unit: "pkts", digits: 0 },
+    { label: "Energy vs Traditional", value: toNumber(delta?.delta_energy_kwh, 0), unit: "kWh", digits: 3 },
   ];
 }
 
@@ -383,13 +464,13 @@ export function fmt(value: number, digits = 2): string {
 export function formatPolicyLabel(policy: string): string {
   const normalized = normalizePolicy(policy);
   if (normalized === "ppo") {
-    return "PPO";
+    return "PPO (AI)";
   }
   if (normalized === "all_on") {
-    return "All-On";
+    return "Traditional (All-On)";
   }
   if (normalized === "heuristic") {
-    return "Heuristic";
+    return "Energy-Aware Heuristic";
   }
   return policy;
 }
@@ -440,18 +521,50 @@ export function formatStatusLabel(value: string): string {
   if (!value) {
     return "Unknown";
   }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "ai_policy") {
+    return "AI Policy";
+  }
+  if (normalized === "traditional_baseline") {
+    return "Traditional Baseline";
+  }
+  if (normalized === "heuristic_baseline" || normalized === "energy_aware_heuristic") {
+    return "Heuristic Baseline";
+  }
+  if (normalized === "non_ai_baseline") {
+    return "Non-AI Baseline";
+  }
   return titleCaseFromSlug(value);
 }
 
 export function statusTone(value: string): "success" | "warning" | "danger" | "neutral" {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "achieved" || normalized === "acceptable" || normalized === "pass") {
+  if (
+    normalized === "achieved" ||
+    normalized === "acceptable" ||
+    normalized === "accepted" ||
+    normalized === "pass" ||
+    normalized === "passed" ||
+    normalized === "approved" ||
+    normalized === "met" ||
+    normalized === "stable"
+  ) {
     return "success";
   }
-  if (normalized === "insufficient_data" || normalized === "check") {
+  if (normalized === "insufficient_data" || normalized === "check" || normalized === "pending" || normalized === "unknown") {
     return "warning";
   }
-  if (normalized === "not_achieved" || normalized === "missing" || normalized === "fail") {
+  if (
+    normalized === "not_achieved" ||
+    normalized === "missing" ||
+    normalized === "fail" ||
+    normalized === "failed" ||
+    normalized === "rejected" ||
+    normalized === "violated" ||
+    normalized === "violation" ||
+    normalized === "breach" ||
+    normalized === "unstable"
+  ) {
     return "danger";
   }
   return "neutral";

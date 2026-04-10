@@ -42,6 +42,15 @@ Core run persistence now also writes to SQLite.
 - default DB file: `artifacts/db/greennet.sqlite3`
 - manual init: `python3 -m greennet.persistence init`
 - backfill older artifact-only runs: `python3 -m greennet.persistence backfill --base both`
+- export a DB-backed summary CSV: `python3 -m greennet.persistence export-summary --base both --output /tmp/results_summary.csv`
+
+The DB now stores:
+
+- run metadata and matrix identity
+- policy, topology, traffic, energy-model, QoS-policy, and stability-policy identity
+- full summary payloads and key flattened summary metrics
+- per-step metrics including transition/flap and power breakdown fields
+- persisted final-evaluation bundle payloads for the official pipeline
 
 See `docs/run_database.md` for schema scope, migration behavior, and backend integration notes.
 
@@ -53,6 +62,8 @@ The final evidence bundle for this repository is not a single `results/` tree. U
 - `experiments/official_matrix_v6/final_evaluation/*`
 - `artifacts/traffic_verify/20260220_matrix/*`
 - locked run folders under `artifacts/locked/`
+
+For the current canonical runnable path, also treat `artifacts/db/greennet.sqlite3` as the structured source of truth for indexed official runs and persisted final-evaluation payloads. The CSV/JSON/Markdown files remain the shipped compatibility and reviewer-facing export layer.
 
 ## Pruning runs safely
 The pruning script is dry-run by default and prints an action plan (KEEP / STRIP / DELETE). Use `--apply` to perform changes. STRIP removes model artifacts only; DELETE removes tiny empty runs (when enabled).

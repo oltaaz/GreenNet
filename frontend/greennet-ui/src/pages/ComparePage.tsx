@@ -25,6 +25,11 @@ import {
   inferPolicy,
   normalizePerStep,
   normalizePolicy,
+  selectQosAcceptanceMissing,
+  selectQosAcceptanceStatus,
+  selectQosAcceptanceThresholds,
+  selectStabilityMissing,
+  selectStabilityStatus,
   statusTone,
 } from "../lib/data";
 import type {
@@ -229,6 +234,12 @@ export default function ComparePage() {
     finalReport?.best_policy ??
     overallRows.find((row) => row.is_best_policy_for_scope) ??
     null;
+  const reportQosThresholds = selectQosAcceptanceThresholds(finalReport);
+  const hasCentralQosThresholds = Boolean(finalReport?.qos_thresholds);
+  const bestAiQosStatus = selectQosAcceptanceStatus(bestAiOverall) || finalReport?.qos_acceptance_status || "";
+  const bestAiQosMissing = selectQosAcceptanceMissing(bestAiOverall) || finalReport?.qos_acceptance_missing || "";
+  const bestAiStabilityStatus = selectStabilityStatus(bestAiOverall) || finalReport?.overall_stability_status || "";
+  const bestAiStabilityMissing = selectStabilityMissing(bestAiOverall) || "";
 
   const generatedAtLabel = useMemo(() => {
     if (!finalReport?.generated_at_utc) {
@@ -260,13 +271,17 @@ export default function ComparePage() {
       <section className="page-title-row">
         <div>
           <p className="page-eyebrow">Reporting</p>
-          <h1>Unified results for live comparisons, scenario validation, and the final baseline vs AI story</h1>
+          <h1>Unified results for the traditional baseline, heuristic baseline, and AI policy story</h1>
         </div>
         {finalReport ? (
           <div className="meta-chip">
             <span>Final report</span>
             <strong>{generatedAtLabel ?? "Available"}</strong>
-            <small>{finalReport.classification?.primary_baseline_policy ? `baseline ${formatPolicyLabel(finalReport.classification.primary_baseline_policy)}` : "report loaded"}</small>
+            <small>
+              {finalReport.classification?.official_traditional_baseline_policy
+                ? `traditional ${formatPolicyLabel(finalReport.classification.official_traditional_baseline_policy)}`
+                : "report loaded"}
+            </small>
           </div>
         ) : null}
       </section>
@@ -293,19 +308,32 @@ export default function ComparePage() {
             </p>
             <div className="status-badge-row">
               <StatusBadge
-                label={`Hypothesis ${formatStatusLabel(bestAiOverall.hypothesis_status ?? "")}`}
-                tone={statusTone(bestAiOverall.hypothesis_status ?? "")}
+                label={`Operational ${formatStatusLabel(bestAiOverall.stability_qualified_hypothesis_status ?? bestAiOverall.hypothesis_status ?? "")}`}
+                tone={statusTone(bestAiOverall.stability_qualified_hypothesis_status ?? bestAiOverall.hypothesis_status ?? "")}
               />
-              <StatusBadge
-                label={`QoS ${formatStatusLabel(bestAiOverall.qos_acceptability_status ?? "")}`}
-                tone={statusTone(bestAiOverall.qos_acceptability_status ?? "")}
-              />
+              {bestAiQosStatus ? (
+                <StatusBadge label={`QoS ${formatStatusLabel(bestAiQosStatus)}`} tone={statusTone(bestAiQosStatus)} />
+              ) : null}
+              {bestAiQosMissing ? <StatusBadge label={`QoS ${formatStatusLabel(bestAiQosMissing)}`} tone="warning" /> : null}
+              {bestAiStabilityStatus ? (
+                <StatusBadge
+                  label={`Stability ${formatStatusLabel(bestAiStabilityStatus)}`}
+                  tone={statusTone(bestAiStabilityStatus)}
+                />
+              ) : null}
+              {bestAiStabilityMissing ? (
+                <StatusBadge label={`Stability ${formatStatusLabel(bestAiStabilityMissing)}`} tone="warning" />
+              ) : null}
               <StatusBadge label={`AI policy ${formatPolicyLabel(bestAiOverall.policy)}`} tone="neutral" />
             </div>
             <div className="report-stat-grid">
               <ReportStat
-                label="Energy reduction vs baseline"
+                label="Energy reduction vs traditional"
                 value={formatSignedValue(bestAiOverall.energy_reduction_pct_vs_baseline, 1, "%")}
+              />
+              <ReportStat
+                label="Energy reduction vs heuristic"
+                value={formatSignedValue(bestAiOverall.energy_reduction_pct_vs_heuristic_baseline, 1, "%")}
               />
               <ReportStat
                 label="Delivered traffic change"
@@ -333,33 +361,37 @@ export default function ComparePage() {
 
           <article className="glass-card report-threshold-card">
             <div className="card-heading">
-              <p>Hypothesis Gate</p>
-              <h3>Acceptance thresholds used in the final report</h3>
+              <p>{hasCentralQosThresholds ? "QoS Acceptance" : "Hypothesis Gate"}</p>
+              <h3>
+                {hasCentralQosThresholds
+                  ? "Centralized QoS thresholds used in the final report"
+                  : "Acceptance thresholds used in the final report"}
+              </h3>
             </div>
             <div className="threshold-list">
               <ReportStat
                 label="Energy reduction target"
-                value={`${fmt(finalReport.hypothesis_thresholds?.energy_target_pct ?? 0, 1)}%`}
+                value={`${fmt((reportQosThresholds ?? finalReport.hypothesis_thresholds)?.energy_target_pct ?? 0, 1)}%`}
               />
               <ReportStat
                 label="Max delivered loss"
-                value={`${fmt(finalReport.hypothesis_thresholds?.max_delivered_loss_pct ?? 0, 1)}%`}
+                value={`${fmt((reportQosThresholds ?? finalReport.hypothesis_thresholds)?.max_delivered_loss_pct ?? 0, 1)}%`}
               />
               <ReportStat
                 label="Max dropped increase"
-                value={`${fmt(finalReport.hypothesis_thresholds?.max_dropped_increase_pct ?? 0, 1)}%`}
+                value={`${fmt((reportQosThresholds ?? finalReport.hypothesis_thresholds)?.max_dropped_increase_pct ?? 0, 1)}%`}
               />
               <ReportStat
                 label="Max delay increase"
-                value={`${fmt(finalReport.hypothesis_thresholds?.max_delay_increase_pct ?? 0, 1)}%`}
+                value={`${fmt((reportQosThresholds ?? finalReport.hypothesis_thresholds)?.max_delay_increase_pct ?? 0, 1)}%`}
               />
               <ReportStat
                 label="Max path latency increase"
-                value={`${fmt(finalReport.hypothesis_thresholds?.max_path_latency_increase_pct ?? 0, 1)}%`}
+                value={`${fmt((reportQosThresholds ?? finalReport.hypothesis_thresholds)?.max_path_latency_increase_pct ?? 0, 1)}%`}
               />
               <ReportStat
                 label="Max QoS violation rate increase"
-                value={`${fmt((finalReport.hypothesis_thresholds?.max_qos_violation_rate_increase_abs ?? 0) * 100, 2)} pts`}
+                value={`${fmt(((reportQosThresholds ?? finalReport.hypothesis_thresholds)?.max_qos_violation_rate_increase_abs ?? 0) * 100, 2)} pts`}
               />
             </div>
           </article>
@@ -369,7 +401,7 @@ export default function ComparePage() {
       {overallRows.length > 0 ? (
         <section className="glass-card table-card">
           <div className="card-heading">
-            <p>Baseline vs AI Final Comparison</p>
+            <p>Traditional vs Heuristic vs AI</p>
             <h3>Overall final evaluation summary</h3>
           </div>
 
@@ -381,14 +413,15 @@ export default function ComparePage() {
                   <th>Class</th>
                   <th>Runs</th>
                   <th>Total Energy</th>
-                  <th>Energy vs Baseline</th>
+                  <th>Energy vs Traditional</th>
                   <th>Delivered Traffic</th>
-                  <th>Delivered vs Baseline</th>
+                  <th>Delivered vs Traditional</th>
                   <th>Dropped Traffic</th>
                   <th>Average Delay</th>
                   <th>QoS Violation Rate</th>
-                  <th>Hypothesis</th>
-                  <th>QoS Status</th>
+                  <th>Stability</th>
+                  <th>Operational</th>
+                  <th>QoS Acceptance</th>
                 </tr>
               </thead>
               <tbody>
@@ -401,7 +434,8 @@ export default function ComparePage() {
                       <div className="table-policy-cell">
                         <strong>{formatPolicyLabel(row.policy)}</strong>
                         <div className="table-badge-row">
-                          {row.is_primary_baseline ? <StatusBadge label="Baseline" tone="neutral" /> : null}
+                          {row.is_primary_baseline ? <StatusBadge label="Traditional" tone="neutral" /> : null}
+                          {row.is_heuristic_baseline ? <StatusBadge label="Heuristic" tone="neutral" /> : null}
                           {row.is_best_ai_policy_for_scope ? <StatusBadge label="Best AI" tone="success" /> : null}
                         </div>
                       </div>
@@ -417,14 +451,20 @@ export default function ComparePage() {
                     <td>{fmt((row.qos_violation_rate_mean ?? NaN) * 100, 1)}%</td>
                     <td>
                       <StatusBadge
-                        label={formatStatusLabel(row.hypothesis_status ?? "")}
-                        tone={statusTone(row.hypothesis_status ?? "")}
+                        label={formatStatusLabel(selectStabilityStatus(row))}
+                        tone={statusTone(selectStabilityStatus(row))}
                       />
                     </td>
                     <td>
                       <StatusBadge
-                        label={formatStatusLabel(row.qos_acceptability_status ?? "")}
-                        tone={statusTone(row.qos_acceptability_status ?? "")}
+                        label={formatStatusLabel(row.stability_qualified_hypothesis_status ?? row.hypothesis_status ?? "")}
+                        tone={statusTone(row.stability_qualified_hypothesis_status ?? row.hypothesis_status ?? "")}
+                      />
+                    </td>
+                    <td>
+                      <StatusBadge
+                        label={formatStatusLabel(selectQosAcceptanceStatus(row))}
+                        tone={statusTone(selectQosAcceptanceStatus(row))}
                       />
                     </td>
                   </tr>
@@ -439,7 +479,7 @@ export default function ComparePage() {
         <section className="scenario-report-section">
           <div className="card-heading">
             <p>Scenario Results</p>
-            <h3>Best AI result per scenario against the baseline</h3>
+            <h3>Best AI result per scenario against the official traditional baseline</h3>
           </div>
 
           <div className="scenario-results-grid">
@@ -452,20 +492,37 @@ export default function ComparePage() {
                   </div>
                   <div className="status-badge-row">
                     <StatusBadge
-                      label={formatStatusLabel(row.hypothesis_status ?? "")}
-                      tone={statusTone(row.hypothesis_status ?? "")}
+                      label={formatStatusLabel(row.stability_qualified_hypothesis_status ?? row.hypothesis_status ?? "")}
+                      tone={statusTone(row.stability_qualified_hypothesis_status ?? row.hypothesis_status ?? "")}
                     />
                     <StatusBadge
-                      label={formatStatusLabel(row.qos_acceptability_status ?? "")}
-                      tone={statusTone(row.qos_acceptability_status ?? "")}
+                      label={`Stability ${formatStatusLabel(selectStabilityStatus(row))}`}
+                      tone={statusTone(selectStabilityStatus(row))}
                     />
+                    <StatusBadge
+                      label={formatStatusLabel(selectQosAcceptanceStatus(row))}
+                      tone={statusTone(selectQosAcceptanceStatus(row))}
+                    />
+                    {selectStabilityMissing(row) ? (
+                      <StatusBadge label={`Stability ${formatStatusLabel(selectStabilityMissing(row))}`} tone="warning" />
+                    ) : null}
+                    {selectQosAcceptanceMissing(row) ? (
+                      <StatusBadge label={`QoS ${formatStatusLabel(selectQosAcceptanceMissing(row))}`} tone="warning" />
+                    ) : null}
                   </div>
                 </div>
                 <p className="card-caption">
                   {formatPolicyLabel(row.policy)} vs {formatPolicyLabel(row.comparison_baseline_policy ?? "")}
+                  {row.comparison_heuristic_baseline_policy
+                    ? ` | heuristic ${formatPolicyLabel(row.comparison_heuristic_baseline_policy)}`
+                    : ""}
                 </p>
                 <div className="report-stat-grid compact">
-                  <ReportStat label="Energy reduction" value={formatSignedValue(row.energy_reduction_pct_vs_baseline, 1, "%")} />
+                  <ReportStat label="Energy vs traditional" value={formatSignedValue(row.energy_reduction_pct_vs_baseline, 1, "%")} />
+                  <ReportStat
+                    label="Energy vs heuristic"
+                    value={formatSignedValue(row.energy_reduction_pct_vs_heuristic_baseline, 1, "%")}
+                  />
                   <ReportStat label="Delivered change" value={formatSignedValue(row.delivered_traffic_change_pct_vs_baseline, 1, "%")} />
                   <ReportStat label="Dropped change" value={formatSignedValue(row.dropped_traffic_change_pct_vs_baseline, 1, "%")} />
                   <ReportStat label="Delay change" value={formatSignedValue(row.avg_delay_ms_change_pct_vs_baseline, 1, "%")} />
@@ -555,24 +612,37 @@ export default function ComparePage() {
                     <th>Delivered Traffic</th>
                     <th>Dropped Traffic</th>
                     <th>Drop Rate</th>
+                    <th>QoS Acceptance</th>
                     <th>Active Links</th>
                     <th>Total Reward</th>
                   </tr>
                 </thead>
                 <tbody>
                   {summaries.map(({ policy, summary }) => (
-                    <tr key={policy}>
-                      <td>{formatPolicyLabel(policy)}</td>
-                      <td>{fmt(summary.energy_kwh, 3)}</td>
-                      <td>{fmt(summary.carbon_g, 3)}</td>
-                      <td>{fmt(summary.avg_delay_ms, 1)}</td>
-                      <td>{fmt(summary.avg_path_latency_ms, 2)}</td>
-                      <td>{fmt(summary.delivered, 0)}</td>
-                      <td>{fmt(summary.dropped, 0)}</td>
-                      <td>{fmt(summary.drop_rate, 1)}%</td>
-                      <td>{fmt(summary.active_ratio, 1)}%</td>
-                      <td>{fmt(summary.reward, 1)}</td>
-                    </tr>
+                    (() => {
+                      const qosStatus = selectQosAcceptanceStatus(summariesByPolicy[policy]);
+                      return (
+                        <tr key={policy}>
+                          <td>{formatPolicyLabel(policy)}</td>
+                          <td>{fmt(summary.energy_kwh, 3)}</td>
+                          <td>{fmt(summary.carbon_g, 3)}</td>
+                          <td>{fmt(summary.avg_delay_ms, 1)}</td>
+                          <td>{fmt(summary.avg_path_latency_ms, 2)}</td>
+                          <td>{fmt(summary.delivered, 0)}</td>
+                          <td>{fmt(summary.dropped, 0)}</td>
+                          <td>{fmt(summary.drop_rate, 1)}%</td>
+                          <td>
+                            {qosStatus ? (
+                              <StatusBadge label={formatStatusLabel(qosStatus)} tone={statusTone(qosStatus)} />
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+                          <td>{fmt(summary.active_ratio, 1)}%</td>
+                          <td>{fmt(summary.reward, 1)}</td>
+                        </tr>
+                      );
+                    })()
                   ))}
                 </tbody>
               </table>

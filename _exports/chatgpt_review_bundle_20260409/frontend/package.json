@@ -1,0 +1,10 @@
+{
+  "name": "greennet-frontend-shell",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix greennet-ui run dev",
+    "build": "npm --prefix greennet-ui run build",
+    "lint": "npm --prefix greennet-ui run lint",
+    "preview": "npm --prefix greennet-ui run preview"
+  }
+}

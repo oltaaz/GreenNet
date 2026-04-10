@@ -173,7 +173,41 @@ def _mean_col(df: pd.DataFrame, col: str) -> float:
         return float("nan")
 
 
-def _compute_kpis(run: RunData) -> Dict[str, float]:
+def _first_text(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _qos_badge(label: str, tone: str, detail: str = "") -> str:
+    palette = {
+        "success": ("#0f5132", "#d1fae5", "#34d399"),
+        "warning": ("#664d03", "#fef3c7", "#f59e0b"),
+        "danger": ("#7f1d1d", "#fee2e2", "#ef4444"),
+        "neutral": ("#1f2937", "#e5e7eb", "#9ca3af"),
+    }
+    fg, bg, border = palette.get(tone, palette["neutral"])
+    suffix = f" {detail}" if detail else ""
+    return (
+        f"<span style='display:inline-flex;align-items:center;gap:0.35rem;padding:0.35rem 0.7rem;"
+        f"border-radius:999px;background:{bg};color:{fg};border:1px solid {border};font-size:0.8rem;"
+        f"font-weight:700;line-height:1.2;'>{label}{suffix}</span>"
+    )
+
+
+def _qos_tone(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized in {"acceptable", "accepted", "pass", "passed", "met", "ok"}:
+        return "success"
+    if normalized in {"not_acceptable", "rejected", "fail", "failed", "violated", "violation", "breach"}:
+        return "danger"
+    if normalized in {"insufficient_data", "check", "pending", "unknown", "missing"}:
+        return "warning"
+    return "neutral"
+
+
+def _compute_kpis(run: RunData) -> Dict[str, Any]:
     df = run.per_step
     ov = overall(run.summary)
 
@@ -220,6 +254,10 @@ def _compute_kpis(run: RunData) -> Dict[str, float]:
         qos_violation = pd.Series([0.0] * len(df))
     qos_violation_steps = float(qos_violation.sum())
     qos_violation_rate = qos_violation_steps / float(steps)
+    qos_status = _first_text(ov.get("qos_acceptance_status"), ov.get("qos_acceptability_status"))
+    qos_missing = _first_text(ov.get("qos_acceptance_missing"), ov.get("qos_acceptability_missing"))
+    stability_status = _first_text(ov.get("stability_status"))
+    stability_missing = _first_text(ov.get("stability_missing"))
 
     return {
         "reward_mean": float(reward_val),
@@ -230,6 +268,12 @@ def _compute_kpis(run: RunData) -> Dict[str, float]:
         "toggles_total": float(toggles_total),
         "qos_violation_rate": float(qos_violation_rate),
         "qos_violation_steps": float(qos_violation_steps),
+        "qos_acceptance_status": qos_status,
+        "qos_acceptance_missing": qos_missing,
+        "stability_status": stability_status,
+        "stability_missing": stability_missing,
+        "qos_violation_rate_mean": float(qos_violation_rate),
+        "qos_violation_count_total": float(qos_violation_steps),
     }
 
 
@@ -249,7 +293,7 @@ def _top_util_edges(df: pd.DataFrame, top_k: int = 5) -> List[Tuple[str, float]]
 
 def render_compare(runs: List[Path]) -> None:
     st.subheader("Compare policies")
-    st.caption("Pick a scenario + seed and compare a baseline vs PPO (overlay plots + KPI cards).")
+    st.caption("Pick a scenario + seed and compare a non-AI reference vs PPO (overlay plots + KPI cards).")
 
     st.subheader("Official Matrix Leaderboard")
     results_dir = ROOT / "results"
@@ -360,6 +404,7 @@ def render_compare(runs: List[Path]) -> None:
                     "delta_dropped_vs_all_on",
                     "delta_dropped_vs_heuristic",
                     "qos_violation_rate_mean",
+                    "qos_acceptance_status",
                     "qos_violation_rate_mean_pct_vs_all_on",
                     "qos_violation_rate_mean_pct_vs_heuristic",
                     "delta_qos_violation_vs_all_on",
@@ -396,6 +441,7 @@ def render_compare(runs: List[Path]) -> None:
             "dropped_mean_pct_vs_all_on": "%Dropped vs All-on",
             "dropped_mean_pct_vs_heuristic": "%Dropped vs Heuristic",
             "qos_violation_rate_mean": "QoS viol rate",
+            "qos_acceptance_status": "QoS acceptance",
             "delta_qos_violation_vs_all_on": "ΔQoS vs All-on",
             "delta_qos_violation_vs_heuristic": "ΔQoS vs Heuristic",
             "qos_violation_rate_mean_pct_vs_all_on": "%QoS vs All-on",
@@ -495,7 +541,7 @@ def render_compare(runs: List[Path]) -> None:
     c5, c6 = st.columns(2)
     with c5:
         baseline_policy = st.selectbox(
-            "Baseline policy",
+            "Reference policy",
             ["heuristic", "all_on"],
             index=0,
             key="cmp_baseline_policy",
@@ -560,12 +606,12 @@ def render_compare(runs: List[Path]) -> None:
 
     with pick_cols[0]:
         if not matched_baseline:
-            st.warning(f"No matching runs for baseline={baseline_policy}")
+            st.warning(f"No matching runs for reference={baseline_policy}")
             chosen["baseline"] = None
         else:
             names = [x.name for x in matched_baseline]
             default_idx = 0
-            selected_name = st.selectbox("Baseline run", names, index=default_idx, key="cmp_pick_baseline")
+            selected_name = st.selectbox("Reference run", names, index=default_idx, key="cmp_pick_baseline")
             chosen["baseline"] = RESULTS_DIR / selected_name
 
     with pick_cols[1]:
@@ -680,7 +726,7 @@ def render_compare(runs: List[Path]) -> None:
                         (
                             f"<div style='color:{status_colors[status]}; "
                             "font-size:0.85rem; margin-top:-0.25rem; margin-bottom:0.35rem;'>"
-                            f"Δ vs baseline: {delta_text}</div>"
+                            f"Δ vs reference: {delta_text}</div>"
                         ),
                         unsafe_allow_html=True,
                     )
@@ -688,6 +734,24 @@ def render_compare(runs: List[Path]) -> None:
                 "Active ratio",
                 f"{vals['active_ratio_mean']:.3f}",
             )
+            qos_status = _first_text(vals.get("qos_acceptance_status"), vals.get("qos_acceptability_status"))
+            qos_missing = _first_text(vals.get("qos_acceptance_missing"), vals.get("qos_acceptability_missing"))
+            stability_status = _first_text(vals.get("stability_status"))
+            stability_missing = _first_text(vals.get("stability_missing"))
+            badges: List[str] = []
+            if qos_status:
+                badges.append(_qos_badge("QoS", _qos_tone(qos_status), qos_status))
+            elif qos_missing:
+                badges.append(_qos_badge("QoS", "warning", qos_missing))
+            if stability_status:
+                badges.append(_qos_badge("Stability", _qos_tone(stability_status), stability_status))
+            elif stability_missing:
+                badges.append(_qos_badge("Stability", "warning", stability_missing))
+            if badges:
+                st.markdown(
+                    "<div style='display:flex;gap:0.5rem;flex-wrap:wrap;'>" + "".join(badges) + "</div>",
+                    unsafe_allow_html=True,
+                )
 
     # Episode selection (applies to all runs that have the episode column)
     episode_value: Optional[int] = None
@@ -764,6 +828,10 @@ def render_compare(runs: List[Path]) -> None:
                 "dropped_total_mean": ov.get("dropped_total_mean", ""),
                 "energy_kwh_total_mean": ov.get("energy_kwh_total_mean", ""),
                 "avg_delay_ms_mean": ov.get("avg_delay_ms_mean", ""),
+                "qos_acceptance_status": _first_text(ov.get("qos_acceptance_status"), ov.get("qos_acceptability_status")),
+                "qos_acceptance_missing": _first_text(ov.get("qos_acceptance_missing"), ov.get("qos_acceptability_missing")),
+                "qos_violation_rate_mean": ov.get("qos_violation_rate_mean", ""),
+                "qos_violation_count_total": ov.get("qos_violation_count_total", ""),
                 "active_ratio_mean": ov.get("active_ratio_mean", ""),
                 "avg_utilization_mean": ov.get("avg_utilization_mean", ""),
             }
@@ -803,7 +871,7 @@ def render_compare(runs: List[Path]) -> None:
 
     st.divider()
 
-    st.subheader("Behavior stats (baseline vs PPO)")
+    st.subheader("Behavior stats (reference vs PPO)")
     stat_cols = st.columns(len(order))
     for i, key in enumerate(order):
         rd = loaded.get(key)

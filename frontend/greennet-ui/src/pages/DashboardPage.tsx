@@ -3,6 +3,7 @@ import ChartCard from "../components/ChartCard";
 import KpiCard from "../components/KpiCard";
 import OfficialResultCard from "../components/OfficialResultCard";
 import RunControls from "../components/RunControls";
+import StatusBadge from "../components/StatusBadge";
 import { ErrorNotice, InfoNotice, LoadingNotice } from "../components/StatusState";
 import TopologyPanel from "../components/TopologyPanel";
 import {
@@ -21,12 +22,18 @@ import {
   fallbackTopology,
   formatPolicyLabel,
   formatScenarioLabel,
+  formatStatusLabel,
   fmt,
   inferPolicy,
   kpiFromOverall,
   latestRunByPolicy,
   linkStateFromRatio,
   normalizePerStep,
+  selectQosAcceptanceMissing,
+  selectQosAcceptanceStatus,
+  selectStabilityMissing,
+  selectStabilityStatus,
+  statusTone,
   toMetrics,
 } from "../lib/data";
 import type {
@@ -41,9 +48,9 @@ import type {
 type PolicySeries = Record<string, PerStepRow[]>;
 
 const REFERENCE_POLICY_STYLES: Record<string, { label: string; color: string }> = {
-  all_on: { label: "All-On", color: "#f7bf5e" },
+  all_on: { label: "Traditional", color: "#f7bf5e" },
   heuristic: { label: "Heuristic", color: "#5dc8ff" },
-  ppo: { label: "PPO", color: "#00f2bf" },
+  ppo: { label: "PPO (AI)", color: "#00f2bf" },
 };
 
 function upsertRun(runs: RunSummary[], nextRun: RunSummary): RunSummary[] {
@@ -306,6 +313,13 @@ export default function DashboardPage() {
   const activeOfficialScenario = (selectedRun?.scenario ?? "").toLowerCase();
   const highlightedOfficialResult =
     officialResults.find((item) => item.scenario === activeOfficialScenario) ?? null;
+  const runQosStatus = selectQosAcceptanceStatus(overallSummary);
+  const runQosMissing = selectQosAcceptanceMissing(overallSummary);
+  const runStabilityStatus = selectStabilityStatus(overallSummary);
+  const runStabilityMissing = selectStabilityMissing(overallSummary);
+  const runHasCentralQosThresholds = Boolean(
+    overallSummary?.qos_acceptance_thresholds ?? overallSummary?.qos_thresholds,
+  );
 
   const kpis = useMemo(() => kpiFromOverall(overallSummary), [overallSummary]);
   const timeData = useMemo(() => chartRows(rows), [rows]);
@@ -454,6 +468,21 @@ export default function DashboardPage() {
               <strong>{selectedRun.max_steps ?? overallSummary?.steps_mean ?? "-"}</strong>
             </article>
           </div>
+          {runQosStatus || runQosMissing || runStabilityStatus || runStabilityMissing || runHasCentralQosThresholds ? (
+            <div className="status-badge-row">
+              {runQosStatus ? (
+                <StatusBadge label={`QoS ${formatStatusLabel(runQosStatus)}`} tone={statusTone(runQosStatus)} />
+              ) : null}
+              {runQosMissing ? <StatusBadge label={`QoS ${formatStatusLabel(runQosMissing)}`} tone="warning" /> : null}
+              {runStabilityStatus ? (
+                <StatusBadge label={`Stability ${formatStatusLabel(runStabilityStatus)}`} tone={statusTone(runStabilityStatus)} />
+              ) : null}
+              {runStabilityMissing ? (
+                <StatusBadge label={`Stability ${formatStatusLabel(runStabilityMissing)}`} tone="warning" />
+              ) : null}
+              {runHasCentralQosThresholds ? <StatusBadge label="QoS policy loaded" tone="neutral" /> : null}
+            </div>
+          ) : null}
         </section>
       ) : null}
 

@@ -10,6 +10,7 @@ from .sqlite_store import (
     get_run_repository,
     infer_run_source,
     persist_run_directory,
+    persist_final_evaluation_bundle,
 )
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "get_run_repository",
     "infer_run_source",
     "persist_run_directory",
+    "persist_final_evaluation_bundle",
 ]

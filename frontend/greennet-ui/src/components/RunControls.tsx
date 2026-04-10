@@ -100,9 +100,9 @@ export default function RunControls({
         <label>
           Policy
           <select value={policy} onChange={(event) => onPolicyChange(event.target.value)}>
-            <option value="all_on">All-On</option>
-            <option value="heuristic">Heuristic</option>
-            <option value="ppo">PPO</option>
+            <option value="all_on">Traditional (All-On)</option>
+            <option value="heuristic">Energy-Aware Heuristic</option>
+            <option value="ppo">PPO (AI)</option>
           </select>
         </label>
 

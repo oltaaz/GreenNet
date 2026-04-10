@@ -152,11 +152,50 @@ class StochasticTrafficConfig:
 
 
 _SCENARIO_ALIASES = {
-    "diurnal": "normal",
-    "normal diurnal": "normal",
-    "normal/diurnal": "normal",
+    "normal diurnal": "diurnal",
+    "normal/diurnal": "diurnal",
     "failure": "anomaly",
+    "flash crowd": "flash_crowd",
+    "flashcrowd": "flash_crowd",
+    "spike": "flash_crowd",
+    "multi peak": "multi_peak",
 }
+
+
+def _default_hotspots_for_node_count(node_count: int) -> tuple[tuple[int, int, float], ...]:
+    if node_count <= 2:
+        return ()
+    if node_count == 6:
+        return ((0, 3, 3.0), (1, 4, 2.0))
+    if node_count == 8:
+        return ((0, 5, 3.0), (2, 7, 2.0))
+    if node_count >= 12:
+        return ((0, 6, 3.0), (2, 9, 2.5), (4, 11, 2.0))
+
+    center = max(1, node_count // 2)
+    return (
+        (0, center, 3.0),
+        (max(1, node_count // 3), node_count - 1, 2.0),
+    )
+
+
+def _diurnal_profile_single_peak() -> tuple[float, ...]:
+    return (0.30, 0.35, 0.45, 0.60, 0.80, 0.95, 1.00, 0.90, 0.75, 0.60, 0.45, 0.35)
+
+
+def _diurnal_profile_multi_peak() -> tuple[float, ...]:
+    return (0.28, 0.42, 0.70, 0.95, 0.72, 0.48, 0.40, 0.62, 0.92, 0.88, 0.55, 0.35)
+
+
+def _resolve_scenario_overrides(
+    base: StochasticTrafficConfig,
+    preset: dict[str, object],
+) -> dict[str, object]:
+    resolved: dict[str, object] = {}
+    for key, value in preset.items():
+        resolved[key] = value(base) if callable(value) else value
+    return resolved
+
 
 _SCENARIO_PRESETS: dict[str, dict[int, dict[str, object]]] = {
     "normal": {
@@ -166,6 +205,16 @@ _SCENARIO_PRESETS: dict[str, dict[int, dict[str, object]]] = {
             "spike_multiplier_range": (1.5, 3.0),
             "spike_duration_range": (2, 6),
             "hotspots": (),
+        }
+    },
+    "diurnal": {
+        2: {
+            "avg_bursts_per_step": 2.8,
+            "diurnal_profile": _diurnal_profile_single_peak(),
+            "spike_prob": 0.01,
+            "spike_multiplier_range": (1.4, 2.6),
+            "spike_duration_range": (2, 5),
+            "hotspots": lambda cfg: _default_hotspots_for_node_count(int(cfg.node_count)),
         }
     },
     "burst": {
@@ -181,7 +230,7 @@ _SCENARIO_PRESETS: dict[str, dict[int, dict[str, object]]] = {
         2: {
             "avg_bursts_per_step": 3.0,
             "spike_prob": 0.01,
-            "hotspots": ((0, 5, 3.0), (2, 7, 2.0)),
+            "hotspots": lambda cfg: _default_hotspots_for_node_count(int(cfg.node_count)),
         }
     },
     "anomaly": {
@@ -191,6 +240,28 @@ _SCENARIO_PRESETS: dict[str, dict[int, dict[str, object]]] = {
             "spike_multiplier_range": (3.0, 8.0),
             "spike_duration_range": (5, 20),
             "hotspots": (),
+        }
+    },
+    "flash_crowd": {
+        2: {
+            "avg_bursts_per_step": 3.4,
+            "diurnal_profile": (0.35, 0.40, 0.45, 0.55, 0.65, 0.75, 0.90, 1.0, 0.95, 0.70, 0.50, 0.40),
+            "hotspots": lambda cfg: _default_hotspots_for_node_count(int(cfg.node_count)),
+            "spike_prob": 0.10,
+            "spike_multiplier_range": (3.0, 9.0),
+            "spike_duration_range": (4, 14),
+            "duration_range": (2, 8),
+            "p_elephant": 0.20,
+        }
+    },
+    "multi_peak": {
+        2: {
+            "avg_bursts_per_step": 3.2,
+            "diurnal_profile": _diurnal_profile_multi_peak(),
+            "spike_prob": 0.02,
+            "spike_multiplier_range": (1.8, 4.0),
+            "spike_duration_range": (2, 8),
+            "hotspots": lambda cfg: _default_hotspots_for_node_count(int(cfg.node_count)),
         }
     },
 }
@@ -215,7 +286,12 @@ def load_named_traffic_profile(name: str, *, node_count: int) -> ReplayTrafficCo
         raise TrafficValidationError(
             f"Unknown traffic profile '{normalized}'. Available named traffic profiles: {available}."
         )
-    return load_traffic_profile_from_file(path, node_count=node_count)
+    try:
+        return load_traffic_profile_from_file(path, node_count=node_count)
+    except TrafficValidationError as exc:
+        raise TrafficValidationError(
+            f"Named traffic profile '{normalized}' is not compatible with node_count={int(node_count)}: {exc}"
+        ) from exc
 
 
 def load_traffic_profile_from_file(path: str | Path, *, node_count: int) -> ReplayTrafficConfig:
@@ -338,7 +414,7 @@ def apply_traffic_scenario(
     if presets is None or use_ver not in presets:
         raise ValueError(f"Unknown traffic scenario '{scenario}' (version={use_ver})")
 
-    cfg = replace(base, **presets[use_ver])
+    cfg = replace(base, **_resolve_scenario_overrides(base, presets[use_ver]))
 
     if intensity is not None:
         cfg.avg_bursts_per_step = max(0.0, float(cfg.avg_bursts_per_step) * float(intensity))

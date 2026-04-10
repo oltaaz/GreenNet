@@ -24,6 +24,8 @@ def _recompute_overall_from_per_step(df: pd.DataFrame) -> dict:
         "active_ratio_mean": float("nan"),
         "avg_delay_ms_mean": float("nan"),
         "steps_mean": float("nan"),
+        "qos_violation_rate_mean": float("nan"),
+        "qos_violation_count_total": float("nan"),
     }
     if df is None or df.empty:
         return metrics
@@ -93,6 +95,8 @@ def _recompute_overall_from_per_step(df: pd.DataFrame) -> dict:
         avg_util_ep = _group_mean("avg_utilization")
         active_ratio_ep = _group_mean("active_ratio")
         delay_ep = _group_mean("avg_delay_ms")
+        qos_violation_ep = _group_mean("qos_violation")
+        qos_violation_total_ep = _group_sum("qos_violation")
 
         steps_mean = (
             group["step"].max().mean() if "step" in df_sorted.columns else float(len(df_sorted))
@@ -123,6 +127,12 @@ def _recompute_overall_from_per_step(df: pd.DataFrame) -> dict:
                 else float("nan"),
                 "avg_delay_ms_mean": float(delay_ep.mean())
                 if not delay_ep.empty
+                else float("nan"),
+                "qos_violation_rate_mean": float(qos_violation_ep.mean())
+                if not qos_violation_ep.empty
+                else float("nan"),
+                "qos_violation_count_total": float(qos_violation_total_ep.sum())
+                if not qos_violation_total_ep.empty
                 else float("nan"),
                 "steps_mean": float(steps_mean),
             }
@@ -171,10 +181,46 @@ def _recompute_overall_from_per_step(df: pd.DataFrame) -> dict:
             "avg_utilization_mean": _col_mean("avg_utilization"),
             "active_ratio_mean": _col_mean("active_ratio"),
             "avg_delay_ms_mean": _col_mean("avg_delay_ms"),
+            "qos_violation_rate_mean": _col_mean("qos_violation"),
+            "qos_violation_count_total": _col_sum("qos_violation"),
             "steps_mean": _col_max("step") if "step" in df_sorted.columns else float(len(df_sorted)),
         }
     )
     return metrics
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _qos_badge(label: str, tone: str, detail: str = "") -> str:
+    palette = {
+        "success": ("#0f5132", "#d1fae5", "#34d399"),
+        "warning": ("#664d03", "#fef3c7", "#f59e0b"),
+        "danger": ("#7f1d1d", "#fee2e2", "#ef4444"),
+        "neutral": ("#1f2937", "#e5e7eb", "#9ca3af"),
+    }
+    fg, bg, border = palette.get(tone, palette["neutral"])
+    suffix = f" {detail}" if detail else ""
+    return (
+        f"<span style='display:inline-flex;align-items:center;gap:0.35rem;padding:0.35rem 0.7rem;"
+        f"border-radius:999px;background:{bg};color:{fg};border:1px solid {border};font-size:0.82rem;"
+        f"font-weight:700;line-height:1.2;'>{label}{suffix}</span>"
+    )
+
+
+def _qos_tone(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized in {"acceptable", "accepted", "pass", "passed", "met", "ok"}:
+        return "success"
+    if normalized in {"not_acceptable", "rejected", "fail", "failed", "violated", "violation", "breach"}:
+        return "danger"
+    if normalized in {"insufficient_data", "check", "pending", "unknown", "missing"}:
+        return "warning"
+    return "neutral"
 
 
 def _metric_cards_from_summary(run: RunData) -> None:
@@ -210,6 +256,11 @@ def _metric_cards_from_summary(run: RunData) -> None:
     else:
         qos_violation = pd.Series([0.0] * len(df))
     qos_violation_rate = float(qos_violation.mean()) if len(df) > 0 else 0.0
+    qos_status = _first_text(ov.get("qos_acceptance_status"), ov.get("qos_acceptability_status"))
+    qos_missing = _first_text(ov.get("qos_acceptance_missing"), ov.get("qos_acceptability_missing"))
+    qos_thresholds = ov.get("qos_acceptance_thresholds") or ov.get("qos_thresholds") or ov.get("hypothesis_thresholds")
+    stability_status = _first_text(ov.get("stability_status"))
+    stability_missing = _first_text(ov.get("stability_missing"))
 
     c11, c12, c13, c14, c15 = st.columns(5)
     c11.metric("Toggle rate", f"{toggles_rate:.4f}")
@@ -217,6 +268,23 @@ def _metric_cards_from_summary(run: RunData) -> None:
     c13.metric("Active ratio (mean)", str(ov.get("active_ratio_mean", "")))
     c14.metric("Avg util (mean)", str(ov.get("avg_utilization_mean", "")))
     c15.metric("Energy kWh (mean)", str(ov.get("energy_kwh_total_mean", "")))
+    if qos_status or qos_missing or stability_status or stability_missing or qos_thresholds:
+        badges: List[str] = []
+        if qos_status:
+            badges.append(_qos_badge("QoS", _qos_tone(qos_status), _first_text(qos_status)))
+        if qos_missing:
+            badges.append(_qos_badge("QoS", "warning", _first_text(qos_missing)))
+        if stability_status:
+            badges.append(_qos_badge("Stability", _qos_tone(stability_status), _first_text(stability_status)))
+        if stability_missing:
+            badges.append(_qos_badge("Stability", "warning", _first_text(stability_missing)))
+        if qos_thresholds:
+            badges.append(_qos_badge("QoS policy", "neutral"))
+        if badges:
+            st.markdown(
+                "<div style='display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.5rem;'>" + "".join(badges) + "</div>",
+                unsafe_allow_html=True,
+            )
 
 
 def render_single_run(runs: List[Path]) -> None:
@@ -352,6 +420,8 @@ def render_single_run(runs: List[Path]) -> None:
             "avg_utilization_mean",
             "active_ratio_mean",
             "avg_delay_ms_mean",
+            "qos_violation_rate_mean",
+            "qos_violation_count_total",
             "steps_mean",
         ]
         tolerances = {
@@ -363,6 +433,8 @@ def render_single_run(runs: List[Path]) -> None:
             "avg_utilization_mean": 1e-6,
             "active_ratio_mean": 1e-6,
             "avg_delay_ms_mean": 1e-6,
+            "qos_violation_rate_mean": 1e-6,
+            "qos_violation_count_total": 1e-6,
             "steps_mean": 0.0,
         }
 
@@ -448,10 +520,14 @@ def render_single_run(runs: List[Path]) -> None:
             "scenario",
             "seed",
             "status",
+            "qos_acceptance_status",
+            "qos_acceptance_missing",
             "reward_total_mean",
             "dropped_total_mean",
             "energy_kwh_total_mean",
             "avg_delay_ms_mean",
+            "qos_violation_rate_mean",
+            "qos_violation_count_total",
             "results_dir",
         ]
         cols = [c for c in cols_first if c in view.columns] + [c for c in view.columns if c not in cols_first]

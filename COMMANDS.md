@@ -18,33 +18,75 @@ python3 train.py --config configs/train_burst.json --timesteps 300000
 python3 train.py --config configs/train_hotspot.json --timesteps 300000
 ```
 
+Regenerate the canonical official PPO family for the current env/topology definitions:
+
+```bash
+python3 experiments/regenerate_official_ppo_checkpoint.py --all-topologies --timesteps 25000
+```
+
+This writes the official reviewer-facing PPO checkpoints to:
+
+- `artifacts/models/official_acceptance_v1/small/ppo_greennet.zip`
+- `artifacts/models/official_acceptance_v1/medium/ppo_greennet.zip`
+- `artifacts/models/official_acceptance_v1/large/ppo_greennet.zip`
+
 ### Run A Single Experiment
 
 ```bash
 python3 run_experiment.py --policy heuristic --scenario normal --seed 0 --episodes 1 --steps 300
 python3 run_experiment.py --policy ppo --scenario hotspot --seed 0 --episodes 1 --steps 300
+python3 run_experiment.py --policy all_on --scenario normal --seed 0 --episodes 1 --steps 300 --topology-name medium
+python3 run_experiment.py --policy all_on --scenario flash_crowd --seed 0 --episodes 1 --steps 300 --topology-name large
 ```
 
-### Run The Official Matrix
+### Reproduce The Official Final Claim
 
 ```bash
-python3 experiments/run_matrix.py \
-  --policies all_on,heuristic,ppo \
-  --scenarios normal,burst,hotspot \
-  --seeds 0,1,2,3,4,5,6,7,8,9 \
-  --episodes 50 \
-  --steps 300 \
-  --tag matrix_v6
+python3 experiments/run_official_acceptance_matrix.py
 ```
+
+This is now the canonical one-command reviewer path. It always uses `configs/acceptance_matrices/official_acceptance_v1.json`, initializes the SQLite run store, executes the official matrix, aggregates results, writes the final evaluation bundle, and mirrors indexed runs plus the final-evaluation payload into `artifacts/db/greennet.sqlite3`.
+
+For PPO, this command now resolves the canonical topology-specific checkpoint family automatically. The older single checkpoint under `runs/20260220_111755/ppo_greennet.zip` is not compatible with the current observation space and should not be used as the official artifact.
+
+Main outputs:
+
+- `artifacts/final_pipeline/official_acceptance_v1/report/reviewer_start_here.md`
+- `artifacts/final_pipeline/official_acceptance_v1/report/concise_report.md`
+- `artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation/final_evaluation_report.md`
+- `artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_official_acceptance_v1.csv`
+
+Prerequisite-only check:
+
+```bash
+python3 experiments/run_official_acceptance_matrix.py --check-only
+```
+
+Use `python3 experiments/run_matrix.py --matrix-manifest <path.json>` for non-official benchmark variants.
+Run summaries now also preserve `matrix_id`, `matrix_name`, `matrix_manifest`, `matrix_case_id`, and `matrix_case_label` so official benchmark identity survives aggregation and final reporting.
 
 ### Build The Final Evidence Bundle
 
 ```bash
-python3 experiments/final_evaluation.py \
-  --summary-csv experiments/official_matrix_v6/results_summary_matrix_v6.csv \
-  --primary-baseline-policy heuristic \
-  --ai-policies ppo \
-  --output-dir experiments/official_matrix_v6/final_evaluation
+python3 experiments/run_official_acceptance_matrix.py \
+  --skip-eval \
+  --summary-csv results/results_summary_official_acceptance_v1.csv
+```
+
+Optional QoS acceptance overrides for the final report remain available here:
+
+- `--max-delivered-loss-pct`
+- `--max-dropped-increase-pct`
+- `--max-delay-increase-pct`
+- `--max-path-latency-increase-pct`
+- `--max-qos-violation-rate-increase`
+
+### Run Database Helpers
+
+```bash
+python3 -m greennet.persistence init
+python3 -m greennet.persistence backfill --base both
+python3 -m greennet.persistence export-summary --base both --output /tmp/results_summary.csv
 ```
 
 ### Start The API And Frontend

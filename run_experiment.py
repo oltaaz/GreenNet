@@ -16,15 +16,25 @@ import numpy as np
 
 from baselines import (
     action_sleep_if_idle,
-    canonical_controller_policy_name,
-    controller_policy_class,
 )
 from greennet.env import EnvConfig, GreenNetEnv
 from greennet.persistence import persist_run_directory
+from greennet.policy_taxonomy import (
+    canonical_controller_policy_name,
+    canonical_experiment_policy_name,
+    controller_policy_class,
+    experiment_policy_class,
+)
+from greennet.qos import (
+    delay_threshold_ms,
+    evaluate_run_qos,
+    runtime_thresholds_from_config,
+)
 from greennet.routing import (
     canonicalize_routing_baseline_name,
     canonicalize_routing_link_cost_model,
 )
+from greennet.stability import evaluate_run_stability, stability_policy_from_config
 from greennet.utils.config import load_env_config_from_run, resolve_env_paths_in_config, save_env_config
 
 try:
@@ -78,6 +88,15 @@ def _coerce_env_value(key: str, value: Any) -> Any:
     return value
 
 
+def _parse_bool_arg(value: str) -> bool:
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Expected a boolean value, got: {value!r}")
+
+
 def _extract_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
     env_overrides: Dict[str, Any] = {}
     for key in ("env", "env_config", "env_kwargs"):
@@ -91,9 +110,46 @@ def _extract_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
         "topology_randomize",
         "topology_name",
         "topology_path",
+        "traffic_model",
         "traffic_seed",
         "traffic_name",
         "traffic_path",
+        "traffic_scenario",
+        "traffic_scenario_version",
+        "traffic_scenario_intensity",
+        "traffic_scenario_duration",
+        "traffic_scenario_frequency",
+        "qos_target_norm_drop",
+        "qos_min_volume",
+        "qos_violation_penalty_scale",
+        "qos_guard_margin",
+        "qos_guard_margin_off",
+        "qos_guard_margin_on",
+        "qos_guard_penalty_scale",
+        "qos_avg_delay_guard_multiplier",
+        "qos_avg_delay_guard_margin_ms",
+        "qos_recovery_delay_multiplier",
+        "qos_recovery_delay_guard_margin_ms",
+        "qos_p95_delay_threshold_ms",
+        "stability_reversal_window_steps",
+        "stability_reversal_penalty",
+        "stability_min_steps_for_assessment",
+        "stability_max_transition_rate",
+        "stability_max_flap_rate",
+        "stability_max_flap_count",
+        "power_network_fixed_watts",
+        "power_device_active_watts",
+        "power_device_sleep_watts",
+        "power_device_dynamic_watts",
+        "power_link_active_watts",
+        "power_link_sleep_watts",
+        "power_link_dynamic_watts",
+        "power_utilization_sensitive",
+        "power_transition_on_joules",
+        "power_transition_off_joules",
+        "carbon_base_intensity_g_per_kwh",
+        "carbon_amplitude_g_per_kwh",
+        "carbon_period_seconds",
     ):
         if key in config and key not in env_overrides:
             env_overrides[key] = config[key]
@@ -168,16 +224,26 @@ FIELDNAMES = [
     "avg_delay_ms",
     "avg_path_latency_ms",
     "energy_kwh",
+    "energy_steady_kwh",
+    "energy_transition_kwh",
     "carbon_g",
+    "carbon_intensity_g_per_kwh",
     "power_total_watts",
     "power_fixed_watts",
     "power_variable_watts",
+    "power_transition_watts_equiv",
     "power_device_watts",
     "power_link_watts",
     "active_devices",
     "inactive_devices",
     "active_links",
     "inactive_links",
+    "transition_on_count",
+    "transition_off_count",
+    "transition_count",
+    "flap_event",
+    "flap_event_count",
+    "stability_reversal_penalty",
     "delta_energy_kwh",
     "delta_delivered",
     "delta_dropped",
@@ -261,10 +327,13 @@ def build_env_config(scenario: str, max_steps: int | None, base_config: EnvConfi
         cfg.traffic_seed = None
 
     scenario_key = scenario.strip().lower()
-    if scenario_key in ("normal", "diurnal", "normal/diurnal", "normal diurnal"):
+    if scenario_key == "normal":
         cfg.traffic_model = "stochastic"
         # Keep "normal" aligned with the model's saved training environment when available.
         cfg.traffic_scenario = None if base_config is not None else "normal"
+    elif scenario_key in ("diurnal", "normal/diurnal", "normal diurnal"):
+        cfg.traffic_model = "stochastic"
+        cfg.traffic_scenario = "diurnal"
     elif scenario_key == "burst":
         cfg.traffic_model = "stochastic"
         cfg.traffic_scenario = "burst"
@@ -274,6 +343,12 @@ def build_env_config(scenario: str, max_steps: int | None, base_config: EnvConfi
     elif scenario_key in ("anomaly", "failure"):
         cfg.traffic_model = "stochastic"
         cfg.traffic_scenario = "anomaly"
+    elif scenario_key in ("flash_crowd", "flash-crowd", "flash crowd"):
+        cfg.traffic_model = "stochastic"
+        cfg.traffic_scenario = "flash_crowd"
+    elif scenario_key in ("multi_peak", "multi-peak", "multi peak"):
+        cfg.traffic_model = "stochastic"
+        cfg.traffic_scenario = "multi_peak"
     elif scenario_key == "custom":
         pass
     else:
@@ -304,24 +379,28 @@ def load_policy(
     model_path: Path | None,
     deterministic: bool,
 ) -> Tuple[ActionFn, Dict[str, Any]]:
-    controller_policy = canonical_controller_policy_name(policy)
-    controller_class = controller_policy_class(policy)
+    canonical_policy = canonical_experiment_policy_name(policy)
+    controller_policy = canonical_controller_policy_name(canonical_policy)
+    controller_class = controller_policy_class(canonical_policy)
+    policy_class = experiment_policy_class(canonical_policy)
 
-    if policy in ("noop", "all_on"):
+    if canonical_policy == "all_on":
         return (lambda _obs, _info, _env: 0), {
             "policy_type": "all_on",
+            "policy_class": policy_class,
             "controller_policy": controller_policy,
             "controller_policy_class": controller_class,
         }
 
-    if policy in ("baseline", "heuristic"):
+    if canonical_policy == "heuristic":
         return action_sleep_if_idle, {
             "policy_type": "heuristic",
+            "policy_class": policy_class,
             "controller_policy": controller_policy,
             "controller_policy_class": controller_class,
         }
 
-    if policy != "ppo":
+    if canonical_policy != "ppo":
         raise ValueError(f"Unknown policy: {policy}")
 
     if model_path is not None and not model_path.exists():
@@ -513,6 +592,15 @@ def load_policy(
         candidates.sort(key=lambda item: item[0], reverse=True)
         return int(candidates[0][1])
 
+    def _delay_guard_limit(
+        avg_path_latency_ms: float,
+        env: GreenNetEnv,
+        *,
+        recovery: bool = False,
+    ) -> float | None:
+        thresholds = runtime_thresholds_from_config(env.config)
+        return delay_threshold_ms(avg_path_latency_ms, thresholds, recovery=recovery)
+
     def _calm_off_action(
         obs: Dict[str, Any],
         info: Dict[str, Any],
@@ -557,7 +645,8 @@ def load_policy(
             return 0, False
         if norm_drop_step > max(0.03, qos_target * 0.75):
             return 0, False
-        if avg_path_latency_ms > 0.0 and avg_delay_ms > max(avg_path_latency_ms * 4.0, avg_path_latency_ms + 15.0):
+        delay_limit = _delay_guard_limit(avg_path_latency_ms, env, recovery=False)
+        if delay_limit is not None and avg_delay_ms > float(delay_limit):
             return 0, False
 
         demand_now = float(np.asarray(obs.get("demand_now", [0.0]), dtype=np.float32).reshape(-1)[0])
@@ -664,7 +753,10 @@ def load_policy(
             or norm_drop_step > max(0.05, qos_target * 1.5)
             or (
                 avg_path_latency_ms > 0.0
-                and avg_delay_ms > max(avg_path_latency_ms * 6.0, avg_path_latency_ms + 20.0)
+                and (
+                    (delay_limit := _delay_guard_limit(avg_path_latency_ms, env, recovery=True)) is not None
+                    and avg_delay_ms > float(delay_limit)
+                )
                 and norm_drop_step > 0.0
             )
         )
@@ -697,6 +789,7 @@ def load_policy(
 
     return _action_ppo_safe, {
         "policy_type": "ppo",
+        "policy_class": policy_class,
         "controller_policy": controller_policy,
         "controller_policy_class": controller_class,
         "model_path": str(resolved_model_path),
@@ -755,16 +848,29 @@ def build_step_row(
         "avg_delay_ms": float(getattr(metrics, "avg_delay_ms", 0.0)),
         "avg_path_latency_ms": float(getattr(metrics, "avg_path_latency_ms", 0.0)),
         "energy_kwh": float(getattr(metrics, "energy_kwh", 0.0)),
+        "energy_steady_kwh": float(getattr(metrics, "energy_steady_kwh", 0.0)),
+        "energy_transition_kwh": float(getattr(metrics, "energy_transition_kwh", 0.0)),
         "carbon_g": float(getattr(metrics, "carbon_g", 0.0)),
+        "carbon_intensity_g_per_kwh": float(getattr(metrics, "carbon_intensity_g_per_kwh", 0.0)),
         "power_total_watts": float(getattr(metrics, "power_total_watts", 0.0)),
         "power_fixed_watts": float(getattr(metrics, "power_fixed_watts", 0.0)),
         "power_variable_watts": float(getattr(metrics, "power_variable_watts", 0.0)),
+        "power_transition_watts_equiv": float(getattr(metrics, "power_transition_watts_equiv", 0.0)),
         "power_device_watts": float(getattr(metrics, "power_device_watts", 0.0)),
         "power_link_watts": float(getattr(metrics, "power_link_watts", 0.0)),
         "active_devices": int(getattr(metrics, "active_devices", 0)),
         "inactive_devices": int(getattr(metrics, "inactive_devices", 0)),
         "active_links": int(getattr(metrics, "active_links", 0)),
         "inactive_links": int(getattr(metrics, "inactive_links", 0)),
+        "transition_on_count": int(getattr(metrics, "transition_on_count", 0)),
+        "transition_off_count": int(getattr(metrics, "transition_off_count", 0)),
+        "transition_count": int(
+            int(getattr(metrics, "transition_on_count", 0))
+            + int(getattr(metrics, "transition_off_count", 0))
+        ),
+        "flap_event": bool(info.get("flap_event", False)),
+        "flap_event_count": int(info.get("flap_event_count", 0)),
+        "stability_reversal_penalty": float(info.get("stability_reversal_penalty", 0.0)),
         "delta_energy_kwh": float(info.get("delta_energy_kwh", 0.0)),
         "delta_delivered": float(info.get("delta_delivered", 0.0)),
         "delta_dropped": float(info.get("delta_dropped", 0.0)),
@@ -809,7 +915,10 @@ def summarize_episodes(episode_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "reward_total": [float(r["reward_total"]) for r in episode_rows],
         "delivered_total": [float(r["delivered_total"]) for r in episode_rows],
         "dropped_total": [float(r["dropped_total"]) for r in episode_rows],
+        "delivery_loss_rate": [float(r["delivery_loss_rate"]) for r in episode_rows if r.get("delivery_loss_rate") is not None],
         "energy_kwh_total": [float(r["energy_kwh_total"]) for r in episode_rows],
+        "energy_steady_kwh_total": [float(r["energy_steady_kwh_total"]) for r in episode_rows],
+        "energy_transition_kwh_total": [float(r["energy_transition_kwh_total"]) for r in episode_rows],
         "carbon_g_total": [float(r["carbon_g_total"]) for r in episode_rows],
         "steps": [int(r["steps"]) for r in episode_rows],
     }
@@ -827,12 +936,29 @@ def summarize_episodes(episode_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         totals["power_total_watts_mean"] = [float(r.get("power_total_watts_mean", 0.0)) for r in episode_rows]
         totals["power_fixed_watts_mean"] = [float(r.get("power_fixed_watts_mean", 0.0)) for r in episode_rows]
         totals["power_variable_watts_mean"] = [float(r.get("power_variable_watts_mean", 0.0)) for r in episode_rows]
+        totals["power_transition_watts_mean"] = [float(r.get("power_transition_watts_mean", 0.0)) for r in episode_rows]
         totals["power_device_watts_mean"] = [float(r.get("power_device_watts_mean", 0.0)) for r in episode_rows]
         totals["power_link_watts_mean"] = [float(r.get("power_link_watts_mean", 0.0)) for r in episode_rows]
+        totals["carbon_intensity_g_per_kwh_mean"] = [float(r.get("carbon_intensity_g_per_kwh_mean", 0.0)) for r in episode_rows]
         totals["active_devices_mean"] = [float(r.get("active_devices_mean", 0.0)) for r in episode_rows]
         totals["inactive_devices_mean"] = [float(r.get("inactive_devices_mean", 0.0)) for r in episode_rows]
         totals["active_links_mean"] = [float(r.get("active_links_mean", 0.0)) for r in episode_rows]
         totals["inactive_links_mean"] = [float(r.get("inactive_links_mean", 0.0)) for r in episode_rows]
+        totals["transition_count_total"] = [float(r.get("transition_count_total", 0.0)) for r in episode_rows]
+        totals["transition_on_count_total"] = [float(r.get("transition_on_count_total", 0.0)) for r in episode_rows]
+        totals["transition_off_count_total"] = [float(r.get("transition_off_count_total", 0.0)) for r in episode_rows]
+        totals["flap_event_count_total"] = [float(r.get("flap_event_count_total", 0.0)) for r in episode_rows]
+        totals["stability_reversal_penalty_total"] = [
+            float(r.get("stability_reversal_penalty_total", 0.0)) for r in episode_rows
+        ]
+    if any("qos_violation_rate" in r for r in episode_rows):
+        totals["qos_violation_rate"] = [float(r.get("qos_violation_rate", 0.0)) for r in episode_rows]
+        totals["qos_violation_count"] = [float(r.get("qos_violation_count", 0.0)) for r in episode_rows]
+        totals["qos_delay_threshold_ms"] = [
+            float(r.get("qos_delay_threshold_ms", 0.0))
+            for r in episode_rows
+            if r.get("qos_delay_threshold_ms") is not None
+        ]
 
     overall = {
         "episodes": len(episode_rows),
@@ -842,8 +968,14 @@ def summarize_episodes(episode_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "delivered_total_std": _std(totals["delivered_total"]),
         "dropped_total_mean": _mean(totals["dropped_total"]),
         "dropped_total_std": _std(totals["dropped_total"]),
+        "delivery_loss_rate_mean": _mean([float(v) for v in totals.get("delivery_loss_rate", [])]),
+        "delivery_loss_rate_std": _std([float(v) for v in totals.get("delivery_loss_rate", [])]),
         "energy_kwh_total_mean": _mean(totals["energy_kwh_total"]),
         "energy_kwh_total_std": _std(totals["energy_kwh_total"]),
+        "energy_steady_kwh_total_mean": _mean(totals["energy_steady_kwh_total"]),
+        "energy_steady_kwh_total_std": _std(totals["energy_steady_kwh_total"]),
+        "energy_transition_kwh_total_mean": _mean(totals["energy_transition_kwh_total"]),
+        "energy_transition_kwh_total_std": _std(totals["energy_transition_kwh_total"]),
         "carbon_g_total_mean": _mean(totals["carbon_g_total"]),
         "carbon_g_total_std": _std(totals["carbon_g_total"]),
         "steps_mean": _mean([float(v) for v in totals["steps"]]),
@@ -884,14 +1016,88 @@ def summarize_episodes(episode_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "power_total_watts_std": _std([float(v) for v in totals["power_total_watts_mean"]]),
                 "power_fixed_watts_mean": _mean([float(v) for v in totals["power_fixed_watts_mean"]]),
                 "power_variable_watts_mean": _mean([float(v) for v in totals["power_variable_watts_mean"]]),
+                "power_transition_watts_mean": _mean([float(v) for v in totals["power_transition_watts_mean"]]),
                 "power_device_watts_mean": _mean([float(v) for v in totals["power_device_watts_mean"]]),
                 "power_link_watts_mean": _mean([float(v) for v in totals["power_link_watts_mean"]]),
+                "carbon_intensity_g_per_kwh_mean": _mean([float(v) for v in totals["carbon_intensity_g_per_kwh_mean"]]),
                 "active_devices_mean": _mean([float(v) for v in totals["active_devices_mean"]]),
                 "inactive_devices_mean": _mean([float(v) for v in totals["inactive_devices_mean"]]),
                 "active_links_mean": _mean([float(v) for v in totals["active_links_mean"]]),
                 "inactive_links_mean": _mean([float(v) for v in totals["inactive_links_mean"]]),
+                "transition_count_total_mean": _mean([float(v) for v in totals["transition_count_total"]]),
+                "transition_on_count_total_mean": _mean([float(v) for v in totals["transition_on_count_total"]]),
+                "transition_off_count_total_mean": _mean([float(v) for v in totals["transition_off_count_total"]]),
+                "flap_event_count_total_mean": _mean([float(v) for v in totals["flap_event_count_total"]]),
+                "stability_reversal_penalty_total_mean": _mean(
+                    [float(v) for v in totals["stability_reversal_penalty_total"]]
+                ),
             }
         )
+    if "qos_violation_rate" in totals:
+        overall.update(
+            {
+                "qos_violation_rate_mean": _mean([float(v) for v in totals["qos_violation_rate"]]),
+                "qos_violation_rate_std": _std([float(v) for v in totals["qos_violation_rate"]]),
+                "qos_violation_rate_count": int(len(totals["qos_violation_rate"])),
+                "qos_violation_count_mean": _mean([float(v) for v in totals["qos_violation_count"]]),
+                "qos_violation_count_std": _std([float(v) for v in totals["qos_violation_count"]]),
+                "qos_violation_count_count": int(len(totals["qos_violation_count"])),
+                "qos_violation_count_total": float(sum(float(v) for v in totals["qos_violation_count"])),
+                "qos_delay_threshold_ms_mean": _mean([float(v) for v in totals.get("qos_delay_threshold_ms", [])]),
+            }
+        )
+
+    thresholds = runtime_thresholds_from_config(episode_rows[0].get("qos_thresholds", {}))
+    overall_qos = evaluate_run_qos(
+        delivered_total=overall.get("delivered_total_mean"),
+        dropped_total=overall.get("dropped_total_mean"),
+        avg_delay_ms=overall.get("avg_delay_ms_mean"),
+        avg_path_latency_ms=overall.get("avg_path_latency_ms_mean"),
+        qos_violation_rate=overall.get("qos_violation_rate_mean"),
+        qos_violation_count=overall.get("qos_violation_count_total"),
+        thresholds=thresholds,
+    )
+    overall.update(overall_qos)
+    qos_thresholds = episode_rows[0].get("qos_thresholds")
+    if isinstance(qos_thresholds, dict):
+        overall["qos_thresholds"] = qos_thresholds
+        overall["qos_policy_name"] = (
+            episode_rows[0].get("qos_policy_name")
+            or qos_thresholds.get("qos_policy_name")
+            or qos_thresholds.get("policy_name")
+        )
+        overall["qos_policy_signature"] = (
+            episode_rows[0].get("qos_policy_signature")
+            or qos_thresholds.get("qos_policy_signature")
+            or qos_thresholds.get("policy_signature")
+        )
+
+    stability_thresholds = episode_rows[0].get("stability_thresholds")
+    if isinstance(stability_thresholds, dict):
+        overall["stability_thresholds"] = stability_thresholds
+        overall["stability_policy_name"] = (
+            episode_rows[0].get("stability_policy_name")
+            or stability_thresholds.get("stability_policy_name")
+            or stability_thresholds.get("policy_name")
+        )
+        overall["stability_policy_signature"] = (
+            episode_rows[0].get("stability_policy_signature")
+            or stability_thresholds.get("stability_policy_signature")
+            or stability_thresholds.get("policy_signature")
+        )
+
+    stability_summary = evaluate_run_stability(
+        steps=overall.get("steps_mean"),
+        transition_count_total=overall.get("transition_count_total_mean"),
+        flap_event_count_total=overall.get("flap_event_count_total_mean"),
+        blocked_by_cooldown_count=overall.get("blocked_by_cooldown_count_mean"),
+        toggles_attempted_count=overall.get("toggles_attempted_count_mean"),
+        policy=stability_policy_from_config(episode_rows[0].get("stability_thresholds", {})),
+    )
+    overall.update(stability_summary)
+    overall["transition_rate_mean"] = stability_summary.get("transition_rate")
+    overall["flap_rate_mean"] = stability_summary.get("flap_rate")
+    overall["blocked_by_cooldown_rate_mean"] = stability_summary.get("blocked_by_cooldown_rate")
 
     return {"episodes": episode_rows, "overall": overall}
 
@@ -919,6 +1125,8 @@ def run_episode(
     total_delivered = 0.0
     total_dropped = 0.0
     total_energy = 0.0
+    total_energy_steady = 0.0
+    total_energy_transition = 0.0
     total_carbon = 0.0
     avg_util_sum = 0.0
     active_ratio_sum = 0.0
@@ -927,13 +1135,21 @@ def run_episode(
     power_total_watts_sum = 0.0
     power_fixed_watts_sum = 0.0
     power_variable_watts_sum = 0.0
+    power_transition_watts_sum = 0.0
     power_device_watts_sum = 0.0
     power_link_watts_sum = 0.0
+    carbon_intensity_sum = 0.0
     active_devices_sum = 0.0
     inactive_devices_sum = 0.0
     active_links_sum = 0.0
     inactive_links_sum = 0.0
+    transition_count_total = 0
+    transition_on_total = 0
+    transition_off_total = 0
+    flap_event_total = 0
+    stability_reversal_penalty_total = 0.0
     steps = 0
+    qos_violation_steps = 0
     toggles_applied = 0
     toggles_reverted = 0
     toggles_attempted = 0
@@ -970,6 +1186,8 @@ def run_episode(
         total_delivered += float(info.get("delta_delivered", 0.0))
         total_dropped += float(info.get("delta_dropped", 0.0))
         total_energy += float(info.get("delta_energy_kwh", 0.0))
+        total_energy_steady += float(getattr(info.get("metrics"), "energy_steady_kwh", 0.0))
+        total_energy_transition += float(getattr(info.get("metrics"), "energy_transition_kwh", 0.0))
         total_carbon += float(delta_carbon)
         avg_util_sum += float(getattr(info.get("metrics"), "avg_utilization", 0.0))
         active_ratio_sum += float(obs["active_ratio"][0])
@@ -978,12 +1196,20 @@ def run_episode(
         power_total_watts_sum += float(getattr(info.get("metrics"), "power_total_watts", 0.0))
         power_fixed_watts_sum += float(getattr(info.get("metrics"), "power_fixed_watts", 0.0))
         power_variable_watts_sum += float(getattr(info.get("metrics"), "power_variable_watts", 0.0))
+        power_transition_watts_sum += float(getattr(info.get("metrics"), "power_transition_watts_equiv", 0.0))
         power_device_watts_sum += float(getattr(info.get("metrics"), "power_device_watts", 0.0))
         power_link_watts_sum += float(getattr(info.get("metrics"), "power_link_watts", 0.0))
+        carbon_intensity_sum += float(getattr(info.get("metrics"), "carbon_intensity_g_per_kwh", 0.0))
         active_devices_sum += float(getattr(info.get("metrics"), "active_devices", 0.0))
         inactive_devices_sum += float(getattr(info.get("metrics"), "inactive_devices", 0.0))
         active_links_sum += float(getattr(info.get("metrics"), "active_links", 0.0))
         inactive_links_sum += float(getattr(info.get("metrics"), "inactive_links", 0.0))
+        transition_count_total += int(info.get("transition_count", 0))
+        transition_on_total += int(getattr(info.get("metrics"), "transition_on_count", 0))
+        transition_off_total += int(getattr(info.get("metrics"), "transition_off_count", 0))
+        flap_event_total += int(info.get("flap_event_count", 0))
+        stability_reversal_penalty_total += float(info.get("stability_reversal_penalty", 0.0))
+        qos_violation_steps += int(bool(info.get("qos_violation")))
         toggles_applied += int(bool(info.get("toggle_applied")))
         toggles_reverted += int(bool(info.get("toggle_reverted")))
         toggles_attempted += int(info.get("toggles_attempted_count", 0))
@@ -997,27 +1223,69 @@ def run_episode(
             break
 
     denom = float(steps) if steps > 0 else 1.0
+    qos_meta = env.get_qos_policy_metadata() if hasattr(env, "get_qos_policy_metadata") else {}
+    stability_meta = env.get_stability_policy_metadata() if hasattr(env, "get_stability_policy_metadata") else {}
+    qos_thresholds = (
+        qos_meta.get("qos_thresholds", qos_meta)
+        if isinstance(qos_meta, dict)
+        else {}
+    )
+    qos_summary = evaluate_run_qos(
+        delivered_total=float(total_delivered),
+        dropped_total=float(total_dropped),
+        avg_delay_ms=float(avg_delay_sum / denom),
+        avg_path_latency_ms=float(avg_path_latency_sum / denom),
+        qos_violation_rate=float(qos_violation_steps / denom),
+        qos_violation_count=float(qos_violation_steps),
+        thresholds=runtime_thresholds_from_config(env.config),
+    )
+    stability_summary = evaluate_run_stability(
+        steps=float(steps),
+        transition_count_total=float(transition_count_total),
+        flap_event_count_total=float(flap_event_total),
+        blocked_by_cooldown_count=float(blocked_by_cooldown),
+        toggles_attempted_count=float(toggles_attempted),
+        policy=stability_policy_from_config(env.config),
+    )
     return {
         "episode": int(episode_idx),
         "steps": int(steps),
         "reward_total": float(total_reward),
         "delivered_total": float(total_delivered),
         "dropped_total": float(total_dropped),
+        "delivery_loss_rate": qos_summary.get("delivery_loss_rate"),
         "energy_kwh_total": float(total_energy),
+        "energy_steady_kwh_total": float(total_energy_steady),
+        "energy_transition_kwh_total": float(total_energy_transition),
         "carbon_g_total": float(total_carbon),
         "avg_utilization_mean": float(avg_util_sum / denom),
         "active_ratio_mean": float(active_ratio_sum / denom),
         "avg_delay_ms_mean": float(avg_delay_sum / denom),
         "avg_path_latency_ms_mean": float(avg_path_latency_sum / denom),
+        "qos_violation_rate": float(qos_violation_steps / denom),
+        "qos_violation_count": int(qos_violation_steps),
+        "qos_acceptance_status": qos_summary.get("qos_acceptance_status"),
+        "qos_acceptance_missing": qos_summary.get("qos_acceptance_missing"),
+        "qos_delay_threshold_ms": qos_summary.get("qos_delay_threshold_ms"),
+        "qos_policy_name": qos_meta.get("qos_policy_name") if isinstance(qos_meta, dict) else None,
+        "qos_policy_signature": qos_meta.get("qos_policy_signature") if isinstance(qos_meta, dict) else None,
+        "qos_thresholds": qos_thresholds,
         "power_total_watts_mean": float(power_total_watts_sum / denom),
         "power_fixed_watts_mean": float(power_fixed_watts_sum / denom),
         "power_variable_watts_mean": float(power_variable_watts_sum / denom),
+        "power_transition_watts_mean": float(power_transition_watts_sum / denom),
         "power_device_watts_mean": float(power_device_watts_sum / denom),
         "power_link_watts_mean": float(power_link_watts_sum / denom),
+        "carbon_intensity_g_per_kwh_mean": float(carbon_intensity_sum / denom),
         "active_devices_mean": float(active_devices_sum / denom),
         "inactive_devices_mean": float(inactive_devices_sum / denom),
         "active_links_mean": float(active_links_sum / denom),
         "inactive_links_mean": float(inactive_links_sum / denom),
+        "transition_count_total": int(transition_count_total),
+        "transition_on_count_total": int(transition_on_total),
+        "transition_off_count_total": int(transition_off_total),
+        "flap_event_count_total": int(flap_event_total),
+        "stability_reversal_penalty_total": float(stability_reversal_penalty_total),
         "toggles_applied_total": int(toggles_applied),
         "toggles_reverted_total": int(toggles_reverted),
         "toggles_total": int(toggles_applied + toggles_reverted),
@@ -1026,6 +1294,21 @@ def run_episode(
         "allowed_toggle_count": int(toggles_allowed),
         "toggles_attempted_count": int(toggles_attempted),
         "toggles_applied_count": int(toggles_applied_count),
+        "stability_policy_name": (
+            stability_meta.get("stability_policy_name") if isinstance(stability_meta, dict) else None
+        ),
+        "stability_policy_signature": (
+            stability_meta.get("stability_policy_signature") if isinstance(stability_meta, dict) else None
+        ),
+        "stability_thresholds": (
+            stability_meta.get("stability_thresholds") if isinstance(stability_meta, dict) else None
+        ),
+        "transition_rate": stability_summary.get("transition_rate"),
+        "flap_rate": stability_summary.get("flap_rate"),
+        "blocked_by_cooldown_rate": stability_summary.get("blocked_by_cooldown_rate"),
+        "stability_status": stability_summary.get("stability_status"),
+        "stability_missing": stability_summary.get("stability_missing"),
+        "stability_flapping_detected": stability_summary.get("stability_flapping_detected"),
     }
 
 
@@ -1039,7 +1322,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--scenario",
-        choices=["normal", "diurnal", "burst", "hotspot", "anomaly", "failure", "custom"],
+        choices=["normal", "diurnal", "burst", "hotspot", "anomaly", "failure", "flash_crowd", "multi_peak", "custom"],
         default=None,
     )
     parser.add_argument("--seed", type=int, default=None, help="Base eval seed (overrides config).")
@@ -1054,12 +1337,32 @@ def main() -> None:
     parser.add_argument("--stochastic", dest="deterministic", action="store_false")
     parser.set_defaults(deterministic=None)
     parser.add_argument("--save-flows", action="store_true", default=None)
+    parser.add_argument("--matrix-id", type=str, default=None)
+    parser.add_argument("--matrix-name", type=str, default=None)
+    parser.add_argument("--matrix-manifest", type=str, default=None)
+    parser.add_argument("--matrix-case-id", type=str, default=None)
+    parser.add_argument("--matrix-case-label", type=str, default=None)
     parser.add_argument("--topology-seed", type=int, default=None)
     parser.add_argument("--topology-name", type=str, default=None)
     parser.add_argument("--topology-path", type=Path, default=None)
     parser.add_argument("--traffic-seed", type=int, default=None)
+    parser.add_argument("--traffic-model", type=str, default=None)
     parser.add_argument("--traffic-name", type=str, default=None)
     parser.add_argument("--traffic-path", type=Path, default=None)
+    parser.add_argument("--traffic-scenario", type=str, default=None)
+    parser.add_argument("--traffic-scenario-version", type=int, default=None)
+    parser.add_argument("--traffic-scenario-intensity", type=float, default=None)
+    parser.add_argument("--traffic-scenario-duration", type=float, default=None)
+    parser.add_argument("--traffic-scenario-frequency", type=float, default=None)
+    parser.add_argument("--stability-reversal-window-steps", type=int, default=None)
+    parser.add_argument("--stability-reversal-penalty", type=float, default=None)
+    parser.add_argument("--stability-min-steps-for-assessment", type=int, default=None)
+    parser.add_argument("--stability-max-transition-rate", type=float, default=None)
+    parser.add_argument("--stability-max-flap-rate", type=float, default=None)
+    parser.add_argument("--stability-max-flap-count", type=int, default=None)
+    parser.add_argument("--power-utilization-sensitive", type=_parse_bool_arg, default=None)
+    parser.add_argument("--power-transition-on-joules", type=float, default=None)
+    parser.add_argument("--power-transition-off-joules", type=float, default=None)
     parser.add_argument("--routing-baseline", type=str, default=None)
     parser.add_argument("--routing-link-cost-model", type=str, default=None)
     args = parser.parse_args()
@@ -1067,9 +1370,10 @@ def main() -> None:
     config = _load_config_file(args.config)
     env_overrides = _extract_env_overrides(config)
 
-    policy = args.policy or config.get("policy")
-    if not policy:
+    requested_policy = args.policy or config.get("policy")
+    if not requested_policy:
         parser.error("Missing --policy (or set 'policy' in --config).")
+    policy = canonical_experiment_policy_name(str(requested_policy))
 
     scenario = args.scenario or config.get("scenario")
     if not scenario:
@@ -1129,6 +1433,36 @@ def main() -> None:
         env_config.traffic_name = str(args.traffic_name).strip() or None
     if args.traffic_path is not None:
         env_config.traffic_path = str(Path(args.traffic_path).expanduser().resolve())
+    if args.traffic_model is not None:
+        env_config.traffic_model = str(args.traffic_model).strip() or env_config.traffic_model
+    if args.traffic_scenario is not None:
+        env_config.traffic_scenario = str(args.traffic_scenario).strip() or None
+    if args.traffic_scenario_version is not None:
+        env_config.traffic_scenario_version = int(args.traffic_scenario_version)
+    if args.traffic_scenario_intensity is not None:
+        env_config.traffic_scenario_intensity = float(args.traffic_scenario_intensity)
+    if args.traffic_scenario_duration is not None:
+        env_config.traffic_scenario_duration = float(args.traffic_scenario_duration)
+    if args.traffic_scenario_frequency is not None:
+        env_config.traffic_scenario_frequency = float(args.traffic_scenario_frequency)
+    if args.stability_reversal_window_steps is not None:
+        env_config.stability_reversal_window_steps = int(args.stability_reversal_window_steps)
+    if args.stability_reversal_penalty is not None:
+        env_config.stability_reversal_penalty = float(args.stability_reversal_penalty)
+    if args.stability_min_steps_for_assessment is not None:
+        env_config.stability_min_steps_for_assessment = int(args.stability_min_steps_for_assessment)
+    if args.stability_max_transition_rate is not None:
+        env_config.stability_max_transition_rate = float(args.stability_max_transition_rate)
+    if args.stability_max_flap_rate is not None:
+        env_config.stability_max_flap_rate = float(args.stability_max_flap_rate)
+    if args.stability_max_flap_count is not None:
+        env_config.stability_max_flap_count = int(args.stability_max_flap_count)
+    if args.power_utilization_sensitive is not None:
+        env_config.power_utilization_sensitive = bool(args.power_utilization_sensitive)
+    if args.power_transition_on_joules is not None:
+        env_config.power_transition_on_joules = float(args.power_transition_on_joules)
+    if args.power_transition_off_joules is not None:
+        env_config.power_transition_off_joules = float(args.power_transition_off_joules)
 
     impact_model_dir = _resolve_impact_predictor_model_dir()
     if policy == "ppo" and impact_model_dir is not None:
@@ -1142,20 +1476,23 @@ def main() -> None:
         deterministic=bool(deterministic),
     )
 
+    external_topology_selected = bool(getattr(env_config, "topology_name", None) or getattr(env_config, "topology_path", None))
+
     # Choose topology seed: allow override; otherwise keep PPO on its training topology to avoid action-space mismatches.
+    # For named/file-backed topologies we keep the fallback stable so layout/debug metadata does not drift with eval seed.
     chosen_topology_seed: int | None = args.topology_seed
     if chosen_topology_seed is None:
         chosen_topology_seed = config.get("topology_seed")
     if chosen_topology_seed is None:
         chosen_topology_seed = env_overrides.get("topology_seed")
-    if chosen_topology_seed is None and policy == "ppo":
+    if chosen_topology_seed is None and (not external_topology_selected) and policy == "ppo":
         mp = policy_meta.get("model_path") if isinstance(policy_meta, dict) else None
         if mp:
             inferred = infer_topology_seed_from_model(Path(mp))
             if inferred is not None:
                 chosen_topology_seed = inferred
     if chosen_topology_seed is None:
-        chosen_topology_seed = int(eval_seed)
+        chosen_topology_seed = 0 if external_topology_selected else int(eval_seed)
 
     # Choose base traffic seed: allow override; otherwise seed+10000.
     chosen_traffic_seed_base: int | None = args.traffic_seed
@@ -1224,6 +1561,10 @@ def main() -> None:
             )
 
     routing_meta = env.get_routing_metadata() if hasattr(env, "get_routing_metadata") else {}
+    traffic_meta = env.get_traffic_metadata() if hasattr(env, "get_traffic_metadata") else {}
+    energy_meta = env.get_energy_model_metadata() if hasattr(env, "get_energy_model_metadata") else {}
+    qos_meta = env.get_qos_policy_metadata() if hasattr(env, "get_qos_policy_metadata") else {}
+    stability_meta = env.get_stability_policy_metadata() if hasattr(env, "get_stability_policy_metadata") else {}
     env.close()
 
     summary = summarize_episodes(episode_summaries)
@@ -1236,6 +1577,8 @@ def main() -> None:
         "allowed_toggle_count",
         "toggles_attempted_count",
         "toggles_applied_count",
+        "transition_count_total",
+        "flap_event_count_total",
     ]
     count_totals = {
         key: int(sum(int(ep.get(key, 0)) for ep in episode_summaries)) for key in count_keys
@@ -1245,6 +1588,7 @@ def main() -> None:
     run_meta = {
         "run_id": run_id,
         "policy": policy,
+        "policy_requested": str(requested_policy),
         "scenario": scenario,
         "seed": int(eval_seed),
         "eval_seed": int(eval_seed),
@@ -1263,6 +1607,10 @@ def main() -> None:
     }
     run_meta.update(count_totals)
     run_meta.update(routing_meta)
+    run_meta.update(traffic_meta)
+    run_meta.update(energy_meta)
+    run_meta.update(qos_meta)
+    run_meta.update(stability_meta)
     if getattr(env_config, "topology_seeds", None):
         run_meta["topology_seeds"] = list(env_config.topology_seeds)
     if getattr(env_config, "topology_name", None):
@@ -1275,12 +1623,24 @@ def main() -> None:
         run_meta["traffic_scenario_intensity"] = float(getattr(env_config, "traffic_scenario_intensity", 1.0))
         run_meta["traffic_scenario_duration"] = float(getattr(env_config, "traffic_scenario_duration", 1.0))
         run_meta["traffic_scenario_frequency"] = float(getattr(env_config, "traffic_scenario_frequency", 1.0))
+    if getattr(env_config, "traffic_model", None):
+        run_meta["traffic_model"] = env_config.traffic_model
     if getattr(env_config, "traffic_name", None):
         run_meta["traffic_name"] = env_config.traffic_name
     if getattr(env_config, "traffic_path", None):
         run_meta["traffic_path"] = env_config.traffic_path
     run_meta.update(policy_meta)
     run_meta["tag"] = tag_str
+    if args.matrix_id is not None:
+        run_meta["matrix_id"] = str(args.matrix_id).strip() or None
+    if args.matrix_name is not None:
+        run_meta["matrix_name"] = str(args.matrix_name).strip() or None
+    if args.matrix_manifest is not None:
+        run_meta["matrix_manifest"] = str(args.matrix_manifest).strip() or None
+    if args.matrix_case_id is not None:
+        run_meta["matrix_case_id"] = str(args.matrix_case_id).strip() or None
+    if args.matrix_case_label is not None:
+        run_meta["matrix_case_label"] = str(args.matrix_case_label).strip() or None
     run_meta_path = out_dir / "run_meta.json"
     run_meta_path.write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
 

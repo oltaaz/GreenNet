@@ -2,7 +2,7 @@ Metadata-Version: 2.4
 Name: greennet
 Version: 0.1.0
 Summary: GreenNet: RL-based energy- and carbon-aware routing with lightweight NetworkX simulation
-Requires-Python: >=3.10
+Requires-Python: <3.14,>=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: gymnasium>=0.29
 Requires-Dist: stable-baselines3>=2.0
@@ -13,110 +13,245 @@ Requires-Dist: plotly>=5.0
 Requires-Dist: streamlit>=1.30
 Requires-Dist: fastapi>=0.110
 Requires-Dist: uvicorn>=0.29
+Provides-Extra: test
+Requires-Dist: pytest>=8.0; extra == "test"
+Requires-Dist: httpx>=0.27; extra == "test"
+Provides-Extra: train
+Requires-Dist: torch>=2.0; extra == "train"
+Requires-Dist: sb3-contrib>=2.0; extra == "train"
+Requires-Dist: scikit-learn>=1.3; extra == "train"
+Requires-Dist: matplotlib>=3.8; extra == "train"
 
 # GreenNet
 
-## Impact Predictor
+GreenNet is an energy- and QoS-aware routing simulator with a baseline-vs-controller evaluation pipeline, a FastAPI backend, and a React demo UI. The project is strongest as a reproducible research/software artifact: the simulator is real, the baselines are explicit, and the final evidence bundle shows a mixed but technically honest AI result rather than a fabricated win.
 
-Impact Predictor is a graph-aware ensemble that predicts next-step OFF-action impact (QoS risk via latency/drop proxies, normalized drop change, and energy change). Runtime gating uses calibrated QoS probability + uncertainty bounds + risk score to block risky OFF toggles.
+## Official Path
 
-```bash
-# 1) Build sweep dataset (multi-scenario + domain randomization)
-ml-env/.venv/bin/python scripts/build_cost_dataset_sweep.py \
-  --episodes-per-scenario 200 \
-  --topology-seeds 0,1,2,3,4,5,6,7,8,9 \
-  --traffic-seeds 0,1,2 \
-  --out artifacts/cost_estimator/ds_sweep.npz \
-  --qos-delay-ms 24 \
-  --qos-drop-max 2 \
-  --demand-scale-min 0.7 \
-  --demand-scale-max 1.6 \
-  --capacity-scale-min 0.7 \
-  --capacity-scale-max 1.3 \
-  --flows-scale-min 0.8 \
-  --flows-scale-max 1.5
+Use this path for the final submission workflow:
 
-# 2) Train Impact Predictor ensemble (group split by topology_seed when available)
-ml-env/.venv/bin/python scripts/train_cost_estimator_torch.py \
-  --dataset artifacts/cost_estimator/ds_sweep.npz \
-  --out-dir models/impact_predictor \
-  --ensemble-size 3 \
-  --epochs 3
-
-# 3) Acceptance suite (done gate)
-ml-env/.venv/bin/python scripts/test_impact_predictor_suite.py \
-  --episodes 10 \
-  --max-steps 200 \
-  --p-off 0.30 \
-  --seed 0 \
-  --abs-tol-lat-ms 2.0 \
-  --tol-norm-drop 0.002 \
-  --tol-dropped 5.0 \
-  --lock-artifacts
-
-# 4) Optional quick smoke
-ml-env/.venv/bin/python scripts/smoke_impact_predictor.py
-```
-
-Impact Predictor is complete when `scripts/test_impact_predictor_suite.py` exits successfully and all rows pass.  
-The suite includes an OOD `extreme` bucket (`ood_bucket=1`) with conservative checks and stronger masking expectations.
-For thesis references, cite a locked acceptance run folder under `artifacts/locked/impact_predictor/<timestamp>/`.
-Locked acceptance example: `artifacts/locked/impact_predictor/20260221_121739/`.
-
-### Threshold presets
-
-Defaults remain strict in code for safety-first behavior. Use env vars to pick a runtime preset.
+1. Install the project with the tracked Python metadata:
 
 ```bash
-# Strict (safety-first, code defaults)
-export COST_ESTIMATOR_P_QOS_MAX=0.11
-export COST_ESTIMATOR_DDROP_MAX=0.001
-export COST_ESTIMATOR_TAU=0.11
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -e '.[test,train]'
 ```
+
+2. Use the canonical training configs in `configs/`.
+
+3. Run experiments with `run_experiment.py`, `train.py`, or `experiments/run_matrix.py` as needed.
+
+4. Package and review the official evidence bundle in `experiments/official_matrix_v6/`, `artifacts/final_submission/matrix_v6/`, and `artifacts/traffic_verify/20260220_matrix/`.
+
+5. Use [docs/final_submission_overview.md](docs/final_submission_overview.md) for the final architecture, artifact glossary, and limitations summary.
+
+6. Run the final verification checks before submission:
 
 ```bash
-# Balanced (recommended)
-export COST_ESTIMATOR_P_QOS_MAX=0.55
-export COST_ESTIMATOR_DDROP_MAX=0.04
-export COST_ESTIMATOR_TAU=0.85
+.venv/bin/python -m pytest -q
+cd frontend/greennet-ui
+npm ci
+npm run build
 ```
+
+## Current Final Claim
+
+The repository now uses one explicit baseline taxonomy:
+
+- official traditional baseline: `all_on` on top of the default routing baseline `min_hop_single_path` with `unit` link cost
+- strongest non-AI heuristic baseline: `heuristic`
+- AI policy: `ppo`
+
+In the curated final evaluation:
+
+- `heuristic` is the best overall non-AI controller
+- `ppo` is the best AI policy
+- `ppo` remains about 4% worse than `heuristic` on energy in the final aggregate
+- the official traditional baseline remains the fixed comparison anchor for report deltas and hypothesis checks
+- QoS stays within the acceptance gates used in the final report
+
+The defensible submission claim is therefore:
+
+- GreenNet provides a credible routing simulation and evaluation framework for energy/QoS tradeoffs
+- the official traditional baseline is explicit and technically honest
+- the energy-aware heuristic is not misrepresented as traditional routing
+- the AI controller is measured against both the official traditional baseline and the strongest handcrafted heuristic under the same scenarios and seeds
+- the final evidence explains a mixed outcome instead of overclaiming improvement
+
+## Canonical Workflow
+
+### 1. Train or rerun a policy
+
+Use the tracked scenario configs in `configs/`:
 
 ```bash
-# Aggressive (energy-first exploratory preset; validate with acceptance suite)
-export COST_ESTIMATOR_P_QOS_MAX=0.60
-export COST_ESTIMATOR_DDROP_MAX=0.05
-export COST_ESTIMATOR_TAU=0.90
+.venv/bin/python train.py --config configs/train_normal.json --timesteps 300000
+.venv/bin/python train.py --config configs/train_burst.json --timesteps 300000
+.venv/bin/python train.py --config configs/train_hotspot.json --timesteps 300000
 ```
 
-Example output fields from the acceptance suite:
-
-```text
-scenario   bucket   ood off_cand off_mask %mask lat_off lat_on nd_off nd_on PASS
-normal     mild      0   ...
-normal     stress    0   ...
-normal     extreme   1   ...
-burst      extreme   1   ...
-hotspot    extreme   1   ...
-```
-
-## Metrics API
-
-Run the backend API:
+### 2. Run a single experiment
 
 ```bash
-uvicorn api_app:app --reload --port 8000
+.venv/bin/python run_experiment.py --policy heuristic --scenario normal --seed 0 --episodes 1 --steps 300
+.venv/bin/python run_experiment.py --policy ppo --scenario hotspot --seed 0 --episodes 1 --steps 300
+.venv/bin/python run_experiment.py --policy all_on --scenario normal --seed 0 --episodes 1 --steps 300 --topology-name medium
+.venv/bin/python run_experiment.py --policy all_on --scenario flash_crowd --seed 0 --episodes 1 --steps 300 --topology-name large
 ```
 
-Example calls:
+### 3. Run the official matrix
 
 ```bash
-curl "http://localhost:8000/api/runs?limit=3"
-curl "http://localhost:8000/api/runs_flat?limit=3"
-curl "http://localhost:8000/api/runs/<run_id>/summary"
-curl "http://localhost:8000/api/aggregate?tag=matrix_v4&group_by=policy,scenario"
+.venv/bin/python experiments/run_matrix.py \
+  --policies all_on,heuristic,ppo \
+  --scenarios normal,burst,hotspot \
+  --seeds 0,1,2,3,4,5,6,7,8,9 \
+  --episodes 50 \
+  --steps 300 \
+  --tag matrix_v6
 ```
 
-Notes:
-- CORS allows Vite dev origins `http://localhost:5173` and `http://127.0.0.1:5173`.
-- `/api/runs_flat` is a compatibility endpoint for older/quick UIs expecting a plain array (same objects as `/api/runs.items`).
-- `/api/aggregate` computes `*_std` using population standard deviation (`statistics.pstdev`).
+To run the same workflow on a reusable packaged topology, add `--topology-name small`, `--topology-name medium`, or `--topology-name large`.
+
+### 4. Build the final evaluation bundle
+
+```bash
+.venv/bin/python experiments/final_evaluation.py \
+  --summary-csv experiments/official_matrix_v6/results_summary_matrix_v6.csv \
+  --primary-baseline-policy all_on \
+  --heuristic-baseline-policy heuristic \
+  --ai-policies ppo \
+  --output-dir experiments/official_matrix_v6/final_evaluation
+```
+
+The canonical reviewer bundle is `artifacts/final_submission/matrix_v6/`.
+It contains `manifest.json` and `traceability.csv` so reviewers can map the submission claim back to the preserved artifacts.
+
+## Topology Selection
+
+GreenNet supports three stable packaged topology classes through the existing config and experiment flow:
+
+- `small`
+- `medium`
+- `large`
+
+Use `env.topology_name` in config JSON or pass `--topology-name` to `run_experiment.py`, `experiments/run_matrix.py`, or `greennet.evaluation.final_pipeline`. `topology_path` still overrides `topology_name` when you need a custom JSON topology file. Legacy packaged names such as `regional_ring` and `metro_hub` are still accepted for compatibility, but new configs should prefer the size-class names.
+
+Traffic selection is now first-class in the same flow. You can:
+
+- use stochastic traffic scenarios: `normal`, `diurnal`, `burst`, `hotspot`, `anomaly`, `flash_crowd`, `multi_peak`
+- use packaged replay traffic via `--traffic-name`
+- use custom replay JSON via `--traffic-path`
+
+`traffic_name` and `traffic_path` override the stochastic generator settings when both are present. Run outputs and aggregate summaries preserve `traffic_mode`, `traffic_model`, `traffic_name`, `traffic_path`, and the configured stochastic scenario metadata.
+
+If the raw historical run folders are absent, the command still rebuilds the aggregate comparison from the packaged summary CSV. The preserved report in `experiments/official_matrix_v6/final_evaluation/` remains the authoritative shipped artifact for the final thesis-facing QoS gate interpretation; any recheck bundle under `final_audit/verification/` should be treated as supplemental verification evidence.
+
+## Architecture Overview
+
+GreenNet is organized around four layers:
+
+- routing/simulation core in `greennet/`
+- baselines and experiment runners in `baselines.py`, `run_experiment.py`, `train.py`, `eval.py`, and `experiments/`
+- API and persistence in `api_app.py` and `greennet/persistence`
+- public demo and analyst tooling in `frontend/greennet-ui/` and `dashboard/`
+
+The controller stack is intentionally simple:
+
+- the simulator computes routing, load, delay, power, and carbon metrics
+- the default routing baseline is `min_hop_single_path` with `unit` link cost
+- `all_on` is the official traditional baseline controller
+- `heuristic` is the explicit energy-aware heuristic baseline controller
+- `ppo` is the learned controller, but it is not presented as universally superior
+
+## Energy Model
+
+GreenNet's energy model is intentionally lightweight and explicit:
+
+- nodes and links each have active and sleep power states
+- total network power is modeled as fixed power plus an optional utilization-sensitive dynamic component
+- carbon emissions are derived from total energy, not estimated independently
+
+The legacy config surface remains valid. Existing `power_*` fields still define the base active/sleep and dynamic power levels for devices and links. The clearer model adds these optional knobs:
+
+- `power_utilization_sensitive`
+- `power_transition_on_joules`
+- `power_transition_off_joules`
+
+For backward compatibility:
+
+- omitting `power_utilization_sensitive` preserves the legacy fixed-plus-dynamic interpretation from the existing `power_*` fields
+- omitting `power_transition_on_joules` and `power_transition_off_joules` keeps transition energy costs at zero
+- existing configs that only set legacy `power_*` and `carbon_*` fields remain valid
+
+In the official workflow, the tracked `configs/train_*.json` files are the config-facing source of truth for these assumptions. `EnvConfig` still provides the fallback defaults used when a config does not override them.
+
+## QoS Policy
+
+GreenNet now uses one explicit QoS policy instead of leaving “acceptable QoS” implicit.
+
+The runtime QoS rule used by ordinary runs and dashboards is:
+
+- normalized delivery-loss ratio threshold: `qos_target_norm_drop` with the default official value `0.072`
+- minimum observed traffic volume before that loss rule is enforced: `qos_min_volume` with the default official value `500`
+- average-delay guard used by controller veto logic and run summaries:
+  `avg_delay_ms <= max(avg_path_latency_ms * 4.0, avg_path_latency_ms + 15.0)`
+- p95 delay is not part of the official rule yet because the current simulator does not compute it cleanly
+
+The final evaluation bundle keeps the repository’s thesis-facing acceptance gate relative to the official traditional baseline. The default official thresholds are:
+
+- delivered traffic loss vs `all_on`: at most `2%`
+- dropped traffic increase vs `all_on`: at most `5%`
+- average delay increase vs `all_on`: at most `10%`
+- average path latency increase vs `all_on`: at most `10%`
+- QoS-violation-rate increase vs `all_on`: at most `0.02`
+
+Run outputs and aggregate summaries now preserve QoS identity and status through fields such as `qos_policy_name`, `qos_policy_signature`, `qos_thresholds`, `delivery_loss_rate_mean`, `qos_violation_rate_mean`, and `qos_acceptance_status`. Final evaluation artifacts still preserve `qos_acceptability_status` for compatibility, and also expose the centralized `qos_thresholds` block.
+
+## Artifact Glossary
+
+- `configs/` - canonical training configs used by the official workflow
+- `experiments/official_matrix_v6/` - curated final matrix summary and final evaluation bundle
+- `artifacts/traffic_verify/20260220_matrix/` - deterministic traffic verification evidence
+- `artifacts/locked/` - locked scenario evidence and retained run bundles
+- `runs/` - operational run directory used by the codebase and scripts
+- `models/` - saved checkpoints and compatibility artifacts
+- `docs/` - workflow notes, input formats, and submission guidance
+
+Not every historical raw result is bundled in one place. The official submission story should cite the curated summary tables and locked verification artifacts rather than trying to imply a single monolithic `results/` folder exists.
+
+## Canonical Config Family
+
+The canonical config family is `configs/train_*.json`.
+
+- use these files for current scenario training
+- treat top-level `train_*.json` files as historical or compatibility snapshots
+- do not mix root-level legacy configs into the final submission narrative unless you are explicitly discussing history
+
+See [configs/README.md](configs/README.md) for the tracked config set and format notes.
+
+## Legacy And Internal Tools
+
+The following paths are useful, but they are not the public-facing submission path:
+
+- `dashboard/` - internal analyst tooling
+- `COMMANDS.md` - legacy command sheet kept for reference
+- older experiment folders and ad hoc run folders under `runs/`
+
+The public demo path is the React app in `frontend/greennet-ui/`.
+
+```bash
+cd frontend/greennet-ui
+npm run dev
+```
+
+## Responsible Design And Limitations
+
+GreenNet evaluates energy against QoS, not energy alone. The project should be described with those constraints visible:
+
+- energy savings are only meaningful if QoS remains acceptable
+- the final matrix does not prove a large AI win on energy
+- gating, thresholds, and scenario definitions matter to the result
+- the Impact Predictor and some experimental scripts are exploratory and should be described as such unless you have bundled and verified evidence for them
+
+Further detail is documented in [docs/final_submission_overview.md](docs/final_submission_overview.md).

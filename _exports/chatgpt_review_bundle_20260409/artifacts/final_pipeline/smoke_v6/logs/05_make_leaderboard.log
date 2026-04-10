@@ -1,0 +1,10 @@
+$ /Users/enionismaili/Desktop/GreenNet/.venv/bin/python /Users/enionismaili/Desktop/GreenNet/experiments/make_leaderboard.py --summary /Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/results_summary_matrix_v6.csv --output /Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/leaderboard_matrix_v6.csv --output-source /Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/leaderboard_source_matrix_v6.csv
+
+[stdout]
+[leaderboard] wrote: /Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/leaderboard_matrix_v6.csv (rows=9)
+[leaderboard] wrote source: /Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/leaderboard_source_matrix_v6.csv (rows=90)
+
+[stderr]
+
+
+[returncode] 0

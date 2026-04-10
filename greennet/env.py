@@ -16,6 +16,7 @@ from gymnasium import spaces
 from greennet.carbon import CarbonModel
 from greennet.impact_predictor import ImpactPredictor
 from greennet.power import PowerModel
+from greennet.qos import runtime_thresholds_from_config, runtime_thresholds_metadata
 from greennet.routing import (
     DEFAULT_ROUTING_COST_ATTR,
     annotate_routing_costs,
@@ -24,6 +25,11 @@ from greennet.routing import (
     canonicalize_routing_link_cost_model,
 )
 from greennet.simulator import Flow, Simulator
+from greennet.stability import (
+    evaluate_run_stability,
+    stability_policy_from_config,
+    stability_policy_metadata,
+)
 from greennet.topology import TopologyConfig, build_topology
 from greennet.traffic import (
     ConstantTrafficGenerator,
@@ -64,6 +70,9 @@ class EnvConfig:
     power_link_active_watts: float = 6.0
     power_link_sleep_watts: float = 0.2
     power_link_dynamic_watts: float = 2.0
+    power_utilization_sensitive: bool = True
+    power_transition_on_joules: float = 0.0
+    power_transition_off_joules: float = 0.0
 
     # Carbon profile used to convert energy into emissions.
     carbon_base_intensity_g_per_kwh: float = 400.0
@@ -136,6 +145,12 @@ class EnvConfig:
     qos_guard_margin_off: float = 0.004
     qos_guard_margin_on: float = 0.002
     qos_guard_penalty_scale: float = 4.5  # multiplier for blocked OFF attempts due to QoS
+    # Delay guard used by controller-side QoS veto logic and run-level QoS summaries.
+    qos_avg_delay_guard_multiplier: float = 4.0
+    qos_avg_delay_guard_margin_ms: float = 15.0
+    qos_recovery_delay_multiplier: float = 6.0
+    qos_recovery_delay_guard_margin_ms: float = 20.0
+    qos_p95_delay_threshold_ms: float | None = None
 
     toggle_penalty: float = 0.02
     off_toggle_penalty_scale: float = 1.5
@@ -171,6 +186,12 @@ class EnvConfig:
     initial_off_edges: int = 3
     initial_off_seed: int | None = 123
     off_start_guard_decision_steps: int = 10  # block OFF actions for first N decision steps when starting all-on
+    stability_reversal_window_steps: int = 20
+    stability_reversal_penalty: float = 0.05
+    stability_min_steps_for_assessment: int = 50
+    stability_max_transition_rate: float = 0.02
+    stability_max_flap_rate: float = 0.25
+    stability_max_flap_count: int = 2
 
     # Optional OFF-action gating via Impact Predictor (ensemble + calibration).
     cost_estimator_enabled: bool = False
@@ -246,6 +267,8 @@ class GreenNetEnv(gym.Env):
         self._traffic_generator: TrafficGenerator | None = None
         self._traffic_by_step: Dict[int, List[TrafficBurst]] = {}
         self._active_bursts: List[Tuple[int, int, float, int]] = []  # (src, dst, demand, remaining_steps)
+        self._power_model: PowerModel | None = None
+        self._carbon_model: CarbonModel | None = None
         # ---- Forecasting state ----
         self._demand_forecaster: DemandForecaster | None = None
         self._demand_norm_scale: float = 1.0
@@ -258,6 +281,11 @@ class GreenNetEnv(gym.Env):
         self._decision_step_count: int = 0
         self._mask_calls: int = 0
         self._last_qos_viol_step: bool = False
+        self._edge_last_transition: Dict[Tuple[int, int], Tuple[int, int]] = {}
+        self._episode_flap_event_count: int = 0
+        self._last_flap_event_count: int = 0
+        self._last_flap_event: bool = False
+        self._last_stability_reversal_penalty: float = 0.0
         self._dbg_cd_block_mask_val_last: int = -999
         self._dbg_cd_block_mask_samples: int = 0
         self._dbg_cd_block_mask_mismatches: int = 0
@@ -378,6 +406,11 @@ class GreenNetEnv(gym.Env):
         self._decision_step_count = 0
         self._mask_calls = 0
         self._dbg_cd_block_mask_val_last = -999
+        self._edge_last_transition = {}
+        self._episode_flap_event_count = 0
+        self._last_flap_event_count = 0
+        self._last_flap_event = False
+        self._last_stability_reversal_penalty = 0.0
         self._dbg_cd_block_mask_samples = 0
         self._dbg_cd_block_mask_mismatches = 0
         self._dbg_block_edge_cd = 0
@@ -562,6 +595,8 @@ class GreenNetEnv(gym.Env):
 
         power_model = self._build_power_model()
         carbon_model = self._build_carbon_model()
+        self._power_model = power_model
+        self._carbon_model = carbon_model
 
         self.simulator = Simulator(
             graph,
@@ -698,26 +733,110 @@ class GreenNetEnv(gym.Env):
             self._apply_edge_defaults(graph, int(u), int(v))
 
     def _build_power_model(self) -> PowerModel:
-        """Build the lightweight power model from explicit environment config."""
-        return PowerModel(
-            network_fixed_watts=float(self.config.power_network_fixed_watts),
-            device_active_watts=float(self.config.power_device_active_watts),
-            device_sleep_watts=float(self.config.power_device_sleep_watts),
-            device_dynamic_watts=float(self.config.power_device_dynamic_watts),
-            link_active_watts=float(self.config.power_link_active_watts),
-            link_sleep_watts=float(self.config.power_link_sleep_watts),
-            link_dynamic_watts=float(self.config.power_link_dynamic_watts),
-        )
+        """Build the power model from explicit environment config."""
+        return PowerModel.from_env_config(self.config).validate()
 
     def _build_carbon_model(self) -> CarbonModel:
-        return CarbonModel(
-            base_intensity=float(self.config.carbon_base_intensity_g_per_kwh),
-            amplitude=float(self.config.carbon_amplitude_g_per_kwh),
-            period=float(self.config.carbon_period_seconds),
-        )
+        return CarbonModel.from_env_config(self.config).validate()
 
     def get_routing_metadata(self) -> Dict[str, Any]:
         return dict(self._routing_metadata)
+
+    def get_traffic_metadata(self) -> Dict[str, Any]:
+        return {
+            "traffic_mode": self._effective_traffic_mode(),
+            "traffic_uses_replay_input": bool(self._traffic_uses_replay_input()),
+            "traffic_uses_scheduled_bursts": bool(self._traffic_uses_scheduled_bursts()),
+        }
+
+    def get_energy_model_metadata(self) -> Dict[str, Any]:
+        power_model = self._power_model if self._power_model is not None else self._build_power_model()
+        carbon_model = self._carbon_model if self._carbon_model is not None else self._build_carbon_model()
+        return {
+            **power_model.metadata(),
+            **carbon_model.metadata(),
+            "energy_model_signature": f"{power_model.signature()}|{carbon_model.signature()}",
+        }
+
+    def get_qos_policy_metadata(self) -> Dict[str, Any]:
+        thresholds = runtime_thresholds_from_config(self.config)
+        metadata = runtime_thresholds_metadata(thresholds)
+        return {
+            "qos_policy_name": metadata["policy_name"],
+            "qos_policy_version": metadata["policy_version"],
+            "qos_policy_signature": metadata["policy_signature"],
+            "qos_thresholds": metadata,
+            "qos_target_norm_drop": metadata["normalized_drop_ratio_threshold"],
+            "qos_min_volume": metadata["min_volume"],
+            "qos_avg_delay_guard_multiplier": metadata["avg_delay_guard_multiplier"],
+            "qos_avg_delay_guard_margin_ms": metadata["avg_delay_guard_margin_ms"],
+            "qos_recovery_delay_multiplier": metadata["recovery_delay_multiplier"],
+            "qos_recovery_delay_guard_margin_ms": metadata["recovery_delay_guard_margin_ms"],
+            "qos_p95_delay_threshold_ms": metadata["p95_delay_threshold_ms"],
+        }
+
+    def get_stability_policy_metadata(self) -> Dict[str, Any]:
+        policy = stability_policy_from_config(self.config)
+        metadata = stability_policy_metadata(policy)
+        return {
+            "stability_policy_name": metadata["policy_name"],
+            "stability_policy_version": metadata["policy_version"],
+            "stability_policy_signature": metadata["policy_signature"],
+            "stability_thresholds": metadata,
+            "stability_reversal_window_steps": metadata["reversal_window_steps"],
+            "stability_reversal_penalty": metadata["reversal_penalty"],
+            "stability_min_steps_for_assessment": metadata["min_steps_for_assessment"],
+            "stability_max_transition_rate": metadata["max_transition_rate"],
+            "stability_max_flap_rate": metadata["max_flap_rate"],
+            "stability_max_flap_count": metadata["max_flap_count"],
+        }
+
+    def _apply_transition_energy_to_metrics(
+        self,
+        metrics: Any,
+        *,
+        toggled_on_count: int,
+        toggled_off_count: int,
+    ) -> Any:
+        if metrics is None:
+            return metrics
+        power_model = self._power_model
+        if power_model is None:
+            return metrics
+
+        transition_on_count = max(0, int(toggled_on_count))
+        transition_off_count = max(0, int(toggled_off_count))
+        transition_energy_kwh = power_model.transition_energy_kwh(
+            toggled_on_count=transition_on_count,
+            toggled_off_count=transition_off_count,
+        )
+        transition_watts_equiv = power_model.transition_watts_equivalent(
+            toggled_on_count=transition_on_count,
+            toggled_off_count=transition_off_count,
+            dt_seconds=float(getattr(self.simulator, "dt_seconds", 1.0) if self.simulator is not None else 1.0),
+        )
+        raw_total_energy_kwh = float(max(0.0, float(getattr(metrics, "energy_kwh", 0.0))))
+        raw_steady_energy_kwh = getattr(metrics, "energy_steady_kwh", None)
+        if raw_steady_energy_kwh in (None, ""):
+            steady_energy_kwh = raw_total_energy_kwh
+        else:
+            steady_energy_kwh = float(max(0.0, float(raw_steady_energy_kwh)))
+            if steady_energy_kwh <= 0.0 and raw_total_energy_kwh > 0.0:
+                steady_energy_kwh = raw_total_energy_kwh
+
+        carbon_intensity = float(max(0.0, float(getattr(metrics, "carbon_intensity_g_per_kwh", 0.0))))
+        if carbon_intensity <= 0.0 and raw_total_energy_kwh > 0.0:
+            carbon_intensity = float(max(0.0, float(getattr(metrics, "carbon_g", 0.0)) / raw_total_energy_kwh))
+        total_energy_kwh = float(steady_energy_kwh + transition_energy_kwh)
+
+        setattr(metrics, "energy_steady_kwh", steady_energy_kwh)
+        setattr(metrics, "energy_transition_kwh", float(transition_energy_kwh))
+        setattr(metrics, "energy_kwh", float(total_energy_kwh))
+        setattr(metrics, "power_transition_watts_equiv", float(transition_watts_equiv))
+        setattr(metrics, "transition_on_count", int(transition_on_count))
+        setattr(metrics, "transition_off_count", int(transition_off_count))
+        setattr(metrics, "carbon_g", float(total_energy_kwh * carbon_intensity))
+        return metrics
 
     def step(self, action: Any) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
         is_decision = self._is_decision_step()
@@ -903,6 +1022,11 @@ class GreenNetEnv(gym.Env):
         self._last_demand_forecast_norm = float(demand_forecast_norm)
 
         metrics = self.simulator.step(flows)
+        metrics = self._apply_transition_energy_to_metrics(
+            metrics,
+            toggled_on_count=int(bool(toggled_on)),
+            toggled_off_count=int(bool(toggled_off)),
+        )
 
         # ---- Convert simulator outputs into per-step deltas and episode totals ----
         # Simulator.step() returns step-local metrics, so accumulate totals here.
@@ -1096,6 +1220,9 @@ class GreenNetEnv(gym.Env):
             "toggles_attempted_count": toggles_attempted_count,
             "toggles_applied_count": toggles_applied_count,
             "emergency_on_applied_count": int(bool(emergency_on_applied)),
+            "flap_event": bool(getattr(self, "_last_flap_event", False)),
+            "flap_event_count": int(getattr(self, "_last_flap_event_count", 0)),
+            "stability_reversal_penalty": float(getattr(self, "_last_stability_reversal_penalty", 0.0)),
             "off_toggles_used": int(getattr(self, "_off_toggles_used", 0)),
             "off_toggles_cap": int(off_toggles_cap),
             "total_toggles_used": int(getattr(self, "_total_toggles_used", 0)),
@@ -1117,12 +1244,22 @@ class GreenNetEnv(gym.Env):
             "power_total_watts": float(getattr(metrics, "power_total_watts", 0.0)),
             "power_fixed_watts": float(getattr(metrics, "power_fixed_watts", 0.0)),
             "power_variable_watts": float(getattr(metrics, "power_variable_watts", 0.0)),
+            "power_transition_watts_equiv": float(getattr(metrics, "power_transition_watts_equiv", 0.0)),
             "power_device_watts": float(getattr(metrics, "power_device_watts", 0.0)),
             "power_link_watts": float(getattr(metrics, "power_link_watts", 0.0)),
             "active_devices": int(getattr(metrics, "active_devices", 0)),
             "inactive_devices": int(getattr(metrics, "inactive_devices", 0)),
             "active_links": int(getattr(metrics, "active_links", 0)),
             "inactive_links": int(getattr(metrics, "inactive_links", 0)),
+            "energy_steady_kwh": float(getattr(metrics, "energy_steady_kwh", 0.0)),
+            "energy_transition_kwh": float(getattr(metrics, "energy_transition_kwh", 0.0)),
+            "carbon_intensity_g_per_kwh": float(getattr(metrics, "carbon_intensity_g_per_kwh", 0.0)),
+            "transition_on_count": int(getattr(metrics, "transition_on_count", 0)),
+            "transition_off_count": int(getattr(metrics, "transition_off_count", 0)),
+            "transition_count": int(
+                int(getattr(metrics, "transition_on_count", 0))
+                + int(getattr(metrics, "transition_off_count", 0))
+            ),
             "delta_energy_kwh": float(delta_energy),
             "delta_delivered": float(delta_delivered),
             "delta_dropped": float(delta_dropped),
@@ -1244,6 +1381,15 @@ class GreenNetEnv(gym.Env):
             "valid_noop_actions": 1,
             "mask_calls": int(getattr(self, "_mask_calls", 0)),
         }
+        stability_summary = evaluate_run_stability(
+            steps=float(max(1, self._step_count)),
+            transition_count_total=float(info["transition_count"]),
+            flap_event_count_total=float(info["flap_event_count"]),
+            blocked_by_cooldown_count=float(info["blocked_by_cooldown_count"]),
+            toggles_attempted_count=float(info["toggles_attempted_count"]),
+            policy=stability_policy_from_config(self.config),
+        )
+        info.update(stability_summary)
         self._last_obs = obs
         return obs, reward, terminated, truncated, info
 
@@ -2094,6 +2240,9 @@ class GreenNetEnv(gym.Env):
         toggled_off = False
         off_budget_blocked = False
         total_budget_blocked = False
+        flap_event = False
+        flap_event_count = 0
+        stability_reversal_penalty = 0.0
 
         idx = -1
         edge: Tuple[int, int] | None = None
@@ -2124,6 +2273,9 @@ class GreenNetEnv(gym.Env):
             self._last_toggle_blocked_global_off_stress = bool(toggle_blocked_global_off_stress)
             self._last_qos_allow_on = bool(qos_allow_on)
             self._last_emergency_on_applied = bool(emergency_on_applied)
+            self._last_flap_event = bool(flap_event)
+            self._last_flap_event_count = int(flap_event_count)
+            self._last_stability_reversal_penalty = float(stability_reversal_penalty)
             if self.debug_logs and action_int > 0 and (not action_invalid):
                 blocked_any = bool(
                     toggle_blocked
@@ -2364,6 +2516,24 @@ class GreenNetEnv(gym.Env):
             emergency_on_applied = True
         else:
             self._total_toggles_used += 1
+
+        transition_direction = 1 if toggled_on else (-1 if toggled_off else 0)
+        if transition_direction != 0 and key is not None:
+            reversal_window_steps = int(getattr(self.config, "stability_reversal_window_steps", 0) or 0)
+            last_transition = self._edge_last_transition.get(key)
+            if (
+                last_transition is not None
+                and int(last_transition[1]) != int(transition_direction)
+                and (int(self._step_count) - int(last_transition[0])) <= max(0, reversal_window_steps)
+            ):
+                flap_event = True
+                flap_event_count = 1
+                self._episode_flap_event_count = int(getattr(self, "_episode_flap_event_count", 0)) + 1
+                stability_reversal_penalty = float(
+                    getattr(self.config, "stability_reversal_penalty", 0.0) or 0.0
+                )
+                toggle_cost = float(toggle_cost) + float(stability_reversal_penalty)
+            self._edge_last_transition[key] = (int(self._step_count), int(transition_direction))
         internal_noop_reason_hint = None
         return _finish()
 

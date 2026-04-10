@@ -11,10 +11,33 @@ from pathlib import Path
 from statistics import fmean, pstdev
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
+from greennet.policy_taxonomy import (
+    DEFAULT_AI_POLICIES,
+    DEFAULT_HEURISTIC_BASELINE_POLICIES,
+    DEFAULT_NON_AI_BASELINE_POLICIES,
+    DEFAULT_TRADITIONAL_BASELINE_POLICIES,
+    canonical_controller_policy_name,
+    canonical_experiment_policy_name,
+    controller_policy_class,
+    experiment_policy_class,
+    is_ai_policy,
+    is_heuristic_baseline_policy,
+    is_traditional_baseline_policy,
+)
+from greennet.qos import (
+    QoSAcceptanceThresholds,
+    acceptance_thresholds_metadata,
+    evaluate_qos_against_baseline,
+)
+from greennet.stability import evaluate_run_stability, stability_policy_from_config
 
 TAG_RE = re.compile(r"__tag-(.+)$")
-DEFAULT_BASELINE_POLICIES = ("heuristic", "utilization_threshold", "baseline", "all_on", "noop")
-DEFAULT_AI_POLICIES = ("ppo",)
+DEFAULT_BASELINE_POLICIES = DEFAULT_NON_AI_BASELINE_POLICIES
+DEFAULT_BASELINE_PRIORITY = (
+    *DEFAULT_TRADITIONAL_BASELINE_POLICIES,
+    *DEFAULT_HEURISTIC_BASELINE_POLICIES,
+)
+DEFAULT_QOS_ACCEPTANCE_THRESHOLDS = QoSAcceptanceThresholds()
 
 
 @dataclass(frozen=True)
@@ -28,21 +51,35 @@ class MetricSpec:
 @dataclass(frozen=True)
 class HypothesisThresholds:
     energy_target_pct: float = 15.0
-    max_qos_violation_rate_increase_abs: float = 0.02
-    max_delivered_loss_pct: float = 2.0
-    max_dropped_increase_pct: float = 5.0
-    max_delay_increase_pct: float = 10.0
-    max_path_latency_increase_pct: float = 10.0
+    max_qos_violation_rate_increase_abs: float = DEFAULT_QOS_ACCEPTANCE_THRESHOLDS.max_qos_violation_rate_increase_abs
+    max_delivered_loss_pct: float = DEFAULT_QOS_ACCEPTANCE_THRESHOLDS.max_delivered_loss_pct
+    max_dropped_increase_pct: float = DEFAULT_QOS_ACCEPTANCE_THRESHOLDS.max_dropped_increase_pct
+    max_delay_increase_pct: float = DEFAULT_QOS_ACCEPTANCE_THRESHOLDS.max_delay_increase_pct
+    max_path_latency_increase_pct: float = DEFAULT_QOS_ACCEPTANCE_THRESHOLDS.max_path_latency_increase_pct
+
+    def qos_thresholds(self) -> QoSAcceptanceThresholds:
+        return QoSAcceptanceThresholds(
+            max_delivered_loss_pct=float(self.max_delivered_loss_pct),
+            max_dropped_increase_pct=float(self.max_dropped_increase_pct),
+            max_delay_increase_pct=float(self.max_delay_increase_pct),
+            max_path_latency_increase_pct=float(self.max_path_latency_increase_pct),
+            max_qos_violation_rate_increase_abs=float(self.max_qos_violation_rate_increase_abs),
+        )
 
 
 METRIC_SPECS: tuple[MetricSpec, ...] = (
     MetricSpec("energy_kwh", "Energy (kWh)", higher_is_better=False),
     MetricSpec("delivered_traffic", "Delivered traffic", higher_is_better=True, part_of_qos_gate=True),
     MetricSpec("dropped_traffic", "Dropped traffic", higher_is_better=False, part_of_qos_gate=True),
+    MetricSpec("delivery_loss_rate", "Delivery-loss rate", higher_is_better=False),
     MetricSpec("avg_delay_ms", "Average delay (ms)", higher_is_better=False, part_of_qos_gate=True),
     MetricSpec("avg_path_latency_ms", "Average path latency (ms)", higher_is_better=False, part_of_qos_gate=True),
     MetricSpec("qos_violation_rate", "QoS violation rate", higher_is_better=False, part_of_qos_gate=True),
     MetricSpec("qos_violation_count", "QoS violation count", higher_is_better=False),
+    MetricSpec("transition_count_total", "Transitions", higher_is_better=False),
+    MetricSpec("transition_rate", "Transition rate", higher_is_better=False),
+    MetricSpec("flap_event_count_total", "Flap events", higher_is_better=False),
+    MetricSpec("flap_rate", "Flap rate", higher_is_better=False),
     MetricSpec("carbon_g", "Carbon emissions (g)", higher_is_better=False),
 )
 METRIC_BY_FIELD = {metric.field: metric for metric in METRIC_SPECS}
@@ -171,11 +208,33 @@ def _common_text(rows: Sequence[Mapping[str, Any]], field: str) -> str | None:
 
 
 def _policy_class(policy: str, *, baseline_policies: set[str], ai_policies: set[str]) -> str:
-    if policy in ai_policies:
-        return "ai"
-    if policy in baseline_policies:
-        return "baseline"
-    return "other"
+    canonical = canonical_experiment_policy_name(policy)
+    if canonical in ai_policies or is_ai_policy(canonical):
+        return "ai_policy"
+    if is_heuristic_baseline_policy(canonical):
+        return "heuristic_baseline"
+    if canonical in baseline_policies or is_traditional_baseline_policy(canonical):
+        return "traditional_baseline" if is_traditional_baseline_policy(canonical) else "non_ai_baseline"
+    return experiment_policy_class(canonical)
+
+
+def _controller_class_for_row(
+    policy: str,
+    *,
+    explicit_value: Any,
+    ai_policies: set[str],
+) -> str:
+    if explicit_value not in ("", None):
+        return str(explicit_value)
+    if policy in ai_policies or is_ai_policy(policy):
+        return "ai_policy"
+    return controller_policy_class(policy)
+
+
+def _baseline_priority_for(baseline_policies: set[str]) -> tuple[str, ...]:
+    ordered = [policy for policy in DEFAULT_BASELINE_PRIORITY if policy in baseline_policies]
+    extras = sorted(policy for policy in baseline_policies if policy not in ordered)
+    return tuple(ordered + extras)
 
 
 def _choose_primary_baseline(
@@ -204,6 +263,25 @@ def _choose_primary_baseline(
     )
 
 
+def _choose_reference_policy(
+    available_policies: Iterable[str],
+    *,
+    requested: str | None,
+    priority: Sequence[str],
+) -> str | None:
+    available = {str(policy) for policy in available_policies}
+    if requested:
+        requested_canonical = canonical_experiment_policy_name(requested)
+        if requested_canonical not in available:
+            return None
+        return requested_canonical
+    for policy in priority:
+        canonical = canonical_experiment_policy_name(policy)
+        if canonical in available:
+            return canonical
+    return None
+
+
 def _build_run_row_from_summary_csv_row(
     row: Mapping[str, Any],
     *,
@@ -212,7 +290,7 @@ def _build_run_row_from_summary_csv_row(
     baseline_policies: set[str],
     ai_policies: set[str],
 ) -> Dict[str, Any]:
-    policy = str(row.get("policy") or "")
+    policy = canonical_experiment_policy_name(row.get("policy"))
     episodes = _to_int(row.get("episodes"))
     max_steps = _to_int(row.get("max_steps"))
     steps_total = None
@@ -229,11 +307,12 @@ def _build_run_row_from_summary_csv_row(
     return {
         "run_id": str(row.get("run_id") or results_dir_text or ""),
         "policy": policy,
-        "policy_class": _policy_class(policy, baseline_policies=baseline_policies, ai_policies=ai_policies),
-        "controller_policy": str(row.get("controller_policy") or policy),
-        "controller_policy_class": str(
-            row.get("controller_policy_class")
-            or ("ai_enhanced" if policy in ai_policies else "traditional_baseline" if policy in baseline_policies else "other")
+        "policy_class": str(row.get("policy_class") or _policy_class(policy, baseline_policies=baseline_policies, ai_policies=ai_policies)),
+        "controller_policy": canonical_controller_policy_name(row.get("controller_policy") or policy),
+        "controller_policy_class": _controller_class_for_row(
+            policy,
+            explicit_value=row.get("controller_policy_class"),
+            ai_policies=ai_policies,
         ),
         "scenario": str(row.get("scenario") or ""),
         "seed": _to_int(row.get("seed")),
@@ -251,6 +330,7 @@ def _build_run_row_from_summary_csv_row(
         "energy_kwh": _to_float(row.get("energy_kwh_total_mean") or row.get("energy_kwh_mean")),
         "delivered_traffic": _to_float(row.get("delivered_total_mean") or row.get("delivered_traffic_mean")),
         "dropped_traffic": _to_float(row.get("dropped_total_mean") or row.get("dropped_traffic_mean")),
+        "delivery_loss_rate": _to_float(row.get("delivery_loss_rate_mean") or row.get("delivery_loss_rate")),
         "avg_delay_ms": _to_float(row.get("avg_delay_ms_mean")),
         "avg_path_latency_ms": _to_float(row.get("avg_path_latency_ms_mean")),
         "qos_violation_rate": _to_float(row.get("qos_violation_rate_mean") or row.get("qos_violation_rate")),
@@ -377,6 +457,8 @@ def _parse_per_step_rollup(per_step_path: Path) -> Dict[str, Any]:
             "dropped_traffic": 0.0,
             "energy_kwh": 0.0,
             "carbon_g": 0.0,
+            "transition_count_total": 0.0,
+            "flap_event_count_total": 0.0,
             "avg_delay_sum": 0.0,
             "avg_delay_count": 0,
             "avg_path_latency_sum": 0.0,
@@ -421,6 +503,14 @@ def _parse_per_step_rollup(per_step_path: Path) -> Dict[str, Any]:
                 stats["qos_present"] = True
                 stats["qos_violation_count"] += int(qos_violation)
 
+            transition_count = _to_float(row.get("transition_count"))
+            if transition_count is None:
+                transition_count = float(int(_to_bool(row.get("toggle_applied")) is True))
+            stats["transition_count_total"] += float(transition_count)
+
+            flap_events = _to_float(row.get("flap_event_count"))
+            stats["flap_event_count_total"] += float(0.0 if flap_events is None else flap_events)
+
     if not episode_totals:
         return {}
 
@@ -446,6 +536,12 @@ def _parse_per_step_rollup(per_step_path: Path) -> Dict[str, Any]:
     return {
         "delivered_traffic": _mean([float(stats["delivered_traffic"]) for stats in per_episode]),
         "dropped_traffic": _mean([float(stats["dropped_traffic"]) for stats in per_episode]),
+        "delivery_loss_rate": _mean(
+            [
+                float(stats["dropped_traffic"]) / max(float(stats["delivered_traffic"]) + float(stats["dropped_traffic"]), 1e-9)
+                for stats in per_episode
+            ]
+        ),
         "energy_kwh": _mean([float(stats["energy_kwh"]) for stats in per_episode]),
         "carbon_g": _mean([float(stats["carbon_g"]) for stats in per_episode]),
         "avg_delay_ms": _mean(delay_means),
@@ -453,6 +549,20 @@ def _parse_per_step_rollup(per_step_path: Path) -> Dict[str, Any]:
         # We use the weighted rate across all selected steps to avoid over-weighting shorter episodes.
         "qos_violation_rate": (float(total_qos_count) / float(total_qos_steps)) if total_qos_steps > 0 else None,
         "qos_violation_count": float(total_qos_count) if total_qos_steps > 0 else None,
+        "transition_count_total": _mean([float(stats["transition_count_total"]) for stats in per_episode]),
+        "transition_rate": _mean(
+            [
+                float(stats["transition_count_total"]) / max(float(stats["steps"]), 1.0)
+                for stats in per_episode
+            ]
+        ),
+        "flap_event_count_total": _mean([float(stats["flap_event_count_total"]) for stats in per_episode]),
+        "flap_rate": _mean(
+            [
+                float(stats["flap_event_count_total"]) / max(float(stats["transition_count_total"]), 1.0)
+                for stats in per_episode
+            ]
+        ),
         "steps_total": int(sum(int(stats["steps"]) for stats in per_episode)),
         "episode_count": int(len(per_episode)),
     }
@@ -473,20 +583,26 @@ def _extract_run_metrics(
     if tag in ("", None):
         tag = _infer_tag_from_dir_name(run_dir)
 
-    policy = str(meta.get("policy") or "")
+    policy = canonical_experiment_policy_name(meta.get("policy"))
     scenario = str(meta.get("scenario") or "")
     episodes = _to_int(meta.get("episodes"))
     if episodes is None:
         episodes = _to_int(per_step.get("episode_count"))
 
     row = {
+        "matrix_id": str(meta.get("matrix_id") or ""),
+        "matrix_name": str(meta.get("matrix_name") or ""),
+        "matrix_manifest": str(meta.get("matrix_manifest") or ""),
+        "matrix_case_id": str(meta.get("matrix_case_id") or ""),
+        "matrix_case_label": str(meta.get("matrix_case_label") or ""),
         "run_id": str(meta.get("run_id") or run_dir.name),
         "policy": policy,
-        "policy_class": _policy_class(policy, baseline_policies=baseline_policies, ai_policies=ai_policies),
-        "controller_policy": str(meta.get("controller_policy") or policy),
-        "controller_policy_class": str(
-            meta.get("controller_policy_class")
-            or ("ai_enhanced" if policy in ai_policies else "traditional_baseline" if policy in baseline_policies else "other")
+        "policy_class": str(meta.get("policy_class") or _policy_class(policy, baseline_policies=baseline_policies, ai_policies=ai_policies)),
+        "controller_policy": canonical_controller_policy_name(meta.get("controller_policy") or policy),
+        "controller_policy_class": _controller_class_for_row(
+            policy,
+            explicit_value=meta.get("controller_policy_class"),
+            ai_policies=ai_policies,
         ),
         "scenario": scenario,
         "seed": _to_int(meta.get("seed")),
@@ -500,18 +616,48 @@ def _extract_run_metrics(
         "routing_link_cost_model": str(meta.get("routing_link_cost_model") or "unit"),
         "routing_forwarding_model": str(meta.get("routing_forwarding_model") or "single_shortest_path"),
         "routing_path_split": str(meta.get("routing_path_split") or "single_path"),
+        "stability_policy_name": str(meta.get("stability_policy_name") or ""),
+        "stability_policy_signature": str(meta.get("stability_policy_signature") or ""),
+        "stability_thresholds": meta.get("stability_thresholds"),
+        "stability_status": str(
+            overall.get("stability_status")
+            or meta.get("stability_status")
+            or ""
+        ),
+        "stability_missing": str(
+            overall.get("stability_missing")
+            or meta.get("stability_missing")
+            or ""
+        ),
         "steps_total": _to_int(per_step.get("steps_total")),
         "energy_kwh": _to_float(overall.get("energy_kwh_total_mean")),
         "delivered_traffic": _to_float(overall.get("delivered_total_mean")),
         "dropped_traffic": _to_float(overall.get("dropped_total_mean")),
+        "delivery_loss_rate": _to_float(overall.get("delivery_loss_rate_mean")),
         "avg_delay_ms": _to_float(overall.get("avg_delay_ms_mean")),
         "avg_path_latency_ms": _to_float(overall.get("avg_path_latency_ms_mean")),
         "qos_violation_rate": _to_float(per_step.get("qos_violation_rate")),
         "qos_violation_count": _to_float(per_step.get("qos_violation_count")),
+        "transition_count_total": _to_float(overall.get("transition_count_total_mean")),
+        "transition_rate": _to_float(overall.get("transition_rate_mean")),
+        "flap_event_count_total": _to_float(overall.get("flap_event_count_total_mean")),
+        "flap_rate": _to_float(overall.get("flap_rate_mean")),
         "carbon_g": _to_float(overall.get("carbon_g_total_mean")),
     }
 
-    for field in ("energy_kwh", "delivered_traffic", "dropped_traffic", "avg_delay_ms", "avg_path_latency_ms", "carbon_g"):
+    for field in (
+        "energy_kwh",
+        "delivered_traffic",
+        "dropped_traffic",
+        "delivery_loss_rate",
+        "avg_delay_ms",
+        "avg_path_latency_ms",
+        "carbon_g",
+        "transition_count_total",
+        "transition_rate",
+        "flap_event_count_total",
+        "flap_rate",
+    ):
         if row[field] is None:
             row[field] = _to_float(per_step.get(field))
 
@@ -526,6 +672,9 @@ def _aggregate_group(
 ) -> Dict[str, Any]:
     seeds = sorted({int(row["seed"]) for row in rows if row.get("seed") is not None})
     out: Dict[str, Any] = {
+        "matrix_id": _common_text(rows, "matrix_id") or "",
+        "matrix_name": _common_text(rows, "matrix_name") or "",
+        "matrix_manifest": _common_text(rows, "matrix_manifest") or "",
         "scope_type": scope_type,
         "scope": scope_value,
         "scenario": scope_value if scope_type == "scenario" else "ALL",
@@ -537,6 +686,8 @@ def _aggregate_group(
         "routing_link_cost_model": _common_text(rows, "routing_link_cost_model") or "unit",
         "routing_forwarding_model": _common_text(rows, "routing_forwarding_model") or "single_shortest_path",
         "routing_path_split": _common_text(rows, "routing_path_split") or "single_path",
+        "stability_policy_name": _common_text(rows, "stability_policy_name") or "",
+        "stability_policy_signature": _common_text(rows, "stability_policy_signature") or "",
         "run_count": int(len(rows)),
         "seed_count": int(len(seeds)),
         "episodes_total": int(sum(int(row.get("episodes") or 0) for row in rows)),
@@ -552,6 +703,18 @@ def _aggregate_group(
 
     qos_counts = [float(row["qos_violation_count"]) for row in rows if row.get("qos_violation_count") is not None]
     out["qos_violation_count_total"] = float(sum(qos_counts)) if qos_counts else None
+
+    stability_gate = evaluate_run_stability(
+        steps=(float(out["steps_total"]) / float(max(out["run_count"], 1))) if out.get("steps_total") is not None else None,
+        transition_count_total=_to_float(out.get("transition_count_total_mean")),
+        flap_event_count_total=_to_float(out.get("flap_event_count_total_mean")),
+        policy=stability_policy_from_config(rows[0].get("stability_thresholds", {})),
+    )
+    out["stability_status"] = stability_gate.get("stability_status")
+    out["stability_missing"] = stability_gate.get("stability_missing")
+    out["transition_rate_mean"] = stability_gate.get("transition_rate")
+    out["flap_rate_mean"] = stability_gate.get("flap_rate")
+    out["stability_thresholds"] = stability_gate.get("stability_thresholds")
     return out
 
 
@@ -571,114 +734,99 @@ def _pct_reduction(baseline_value: float | None, candidate_value: float | None) 
     return float((float(baseline_value) - float(candidate_value)) / float(baseline_value) * 100.0)
 
 
+def _attach_reference_metrics(
+    row: Dict[str, Any],
+    reference_row: Mapping[str, Any] | None,
+    *,
+    reference_policy: str | None,
+    suffix: str,
+) -> bool:
+    row[f"comparison_{suffix}_policy"] = reference_policy
+    row[f"comparison_{suffix}_available"] = bool(reference_row is not None)
+
+    if reference_row is None:
+        return False
+
+    metric_pairs = (
+        ("delivered_traffic", "change_pct"),
+        ("dropped_traffic", "change_pct"),
+        ("avg_delay_ms", "change_pct"),
+        ("avg_path_latency_ms", "change_pct"),
+        ("qos_violation_rate", "delta_only"),
+        ("qos_violation_count", "delta_only"),
+        ("energy_kwh", "reduction_pct"),
+        ("carbon_g", "reduction_pct"),
+    )
+
+    for field, mode in metric_pairs:
+        current_value = row.get(f"{field}_mean")
+        reference_value = reference_row.get(f"{field}_mean")
+        row[f"{field}_delta_vs_{suffix}"] = (
+            None if current_value is None or reference_value is None else float(current_value) - float(reference_value)
+        )
+        if mode == "change_pct":
+            row[f"{field}_change_pct_vs_{suffix}"] = _pct_change(reference_value, current_value)
+        elif mode == "reduction_pct":
+            target_field = "energy_reduction_pct" if field == "energy_kwh" else "carbon_reduction_pct"
+            row[f"{target_field}_vs_{suffix}"] = _pct_reduction(reference_value, current_value)
+
+    return True
+
+
 def _attach_baseline_comparison(
     row: Dict[str, Any],
     baseline_row: Mapping[str, Any] | None,
     *,
     primary_baseline_policy: str,
+    heuristic_baseline_policy: str | None,
+    heuristic_baseline_row: Mapping[str, Any] | None,
     thresholds: HypothesisThresholds,
 ) -> None:
+    row["official_traditional_baseline_policy"] = primary_baseline_policy
+    row["strongest_heuristic_baseline_policy"] = heuristic_baseline_policy
+    row["comparison_official_baseline_policy"] = primary_baseline_policy
+    row["comparison_heuristic_baseline_policy"] = heuristic_baseline_policy
+
+    comparison_available = _attach_reference_metrics(
+        row,
+        baseline_row,
+        reference_policy=primary_baseline_policy,
+        suffix="baseline",
+    )
+    row["comparison_available"] = comparison_available
     row["comparison_baseline_policy"] = primary_baseline_policy
-    row["comparison_available"] = bool(baseline_row is not None)
+    row["comparison_official_baseline_available"] = comparison_available
+    row["comparison_official_baseline_policy"] = primary_baseline_policy
+
+    _attach_reference_metrics(
+        row,
+        heuristic_baseline_row,
+        reference_policy=heuristic_baseline_policy,
+        suffix="heuristic_baseline",
+    )
 
     if baseline_row is None:
         row["qos_acceptability_status"] = "insufficient_data"
         row["hypothesis_status"] = "insufficient_data"
-        row["qos_acceptability_missing"] = "missing baseline row"
+        row["qos_acceptability_missing"] = "missing official baseline row"
         row["is_primary_baseline"] = False
+        row["is_official_traditional_baseline"] = False
+        row["is_heuristic_baseline"] = bool(heuristic_baseline_policy and row["policy"] == heuristic_baseline_policy)
         return
 
     row["is_primary_baseline"] = row["policy"] == primary_baseline_policy
+    row["is_official_traditional_baseline"] = row["policy"] == primary_baseline_policy
+    row["is_heuristic_baseline"] = bool(heuristic_baseline_policy and row["policy"] == heuristic_baseline_policy)
 
-    delivered = row.get("delivered_traffic_mean")
-    baseline_delivered = baseline_row.get("delivered_traffic_mean")
-    dropped = row.get("dropped_traffic_mean")
-    baseline_dropped = baseline_row.get("dropped_traffic_mean")
-    delay = row.get("avg_delay_ms_mean")
-    baseline_delay = baseline_row.get("avg_delay_ms_mean")
-    path_latency = row.get("avg_path_latency_ms_mean")
-    baseline_path_latency = baseline_row.get("avg_path_latency_ms_mean")
-    qos_rate = row.get("qos_violation_rate_mean")
-    baseline_qos_rate = baseline_row.get("qos_violation_rate_mean")
-    energy = row.get("energy_kwh_mean")
-    baseline_energy = baseline_row.get("energy_kwh_mean")
-    carbon = row.get("carbon_g_mean")
-    baseline_carbon = baseline_row.get("carbon_g_mean")
-    qos_count = row.get("qos_violation_count_mean")
-    baseline_qos_count = baseline_row.get("qos_violation_count_mean")
-
-    row["delivered_traffic_delta_vs_baseline"] = (
-        None if delivered is None or baseline_delivered is None else float(delivered) - float(baseline_delivered)
+    qos_gate = evaluate_qos_against_baseline(
+        delivered_change_pct=_to_float(row.get("delivered_traffic_change_pct_vs_baseline")),
+        dropped_change_pct=_to_float(row.get("dropped_traffic_change_pct_vs_baseline")),
+        avg_delay_change_pct=_to_float(row.get("avg_delay_ms_change_pct_vs_baseline")),
+        avg_path_latency_change_pct=_to_float(row.get("avg_path_latency_ms_change_pct_vs_baseline")),
+        qos_violation_rate_delta=_to_float(row.get("qos_violation_rate_delta_vs_baseline")),
+        thresholds=thresholds.qos_thresholds(),
     )
-    row["delivered_traffic_change_pct_vs_baseline"] = _pct_change(baseline_delivered, delivered)
-    row["dropped_traffic_delta_vs_baseline"] = (
-        None if dropped is None or baseline_dropped is None else float(dropped) - float(baseline_dropped)
-    )
-    row["dropped_traffic_change_pct_vs_baseline"] = _pct_change(baseline_dropped, dropped)
-    row["avg_delay_ms_delta_vs_baseline"] = (
-        None if delay is None or baseline_delay is None else float(delay) - float(baseline_delay)
-    )
-    row["avg_delay_ms_change_pct_vs_baseline"] = _pct_change(baseline_delay, delay)
-    row["avg_path_latency_ms_delta_vs_baseline"] = (
-        None if path_latency is None or baseline_path_latency is None else float(path_latency) - float(baseline_path_latency)
-    )
-    row["avg_path_latency_ms_change_pct_vs_baseline"] = _pct_change(baseline_path_latency, path_latency)
-    row["qos_violation_rate_delta_vs_baseline"] = (
-        None if qos_rate is None or baseline_qos_rate is None else float(qos_rate) - float(baseline_qos_rate)
-    )
-    row["qos_violation_count_delta_vs_baseline"] = (
-        None if qos_count is None or baseline_qos_count is None else float(qos_count) - float(baseline_qos_count)
-    )
-    row["energy_kwh_delta_vs_baseline"] = (
-        None if energy is None or baseline_energy is None else float(energy) - float(baseline_energy)
-    )
-    row["energy_reduction_pct_vs_baseline"] = _pct_reduction(baseline_energy, energy)
-    row["carbon_g_delta_vs_baseline"] = (
-        None if carbon is None or baseline_carbon is None else float(carbon) - float(baseline_carbon)
-    )
-    row["carbon_reduction_pct_vs_baseline"] = _pct_reduction(baseline_carbon, carbon)
-
-    # These thresholds are reporting heuristics, not simulator-native acceptance checks.
-    # The defaults are intentionally exposed on the CLI because "acceptable QoS degradation"
-    # is a thesis/reporting choice rather than a single hard-coded product rule.
-    gate_checks: Dict[str, bool] = {}
-    missing: List[str] = []
-
-    delivered_change_pct = row.get("delivered_traffic_change_pct_vs_baseline")
-    if delivered_change_pct is None:
-        missing.append("delivered_traffic")
-    else:
-        gate_checks["delivered_traffic"] = float(delivered_change_pct) >= -float(thresholds.max_delivered_loss_pct)
-
-    dropped_change_pct = row.get("dropped_traffic_change_pct_vs_baseline")
-    if dropped_change_pct is None:
-        missing.append("dropped_traffic")
-    else:
-        gate_checks["dropped_traffic"] = float(dropped_change_pct) <= float(thresholds.max_dropped_increase_pct)
-
-    delay_change_pct = row.get("avg_delay_ms_change_pct_vs_baseline")
-    if delay_change_pct is None:
-        missing.append("avg_delay_ms")
-    else:
-        gate_checks["avg_delay_ms"] = float(delay_change_pct) <= float(thresholds.max_delay_increase_pct)
-
-    path_latency_change_pct = row.get("avg_path_latency_ms_change_pct_vs_baseline")
-    if path_latency_change_pct is None:
-        missing.append("avg_path_latency_ms")
-    else:
-        gate_checks["avg_path_latency_ms"] = float(path_latency_change_pct) <= float(thresholds.max_path_latency_increase_pct)
-
-    qos_rate_delta = row.get("qos_violation_rate_delta_vs_baseline")
-    if qos_rate_delta is None:
-        missing.append("qos_violation_rate")
-    else:
-        gate_checks["qos_violation_rate"] = float(qos_rate_delta) <= float(thresholds.max_qos_violation_rate_increase_abs)
-
-    row["qos_acceptability_missing"] = ",".join(missing)
-    if missing:
-        row["qos_acceptability_status"] = "insufficient_data"
-    else:
-        row["qos_acceptability_status"] = "acceptable" if all(gate_checks.values()) else "not_acceptable"
+    row.update(qos_gate)
 
     energy_reduction_pct = row.get("energy_reduction_pct_vs_baseline")
     energy_ok = (
@@ -692,9 +840,17 @@ def _attach_baseline_comparison(
     else:
         row["hypothesis_status"] = "not_achieved"
 
+    stability_status = str(row.get("stability_status") or "")
+    if row["hypothesis_status"] == "insufficient_data" or stability_status in {"", "insufficient_data"}:
+        row["stability_qualified_hypothesis_status"] = "insufficient_data"
+    elif row["hypothesis_status"] == "achieved" and stability_status == "stable":
+        row["stability_qualified_hypothesis_status"] = "achieved"
+    else:
+        row["stability_qualified_hypothesis_status"] = "not_achieved"
+
 
 def _rank_key(row: Mapping[str, Any]) -> tuple[float, float, float, float, float, float, float, str]:
-    status = str(row.get("hypothesis_status") or "")
+    status = str(row.get("stability_qualified_hypothesis_status") or row.get("hypothesis_status") or "")
     qos_status = str(row.get("qos_acceptability_status") or "")
     if status == "achieved":
         status_rank = 2.0
@@ -755,6 +911,7 @@ def _build_summary_rows(
     run_rows: Sequence[Mapping[str, Any]],
     *,
     primary_baseline_policy: str,
+    heuristic_baseline_policy: str | None,
     thresholds: HypothesisThresholds,
     ai_policies: set[str],
 ) -> List[Dict[str, Any]]:
@@ -774,12 +931,24 @@ def _build_summary_rows(
         for row in summary_rows
         if row["policy"] == primary_baseline_policy
     }
+    heuristic_lookup = (
+        {
+            (row["scope_type"], row["scope"]): row
+            for row in summary_rows
+            if heuristic_baseline_policy is not None and row["policy"] == heuristic_baseline_policy
+        }
+        if heuristic_baseline_policy is not None
+        else {}
+    )
     for row in summary_rows:
         baseline_row = baseline_lookup.get((row["scope_type"], row["scope"]))
+        heuristic_row = heuristic_lookup.get((row["scope_type"], row["scope"]))
         _attach_baseline_comparison(
             row,
             baseline_row,
             primary_baseline_policy=primary_baseline_policy,
+            heuristic_baseline_policy=heuristic_baseline_policy,
+            heuristic_baseline_row=heuristic_row,
             thresholds=thresholds,
         )
 
@@ -817,15 +986,17 @@ def _headline_for_row(row: Mapping[str, Any] | None, *, primary_baseline_policy:
     return (
         f"{policy} ({policy_class}) vs {primary_baseline_policy}: "
         f"energy {energy_reduction}, delivered {delivered_change}, "
-        f"QoS violation rate delta {qos_phrase}, hypothesis={row.get('hypothesis_status', 'n/a')}"
+        f"QoS violation rate delta {qos_phrase}, stability={row.get('stability_status', 'n/a')}, "
+        f"operational={row.get('stability_qualified_hypothesis_status', row.get('hypothesis_status', 'n/a'))}"
     )
 
 
 def _markdown_table(rows: Sequence[Mapping[str, Any]]) -> str:
     header = (
         "| Policy | Class | Runs | Energy (kWh) | Energy vs baseline | Delivered | Dropped | "
-        "Avg delay (ms) | Path latency (ms) | QoS rate | QoS count | Carbon (g) | QoS status | Hypothesis |\n"
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |"
+        "Avg delay (ms) | Path latency (ms) | QoS rate | QoS count | Transitions | Flap rate | Carbon (g) | "
+        "QoS status | Stability | Operational | Hypothesis |\n"
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- |"
     )
     lines = [header]
     for row in rows:
@@ -837,7 +1008,8 @@ def _markdown_table(rows: Sequence[Mapping[str, Any]]) -> str:
 
         lines.append(
             "| {policy} | {klass} | {runs} | {energy} | {energy_red} | {delivered} | {dropped} | "
-            "{delay} | {path} | {qos_rate} | {qos_count} | {carbon} | {qos_status} | {hypothesis} |".format(
+            "{delay} | {path} | {qos_rate} | {qos_count} | {transitions} | {flap_rate} | {carbon} | "
+            "{qos_status} | {stability} | {operational} | {hypothesis} |".format(
                 policy=policy_label,
                 klass=row.get("policy_class", "other"),
                 runs=int(row.get("run_count") or 0),
@@ -849,8 +1021,14 @@ def _markdown_table(rows: Sequence[Mapping[str, Any]]) -> str:
                 path=_fmt_number(row.get("avg_path_latency_ms_mean"), 3),
                 qos_rate=_fmt_number(row.get("qos_violation_rate_mean"), 4),
                 qos_count=_fmt_number(row.get("qos_violation_count_mean"), 2),
+                transitions=_fmt_number(row.get("transition_count_total_mean"), 2),
+                flap_rate=_fmt_pct(
+                    None if row.get("flap_rate_mean") is None else float(row.get("flap_rate_mean")) * 100.0
+                ),
                 carbon=_fmt_number(row.get("carbon_g_mean"), 6),
                 qos_status=row.get("qos_acceptability_status", "n/a"),
+                stability=row.get("stability_status", "n/a"),
+                operational=row.get("stability_qualified_hypothesis_status", "n/a"),
                 hypothesis=row.get("hypothesis_status", "n/a"),
             )
         )
@@ -863,6 +1041,7 @@ def _write_markdown_report(
     summary_rows: Sequence[Mapping[str, Any]],
     generated_at_utc: str,
     primary_baseline_policy: str,
+    heuristic_baseline_policy: str | None,
     baseline_policies: Sequence[str],
     ai_policies: Sequence[str],
     routing_baselines: Sequence[str],
@@ -886,8 +1065,9 @@ def _write_markdown_report(
         f"- Generated at: `{generated_at_utc}`",
         f"- Source selection: `{source_description}`",
         f"- Selected runs: `{selected_run_count}`",
-        f"- Primary baseline policy: `{primary_baseline_policy}`",
-        f"- Baseline policies in scope: `{', '.join(baseline_policies) if baseline_policies else 'n/a'}`",
+        f"- Official traditional baseline policy: `{primary_baseline_policy}`",
+        f"- Strongest heuristic baseline policy: `{heuristic_baseline_policy or 'n/a'}`",
+        f"- Non-AI policies in scope: `{', '.join(baseline_policies) if baseline_policies else 'n/a'}`",
         f"- AI policies in scope: `{', '.join(ai_policies) if ai_policies else 'n/a'}`",
         f"- Routing baselines in scope: `{', '.join(routing_baselines) if routing_baselines else 'n/a'}`",
         f"- Routing link-cost models in scope: `{', '.join(routing_link_cost_models) if routing_link_cost_models else 'n/a'}`",
@@ -911,6 +1091,8 @@ def _write_markdown_report(
             path=thresholds.max_path_latency_increase_pct,
             qos=thresholds.max_qos_violation_rate_increase_abs,
         ),
+        "- Stability gate: use the exported `stability_status` from the centralized stability policy. "
+        "Operational success requires the energy/QoS hypothesis to be achieved while stability remains `stable`.",
         "",
         "## Overall Comparison",
         _markdown_table(overall_rows),
@@ -931,6 +1113,9 @@ def _write_markdown_report(
 
 
 CSV_COLUMNS = [
+    "matrix_id",
+    "matrix_name",
+    "matrix_manifest",
     "scope_type",
     "scope",
     "scenario",
@@ -942,58 +1127,100 @@ CSV_COLUMNS = [
     "routing_link_cost_model",
     "routing_forwarding_model",
     "routing_path_split",
+    "stability_policy_name",
+    "stability_policy_signature",
     "run_count",
     "seed_count",
     "episodes_total",
     "steps_total",
     "seed_list",
+    "official_traditional_baseline_policy",
+    "strongest_heuristic_baseline_policy",
     "comparison_baseline_policy",
     "comparison_available",
+    "comparison_official_baseline_policy",
+    "comparison_official_baseline_available",
+    "comparison_heuristic_baseline_policy",
+    "comparison_heuristic_baseline_available",
     "is_primary_baseline",
+    "is_official_traditional_baseline",
+    "is_heuristic_baseline",
     "is_best_policy_for_scope",
     "is_best_ai_policy_for_scope",
     "qos_acceptability_status",
     "qos_acceptability_missing",
+    "stability_status",
+    "stability_missing",
+    "stability_qualified_hypothesis_status",
     "hypothesis_status",
     "energy_kwh_mean",
     "energy_kwh_std",
     "energy_kwh_count",
     "energy_kwh_delta_vs_baseline",
     "energy_reduction_pct_vs_baseline",
-    "delivered_traffic_mean",
-    "delivered_traffic_std",
-    "delivered_traffic_count",
-    "delivered_traffic_delta_vs_baseline",
-    "delivered_traffic_change_pct_vs_baseline",
-    "dropped_traffic_mean",
-    "dropped_traffic_std",
-    "dropped_traffic_count",
+    "energy_kwh_delta_vs_heuristic_baseline",
+    "energy_reduction_pct_vs_heuristic_baseline",
+        "delivered_traffic_mean",
+        "delivered_traffic_std",
+        "delivered_traffic_count",
+        "delivered_traffic_delta_vs_baseline",
+        "delivered_traffic_change_pct_vs_baseline",
+        "delivered_traffic_delta_vs_heuristic_baseline",
+        "delivered_traffic_change_pct_vs_heuristic_baseline",
+        "delivery_loss_rate_mean",
+        "delivery_loss_rate_std",
+        "delivery_loss_rate_count",
+        "dropped_traffic_mean",
+        "dropped_traffic_std",
+        "dropped_traffic_count",
     "dropped_traffic_delta_vs_baseline",
     "dropped_traffic_change_pct_vs_baseline",
+    "dropped_traffic_delta_vs_heuristic_baseline",
+    "dropped_traffic_change_pct_vs_heuristic_baseline",
     "avg_delay_ms_mean",
     "avg_delay_ms_std",
     "avg_delay_ms_count",
     "avg_delay_ms_delta_vs_baseline",
     "avg_delay_ms_change_pct_vs_baseline",
+    "avg_delay_ms_delta_vs_heuristic_baseline",
+    "avg_delay_ms_change_pct_vs_heuristic_baseline",
     "avg_path_latency_ms_mean",
     "avg_path_latency_ms_std",
     "avg_path_latency_ms_count",
     "avg_path_latency_ms_delta_vs_baseline",
     "avg_path_latency_ms_change_pct_vs_baseline",
+    "avg_path_latency_ms_delta_vs_heuristic_baseline",
+    "avg_path_latency_ms_change_pct_vs_heuristic_baseline",
     "qos_violation_rate_mean",
     "qos_violation_rate_std",
     "qos_violation_rate_count",
     "qos_violation_rate_delta_vs_baseline",
+    "qos_violation_rate_delta_vs_heuristic_baseline",
     "qos_violation_count_mean",
     "qos_violation_count_std",
     "qos_violation_count_count",
     "qos_violation_count_total",
     "qos_violation_count_delta_vs_baseline",
+    "qos_violation_count_delta_vs_heuristic_baseline",
+    "transition_count_total_mean",
+    "transition_count_total_std",
+    "transition_count_total_count",
+    "transition_rate_mean",
+    "transition_rate_std",
+    "transition_rate_count",
+    "flap_event_count_total_mean",
+    "flap_event_count_total_std",
+    "flap_event_count_total_count",
+    "flap_rate_mean",
+    "flap_rate_std",
+    "flap_rate_count",
     "carbon_g_mean",
     "carbon_g_std",
     "carbon_g_count",
     "carbon_g_delta_vs_baseline",
     "carbon_reduction_pct_vs_baseline",
+    "carbon_g_delta_vs_heuristic_baseline",
+    "carbon_reduction_pct_vs_heuristic_baseline",
 ]
 
 
@@ -1013,6 +1240,7 @@ def _build_json_payload(
     source_description: str,
     source_mode: str,
     primary_baseline_policy: str,
+    heuristic_baseline_policy: str | None,
     baseline_policies: Sequence[str],
     ai_policies: Sequence[str],
     routing_baselines: Sequence[str],
@@ -1029,9 +1257,15 @@ def _build_json_payload(
             "selected_run_count": len(run_rows),
             "selected_policies": sorted({str(row.get("policy") or "") for row in run_rows}),
             "selected_scenarios": sorted({str(row.get("scenario") or "") for row in run_rows}),
+            "matrix_id": _common_text(run_rows, "matrix_id"),
+            "matrix_name": _common_text(run_rows, "matrix_name"),
+            "matrix_manifest": _common_text(run_rows, "matrix_manifest"),
+            "matrix_case_ids": sorted({str(row.get("matrix_case_id") or "") for row in run_rows if str(row.get("matrix_case_id") or "")}),
         },
         "classification": {
             "primary_baseline_policy": primary_baseline_policy,
+            "official_traditional_baseline_policy": primary_baseline_policy,
+            "strongest_heuristic_baseline_policy": heuristic_baseline_policy,
             "baseline_policies": list(baseline_policies),
             "ai_policies": list(ai_policies),
             "routing_baselines": list(routing_baselines),
@@ -1048,9 +1282,17 @@ def _build_json_payload(
             "max_delay_increase_pct": thresholds.max_delay_increase_pct,
             "max_path_latency_increase_pct": thresholds.max_path_latency_increase_pct,
         },
+        "qos_thresholds": acceptance_thresholds_metadata(thresholds.qos_thresholds()),
+        "stability_thresholds": (
+            None if best_ai_overall is None else best_ai_overall.get("stability_thresholds")
+        ),
         "best_policy": best_overall,
         "best_ai_policy": best_ai_overall,
         "overall_hypothesis_status": None if best_ai_overall is None else best_ai_overall.get("hypothesis_status"),
+        "overall_stability_status": None if best_ai_overall is None else best_ai_overall.get("stability_status"),
+        "overall_operational_status": (
+            None if best_ai_overall is None else best_ai_overall.get("stability_qualified_hypothesis_status")
+        ),
         "summary_rows": list(summary_rows),
     }
 
@@ -1081,7 +1323,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         "--baseline-policies",
         type=str,
         default=",".join(DEFAULT_BASELINE_POLICIES),
-        help="Comma-separated baseline policies used for classification.",
+        help="Comma-separated non-AI policies used for classification.",
     )
     parser.add_argument(
         "--ai-policies",
@@ -1093,7 +1335,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         "--primary-baseline-policy",
         type=str,
         default=None,
-        help="Baseline policy used for authoritative deltas and hypothesis checks. Defaults to heuristic/baseline/all_on/noop if present.",
+        help="Official traditional baseline policy used for authoritative deltas and hypothesis checks. Defaults to all_on/noop if present.",
+    )
+    parser.add_argument(
+        "--heuristic-baseline-policy",
+        type=str,
+        default=None,
+        help="Optional strongest handcrafted heuristic baseline used for secondary comparisons. Defaults to heuristic/baseline if present.",
     )
     parser.add_argument("--energy-target-pct", type=float, default=15.0)
     parser.add_argument("--max-qos-violation-rate-increase", type=float, default=0.02)
@@ -1155,10 +1403,16 @@ def main(argv: Sequence[str] | None = None) -> None:
     if not run_rows:
         raise SystemExit("No valid run artifacts were found after loading run metadata.")
 
+    baseline_priority = _baseline_priority_for(baseline_policies)
     primary_baseline_policy = _choose_primary_baseline(
         (row["policy"] for row in run_rows),
         requested=args.primary_baseline_policy,
-        baseline_priority=DEFAULT_BASELINE_POLICIES,
+        baseline_priority=baseline_priority,
+    )
+    heuristic_baseline_policy = _choose_reference_policy(
+        (row["policy"] for row in run_rows),
+        requested=args.heuristic_baseline_policy,
+        priority=DEFAULT_HEURISTIC_BASELINE_POLICIES,
     )
 
     thresholds = HypothesisThresholds(
@@ -1172,6 +1426,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     summary_rows = _build_summary_rows(
         run_rows,
         primary_baseline_policy=primary_baseline_policy,
+        heuristic_baseline_policy=heuristic_baseline_policy,
         thresholds=thresholds,
         ai_policies=ai_policies,
     )
@@ -1216,6 +1471,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         source_description=source_description,
         source_mode=source_mode,
         primary_baseline_policy=primary_baseline_policy,
+        heuristic_baseline_policy=heuristic_baseline_policy,
         baseline_policies=baseline_policies_in_scope,
         ai_policies=ai_policies_in_scope,
         routing_baselines=routing_baselines_in_scope,
@@ -1230,6 +1486,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         summary_rows=summary_rows,
         generated_at_utc=generated_at_utc,
         primary_baseline_policy=primary_baseline_policy,
+        heuristic_baseline_policy=heuristic_baseline_policy,
         baseline_policies=baseline_policies_in_scope,
         ai_policies=ai_policies_in_scope,
         routing_baselines=routing_baselines_in_scope,

@@ -1,0 +1,93 @@
+{
+  "calibration": {
+    "brier_cal": 0.2221394181251526,
+    "brier_uncal": 0.23342300951480865,
+    "temperature": 0.4322168231010437,
+    "val_rows": 52513
+  },
+  "dataset_path": "artifacts/cost_estimator/ds_graph.npz",
+  "dataset_qos_delay_ms": null,
+  "dataset_qos_drop_max": null,
+  "edge_dim": 4,
+  "edge_feature_names": [
+    "edge_active",
+    "edge_utilization",
+    "edge_capacity",
+    "edge_latency"
+  ],
+  "ensemble_size": 3,
+  "global_dim": 16,
+  "global_feature_names": [
+    "time",
+    "avg_util",
+    "active_ratio",
+    "max_util",
+    "min_util",
+    "p95_util",
+    "demand_now",
+    "demand_forecast",
+    "dropped_prev",
+    "num_active_edges",
+    "near_saturated_edges",
+    "norm_drop_step",
+    "norm_drop_total",
+    "qos_violation_step",
+    "global_cooldown_norm",
+    "decision_step_norm"
+  ],
+  "hidden_dim": 32,
+  "model_type": "impact_predictor_ensemble",
+  "num_edges": 18,
+  "risk_defaults": {
+    "k": 1.0,
+    "w_drop": 1.0,
+    "w_energy": 0.2
+  },
+  "rows_raw": 500000,
+  "rows_used": 350091,
+  "scenario_metrics": {
+    "all": {
+      "ddrop_mae": 0.0011983966687694192,
+      "denergy_mae": 0.0006555533036589622,
+      "qos_auc": 0.5799078693430262,
+      "qos_brier": 0.2221394181251526,
+      "qos_positive_rate": 0.05031135147487289,
+      "rows": 52513
+    }
+  },
+  "split": {
+    "mode": "random",
+    "train_rows": 297578,
+    "val_frac": 0.15,
+    "val_rows": 52513
+  },
+  "temperature": 0.4322168231010437,
+  "threshold_defaults": {
+    "ddrop_max": 0.001,
+    "p_qos_max": 0.11,
+    "tau": 0.11
+  },
+  "training_args": {
+    "batch_size": 128,
+    "ensemble_size": 3,
+    "epochs": 1,
+    "hidden_dim": 32,
+    "lr": 0.001,
+    "off_only": true,
+    "seed": 42,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "val_frac": 0.15
+  },
+  "validation_metrics": {
+    "ddrop_mae": 0.0011983966687694192,
+    "denergy_mae": 0.0006555533036589622,
+    "qos_auc": 0.5799078693430262,
+    "qos_brier": 0.2221394181251526,
+    "qos_positive_rate": 0.05031135147487289
+  },
+  "y_qos_positive_rate_used": 0.050024136581631636
+}

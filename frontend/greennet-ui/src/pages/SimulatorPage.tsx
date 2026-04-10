@@ -13,7 +13,6 @@ import {
   normalizePerStep,
   timelineFromRows,
 } from "../lib/data";
-import { isDemoRunId } from "../lib/demo";
 import type { RunSummary, StepState, TopologyData } from "../lib/types";
 
 function upsertRun(runs: RunSummary[], nextRun: RunSummary): RunSummary[] {
@@ -185,8 +184,6 @@ export default function SimulatorPage() {
     return run ? inferPolicy(run) : policy;
   }, [policy, runs, selectedRunId]);
 
-  const demoMode = isDemoRunId(selectedRunId);
-
   const linkTelemetry = useMemo(() => {
     if (!step) {
       return { onCount: 0, offCount: 0, switched: 0, energyDelta: 0 };
@@ -269,14 +266,14 @@ export default function SimulatorPage() {
             <h3>Simulator Playback</h3>
           </div>
 
-          <label>
-            Policy
-            <select value={policy} onChange={(event) => setPolicy(event.target.value)}>
-              <option value="all_on">All-On</option>
-              <option value="heuristic">Heuristic</option>
-              <option value="ppo">PPO</option>
-            </select>
-          </label>
+            <label>
+              Policy
+              <select value={policy} onChange={(event) => setPolicy(event.target.value)}>
+              <option value="all_on">Traditional (All-On)</option>
+              <option value="heuristic">Energy-Aware Heuristic</option>
+              <option value="ppo">PPO (AI)</option>
+              </select>
+            </label>
 
           <label>
             Run

@@ -20,8 +20,14 @@ These `EnvConfig` fields are now supported in train/eval configs and saved `env_
 
 - `topology_name`
 - `topology_path`
+- `traffic_model`
 - `traffic_name`
 - `traffic_path`
+- `traffic_scenario`
+- `traffic_scenario_version`
+- `traffic_scenario_intensity`
+- `traffic_scenario_duration`
+- `traffic_scenario_frequency`
 
 Resolution rules:
 
@@ -37,13 +43,37 @@ Relative `topology_path` and `traffic_path` values in config files are resolved 
 
 Bundled named topologies:
 
-- `metro_hub`
-- `regional_ring`
+- official reusable classes:
+  - `small` -> loads the packaged `regional_ring` topology
+  - `medium` -> loads the packaged `metro_hub` topology
+  - `large` -> loads the packaged `backbone_large` topology
+- compatibility aliases still accepted:
+  - `regional_ring`
+  - `metro_hub`
+  - `backbone_large`
 
 Bundled named traffic profiles:
 
 - `commuter_bursts`
 - `commuter_matrices`
+- `regional_ring_commuter_matrices`
+- `backbone_large_flash_crowd_bursts`
+
+Built-in stochastic traffic scenarios:
+
+- `normal`
+- `diurnal`
+- `burst`
+- `hotspot`
+- `anomaly`
+- `flash_crowd`
+- `multi_peak`
+
+Compatibility aliases still accepted where already used:
+
+- `failure` -> `anomaly`
+- `normal/diurnal` -> `diurnal`
+- `flash crowd` -> `flash_crowd`
 
 ## Experiment Runner Usage
 
@@ -52,11 +82,11 @@ Direct CLI usage:
 ```bash
 python3 run_experiment.py \
   --policy all_on \
-  --scenario custom \
+  --scenario flash_crowd \
   --seed 17 \
   --steps 50 \
-  --topology-name metro_hub \
-  --traffic-name commuter_matrices
+  --topology-name medium \
+  --traffic-scenario-intensity 1.2
 ```
 
 Config-driven usage:
@@ -68,8 +98,8 @@ Config-driven usage:
   "episodes": 3,
   "steps": 100,
   "env": {
-    "topology_name": "metro_hub",
-    "traffic_name": "commuter_bursts"
+    "topology_name": "large",
+    "traffic_name": "backbone_large_flash_crowd_bursts"
   }
 }
 ```
@@ -85,6 +115,22 @@ Train CLI usage works through the same env block:
     "traffic_path": "inputs/my_traffic.json"
   }
 }
+```
+
+Matrix and official-pipeline usage support the same selectors:
+
+```bash
+python3 experiments/run_matrix.py \
+  --policies all_on,heuristic,ppo \
+  --scenarios normal,burst,hotspot \
+  --seeds 0,1,2 \
+  --topology-name small \
+  --traffic-name regional_ring_commuter_matrices
+
+python3 -m greennet.evaluation.final_pipeline \
+  --tag topology_small_demo \
+  --topology-name small \
+  --traffic-name regional_ring_commuter_matrices
 ```
 
 ## Topology File Format
@@ -137,6 +183,8 @@ Traffic replay files are JSON objects with:
 - exactly one of:
   - `bursts`
   - `matrices`
+
+These replay files are topology-specific by `node_count`. A named or custom traffic replay file must match the active topology's node count.
 
 ### Burst Trace Format
 
@@ -205,4 +253,7 @@ Validation rules:
 
 - Saved `env_config.json` files are normalized so file-backed topologies persist the correct `node_count` and `directed` values.
 - Relative file paths are stored as absolute paths in saved run configs to keep result folders replayable.
+- Prefer `small`, `medium`, and `large` in new configs and scripts. The older packaged names remain accepted as compatibility aliases.
+- `traffic_name` / `traffic_path` take precedence over stochastic `traffic_model` / `traffic_scenario` settings and are recorded in run metadata alongside `traffic_mode`.
+- The built-in `hotspot`, `flash_crowd`, and `multi_peak` stochastic scenarios now generate topology-safe hotspot pairs so they work across the D6 `small`, `medium`, and `large` topology classes.
 - For PPO evaluation, a custom topology must still be action-space compatible with the checkpoint you load.
