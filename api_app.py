@@ -193,14 +193,43 @@ def _run_repository():
         return None
 
 
+def _path_within_repo(path_text: Any) -> bool:
+    if path_text in ("", None):
+        return False
+    try:
+        candidate = Path(str(path_text)).expanduser()
+        resolved = candidate.resolve() if candidate.is_absolute() else (REPO_ROOT / candidate).resolve()
+        repo_root = REPO_ROOT.resolve()
+        resolved.relative_to(repo_root)
+        return True
+    except Exception:
+        return False
+
+
+def _db_final_evaluation_matches_repo(payload: Dict[str, Any]) -> bool:
+    artifact = payload.get("artifact")
+    if not isinstance(artifact, dict):
+        return False
+
+    for key in ("output_dir", "summary_path", "report_path"):
+        if _path_within_repo(artifact.get(key)):
+            return True
+    return False
+
+
 def _latest_final_evaluation_from_db() -> Optional[Dict[str, Any]]:
     repo = _run_repository()
     if repo is None:
         return None
     try:
-        return repo.get_latest_final_evaluation()
+        payload = repo.get_latest_final_evaluation()
     except Exception:
         return None
+    if not payload or not isinstance(payload, dict):
+        return None
+    if not _db_final_evaluation_matches_repo(payload):
+        return None
+    return payload
 
 
 def _run_identity_for_dir(run_dir: Path) -> Tuple[str, str]:

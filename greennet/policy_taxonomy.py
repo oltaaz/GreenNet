@@ -87,3 +87,28 @@ def is_heuristic_baseline_policy(policy: str | None) -> bool:
 
 def is_ai_policy(policy: str | None) -> bool:
     return canonical_experiment_policy_name(policy) == "ppo"
+
+
+def reviewer_policy_label(policy: str | None) -> str:
+    canonical = canonical_experiment_policy_name(policy)
+    if canonical == "all_on":
+        return "Traditional (All-On)"
+    if canonical == "heuristic":
+        return "Energy-Aware Heuristic"
+    if canonical == "ppo":
+        return "PPO-Based Hybrid (AI)"
+    return str(policy or "")
+
+
+def reviewer_policy_descriptor(policy: str | None) -> str:
+    canonical = canonical_experiment_policy_name(policy)
+    if canonical == "ppo":
+        return (
+            "PPO-based hybrid controller with rule-based safety, recovery, and calm-off "
+            "overrides over the fixed routing baseline"
+        )
+    if canonical == "heuristic":
+        return "Handcrafted energy-aware heuristic controller over the fixed routing baseline"
+    if canonical == "all_on":
+        return "Traditional all-on control over the fixed routing baseline"
+    return str(policy or "")

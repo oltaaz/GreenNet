@@ -69,7 +69,7 @@ def _preflight_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--results-dir", type=Path, default=Path("results"))
     parser.add_argument("--runs-dir", type=Path, default=Path("runs"))
-    parser.add_argument("--output-dir", type=Path, default=Path("artifacts/final_pipeline/latest"))
+    parser.add_argument("--output-dir", type=Path, default=Path("artifacts/final_pipeline/official_acceptance_v1"))
     parser.add_argument("--ppo-model", type=Path, default=None)
     parser.add_argument("--summary-csv", type=Path, default=None)
     parser.add_argument("--skip-eval", action="store_true")
@@ -81,7 +81,12 @@ def _preflight_parser() -> argparse.ArgumentParser:
 
 def _write_reviewer_summary(manifest: dict, *, db_path: Path) -> Path:
     outputs = manifest.get("outputs", {}) if isinstance(manifest.get("outputs"), dict) else {}
-    report_dir = Path(str(outputs.get("concise_report") or _repo_root() / "artifacts" / "final_pipeline" / "latest" / "report")).resolve().parent
+    report_dir = Path(
+        str(
+            outputs.get("concise_report")
+            or _repo_root() / "artifacts" / "final_pipeline" / "official_acceptance_v1" / "report"
+        )
+    ).resolve().parent
     summary_path = report_dir / "reviewer_start_here.md"
     lines = [
         "# GreenNet Official Reproduction",

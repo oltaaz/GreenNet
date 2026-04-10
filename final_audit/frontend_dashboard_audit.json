@@ -1,0 +1,110 @@
+{
+  "scope": "frontend_dashboard_presentation",
+  "readiness_score": 6.8,
+  "verdict": "Ready with minor fixes",
+  "summary": "The React UI is real, buildable, and meaningfully integrated with the backend, and it fulfills the dashboard/visualization promise better than the retained Streamlit tooling. The main risks are reviewer trust and polish: lint fails, there is no frontend test coverage, and demo/generated fallback behavior can weaken evidentiary clarity.",
+  "surfaces": {
+    "official_public_ui": "frontend/greennet-ui",
+    "internal_tooling": "dashboard"
+  },
+  "checks": [
+    {
+      "item": "Official public React frontend exists",
+      "status": "PASS",
+      "evidence": [
+        "frontend/greennet-ui/README.md",
+        "frontend/greennet-ui/src/App.tsx",
+        "README.md"
+      ]
+    },
+    {
+      "item": "Visualization/dashboard promise fulfilled",
+      "status": "PASS",
+      "evidence": [
+        "frontend/greennet-ui/src/pages/DashboardPage.tsx",
+        "frontend/greennet-ui/src/pages/ComparePage.tsx",
+        "frontend/greennet-ui/src/pages/SimulatorPage.tsx"
+      ]
+    },
+    {
+      "item": "Public React UI clearly distinguished from internal Streamlit tooling",
+      "status": "PASS",
+      "evidence": [
+        "dashboard/README.md",
+        "frontend/greennet-ui/README.md",
+        "dashboard/app.py"
+      ]
+    },
+    {
+      "item": "API-backed integration",
+      "status": "PASS",
+      "evidence": [
+        "frontend/greennet-ui/src/lib/api.ts",
+        "frontend/greennet-ui/vite.config.ts",
+        "api_app.py"
+      ]
+    },
+    {
+      "item": "Frontend buildability",
+      "status": "PASS",
+      "evidence": [
+        "npm --prefix frontend/greennet-ui run build passed"
+      ]
+    },
+    {
+      "item": "Frontend polish / quality gate",
+      "status": "FAIL",
+      "evidence": [
+        "npm --prefix frontend/greennet-ui run lint failed"
+      ]
+    },
+    {
+      "item": "Frontend automated verification coverage",
+      "status": "FAIL",
+      "evidence": [
+        "No test/spec files found under frontend/greennet-ui",
+        "No frontend test runner dependency found"
+      ]
+    },
+    {
+      "item": "Reviewer-safe handling of fallback/demo data",
+      "status": "PARTIAL",
+      "evidence": [
+        "frontend/greennet-ui/src/lib/api.ts",
+        "frontend/greennet-ui/src/pages/DashboardPage.tsx",
+        "frontend/greennet-ui/src/pages/ComparePage.tsx",
+        "frontend/greennet-ui/src/pages/SimulatorPage.tsx"
+      ]
+    },
+    {
+      "item": "Simulator presentation honesty",
+      "status": "PARTIAL",
+      "evidence": [
+        "frontend/greennet-ui/src/pages/SimulatorPage.tsx",
+        "frontend/greennet-ui/src/components/TopologyPanel.tsx"
+      ]
+    }
+  ],
+  "major_risks": [
+    "Generated demo runs can be substituted when backend run listing fails, which risks reviewer confusion.",
+    "Generated topology/layout fallback reduces evidentiary clarity for dashboard and simulator views.",
+    "Lint failure weakens the claim that the frontend is polished and final-submission ready.",
+    "No frontend tests or smoke checks exist for a UI that presents final evaluation artifacts."
+  ],
+  "priority_fixes": {
+    "critical_before_submission": [
+      "Fix frontend lint errors and warnings.",
+      "Make demo-mode state impossible to miss on dashboard and simulator routes.",
+      "Clarify in the simulator UI which elements are simulated presentation versus backend-derived state."
+    ],
+    "important_not_blocking": [
+      "Add at least one frontend smoke test for the results page.",
+      "Add a reviewer note recommending the order Home -> Results -> Dashboard -> Simulator.",
+      "Keep Streamlit clearly internal in all final docs and demos."
+    ],
+    "nice_to_have": [
+      "Add provenance badges such as artifact-backed, live-run, generated-demo, generated-layout.",
+      "Split the large frontend bundle for better engineering polish."
+    ]
+  }
+}

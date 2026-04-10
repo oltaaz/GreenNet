@@ -51,7 +51,7 @@ type PolicySeries = Record<string, PerStepRow[]>;
 const REFERENCE_POLICY_STYLES: Record<string, { label: string; color: string }> = {
   all_on: { label: "Traditional", color: "#f7bf5e" },
   heuristic: { label: "Heuristic", color: "#5dc8ff" },
-  ppo: { label: "PPO (AI)", color: "#00f2bf" },
+  ppo: { label: "PPO-Based Hybrid (AI)", color: "#00f2bf" },
 };
 
 function upsertRun(runs: RunSummary[], nextRun: RunSummary): RunSummary[] {
@@ -105,11 +105,15 @@ export default function DashboardPage() {
 
         setRuns(catalog.runs);
         setRunCatalogSource(catalog.source);
-        if (!selectedRunId && catalog.runs.length > 0) {
-          setSelectedRunId(catalog.runs[0].run_id);
-        } else if (selectedRunId && !catalog.runs.find((run) => run.run_id === selectedRunId)) {
-          setSelectedRunId(catalog.runs[0]?.run_id ?? "");
-        }
+        setSelectedRunId((currentRunId) => {
+          if (!currentRunId && catalog.runs.length > 0) {
+            return catalog.runs[0].run_id;
+          }
+          if (currentRunId && !catalog.runs.find((run) => run.run_id === currentRunId)) {
+            return catalog.runs[0]?.run_id ?? "";
+          }
+          return currentRunId;
+        });
       } catch (apiError) {
         if (alive) {
           setError(apiError instanceof Error ? apiError.message : "Failed to load runs");

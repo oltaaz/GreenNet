@@ -36,7 +36,9 @@ export function BackendStatusProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void refresh();
+    const kickoffId = window.setTimeout(() => {
+      void refresh();
+    }, 0);
 
     const intervalId = window.setInterval(() => {
       void refresh();
@@ -48,6 +50,7 @@ export function BackendStatusProvider({ children }: { children: ReactNode }) {
 
     window.addEventListener("focus", handleFocus);
     return () => {
+      window.clearTimeout(kickoffId);
       window.clearInterval(intervalId);
       window.removeEventListener("focus", handleFocus);
     };
@@ -66,6 +69,7 @@ export function BackendStatusProvider({ children }: { children: ReactNode }) {
   return <BackendStatusContext.Provider value={value}>{children}</BackendStatusContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useBackendStatus(): BackendStatusValue {
   const context = useContext(BackendStatusContext);
   if (!context) {

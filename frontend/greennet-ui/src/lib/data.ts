@@ -464,7 +464,7 @@ export function fmt(value: number, digits = 2): string {
 export function formatPolicyLabel(policy: string): string {
   const normalized = normalizePolicy(policy);
   if (normalized === "ppo") {
-    return "PPO (AI)";
+    return "PPO-Based Hybrid (AI)";
   }
   if (normalized === "all_on") {
     return "Traditional (All-On)";

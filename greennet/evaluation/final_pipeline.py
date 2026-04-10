@@ -16,6 +16,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from greennet.evaluation.acceptance_matrix import acceptance_matrix_metadata, load_acceptance_matrix
 from greennet.persistence import persist_final_evaluation_bundle
+from greennet.policy_taxonomy import reviewer_policy_label
 from greennet.qos import QoSAcceptanceThresholds
 
 try:
@@ -577,8 +578,8 @@ def _direct_answer(row: Mapping[str, Any] | None) -> str:
     if row is None:
         return "No overall AI-vs-baseline comparison was available."
 
-    baseline = str(row.get("baseline_policy") or "baseline")
-    ai = str(row.get("ai_policy") or "ai")
+    baseline = reviewer_policy_label(row.get("baseline_policy") or "baseline")
+    ai = reviewer_policy_label(row.get("ai_policy") or "ai")
     hypothesis = str(row.get("hypothesis_status") or "insufficient_data")
     operational = str(row.get("stability_qualified_hypothesis_status") or hypothesis)
     qos_status = str(row.get("qos_acceptability_status") or "insufficient_data")
@@ -613,8 +614,8 @@ def _research_question_markdown(rows: Sequence[Mapping[str, Any]]) -> str:
         lines.append(
             "| {scope} | {baseline} | {ai} | {energy} | {delivered} | {dropped} | {delay} | {path} | {qos} | {qos_status} | {stability} | {operational} | {hypothesis} |".format(
                 scope=row.get("scope", "n/a"),
-                baseline=row.get("baseline_policy", "n/a"),
-                ai=row.get("ai_policy", "n/a"),
+                baseline=reviewer_policy_label(row.get("baseline_policy", "n/a")),
+                ai=reviewer_policy_label(row.get("ai_policy", "n/a")),
                 energy=_fmt_pct(row.get("energy_reduction_pct_vs_baseline")),
                 delivered=_fmt_pct(row.get("delivered_traffic_change_pct_vs_baseline")),
                 dropped=_fmt_pct(row.get("dropped_traffic_change_pct_vs_baseline")),
@@ -652,8 +653,9 @@ def _write_concise_report(
         f"- Source: `{source.get('description', summary_csv_path)}`",
         f"- Acceptance matrix: `{source.get('matrix_id', 'n/a')}` ({source.get('matrix_name', 'n/a')})",
         f"- Selected runs: `{source.get('selected_run_count', 'n/a')}`",
-        f"- Official traditional baseline policy: `{classification.get('official_traditional_baseline_policy', classification.get('primary_baseline_policy', 'n/a'))}`",
-        f"- Strongest heuristic baseline policy: `{classification.get('strongest_heuristic_baseline_policy', 'n/a')}`",
+        f"- Official traditional baseline policy: `{reviewer_policy_label(classification.get('official_traditional_baseline_policy', classification.get('primary_baseline_policy', 'n/a')))}`",
+        f"- Strongest heuristic baseline policy: `{reviewer_policy_label(classification.get('strongest_heuristic_baseline_policy', 'n/a'))}`",
+        "- AI policy note: `ppo` in this benchmark denotes the PPO-based hybrid controller, not a raw unwrapped PPO policy.",
         "",
         "## Thesis Table",
         _research_question_markdown(research_rows),

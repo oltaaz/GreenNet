@@ -201,7 +201,7 @@ export default function TopologyPanel({
     }
 
     return output;
-  }, [activeEdges, edges, inactiveEdges, metrics?.delivered, metrics?.dropped, phase, previousMetrics?.delivered, previousMetrics?.dropped, stepIndex]);
+  }, [activeEdges, edges, inactiveEdges, metrics?.delivered, metrics?.dropped, phase, stepIndex]);
 
   const nodeLoad = useMemo(() => {
     const loadMap = new Map<string, number>();

@@ -1,5 +1,10 @@
 # Official Matrix matrix_v6
 
+## Archival Status
+- This bundle is preserved historical evidence only.
+- It is **not** the canonical reviewer-facing final bundle for the current repository state.
+- The canonical reviewer-facing final bundle is `artifacts/final_pipeline/official_acceptance_v1/`.
+
 ## Metadata
 - tag: matrix_v6
 - generated_at_utc: 2026-02-06T00:38:45.243976+00:00

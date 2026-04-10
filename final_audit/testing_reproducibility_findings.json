@@ -1,0 +1,171 @@
+{
+  "audit_scope": "testing_reproducibility_evidence_quality",
+  "generated_from_repo": "/Users/enionismaili/Desktop/GreenNet",
+  "readiness_score": 5.8,
+  "verdict": "Not ready yet",
+  "summary": "GreenNet has real tests and a real manifest-driven evaluation pipeline, but final-submission reproducibility is weakened by conflicting canonical paths, a pinned historical bundle that is not the current rerun output, API behavior that depends on ambient SQLite state, a stale verification note, and an oversized 33G database artifact.",
+  "status_items": [
+    {
+      "item": "Automated tests exist across unit and integration layers",
+      "status": "PASS",
+      "evidence": [
+        "/Users/enionismaili/Desktop/GreenNet/tests/unit/test_acceptance_matrix.py",
+        "/Users/enionismaili/Desktop/GreenNet/tests/unit/test_official_ppo.py",
+        "/Users/enionismaili/Desktop/GreenNet/tests/integration/test_run_experiment.py",
+        "/Users/enionismaili/Desktop/GreenNet/tests/integration/test_acceptance_matrix_pipeline.py",
+        "/Users/enionismaili/Desktop/GreenNet/tests/integration/test_official_reproduction.py"
+      ]
+    },
+    {
+      "item": "Tests fully validate the final official rerun path end-to-end",
+      "status": "PARTIAL",
+      "evidence": [
+        "/Users/enionismaili/Desktop/GreenNet/tests/integration/test_official_reproduction.py"
+      ]
+    },
+    {
+      "item": "Reviewer-facing behavior is isolated from ambient machine state",
+      "status": "FAIL",
+      "evidence": [
+        "/Users/enionismaili/Desktop/GreenNet/api_app.py",
+        "/Users/enionismaili/Desktop/GreenNet/tests/integration/test_api_app.py"
+      ]
+    },
+    {
+      "item": "One canonical command/path is consistently documented and implemented",
+      "status": "FAIL",
+      "evidence": [
+        "/Users/enionismaili/Desktop/GreenNet/greennet/evaluation/reproduction.py",
+        "/Users/enionismaili/Desktop/GreenNet/README.md",
+        "/Users/enionismaili/Desktop/GreenNet/docs/final_submission_overview.md"
+      ]
+    },
+    {
+      "item": "Pinned historical results are clearly distinguished from current reproducible outputs",
+      "status": "PARTIAL",
+      "evidence": [
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/latest/README.md",
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/archive/official_acceptance_v1_energy_1p49_reconstructed/README.md",
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/report/concise_report.md",
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/latest/report/concise_report.md"
+      ]
+    },
+    {
+      "item": "Artifact provenance is machine-readable and traceable",
+      "status": "PASS",
+      "evidence": [
+        "/Users/enionismaili/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json",
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/metadata/pipeline_manifest.json",
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/metadata/pipeline_config.json"
+      ]
+    }
+  ],
+  "major_risks": [
+    {
+      "title": "Canonical path conflict",
+      "severity": "critical",
+      "detail": "The reproduction code defaults to artifacts/final_pipeline/latest while the docs present artifacts/final_pipeline/official_acceptance_v1 as canonical. The latest path is explicitly historical and not the current rerun output."
+    },
+    {
+      "title": "Ambient DB state affects reviewer-visible API output",
+      "severity": "critical",
+      "detail": "api_app.py prefers the latest SQLite final_evaluation payload before scanning artifact files. This caused a current integration failure and makes behavior machine-state dependent."
+    },
+    {
+      "title": "Verification note is stale",
+      "severity": "high",
+      "detail": "final_audit/verification/README.md claims a fully passing verification state that does not match the current observed integration test result."
+    },
+    {
+      "title": "Oversized database artifact",
+      "severity": "high",
+      "detail": "artifacts/db/greennet.sqlite3 is about 33G, which is too large and too historically mixed for a clean reviewer-facing submission artifact."
+    },
+    {
+      "title": "Historical and current final claims diverge",
+      "severity": "medium",
+      "detail": "The pinned latest bundle reports 1.49% PPO energy reduction vs all_on, while the current runnable official bundle reports 1.33%."
+    }
+  ],
+  "executed_checks": [
+    {
+      "command": ".venv/bin/python -m pytest -q tests/integration/test_official_reproduction.py tests/integration/test_acceptance_matrix_pipeline.py tests/unit/test_official_ppo.py tests/unit/test_acceptance_matrix.py",
+      "result": "pass",
+      "details": "8 passed in 14.90s"
+    },
+    {
+      "command": ".venv/bin/python -m pytest -q tests/integration/test_run_experiment.py tests/integration/test_env_integration.py tests/integration/test_api_app.py",
+      "result": "fail",
+      "details": "17 passed, 1 failed; failing test: test_final_evaluation_endpoint_returns_latest_valid_artifact"
+    },
+    {
+      "command": "pytest -q ...",
+      "result": "fail",
+      "details": "pytest not found on PATH in this environment; repo-local .venv invocation worked"
+    }
+  ],
+  "checklist": [
+    {
+      "priority": "critical",
+      "item": "Unify the canonical rerun output path and the canonical shipped bundle",
+      "files": [
+        "/Users/enionismaili/Desktop/GreenNet/greennet/evaluation/reproduction.py",
+        "/Users/enionismaili/Desktop/GreenNet/README.md",
+        "/Users/enionismaili/Desktop/GreenNet/docs/final_submission_overview.md"
+      ]
+    },
+    {
+      "priority": "critical",
+      "item": "Fix /api/final_evaluation so it does not depend on ambient repository DB state when artifact-local state is intended",
+      "files": [
+        "/Users/enionismaili/Desktop/GreenNet/api_app.py",
+        "/Users/enionismaili/Desktop/GreenNet/tests/integration/test_api_app.py"
+      ]
+    },
+    {
+      "priority": "critical",
+      "item": "Refresh the verification note and supporting evidence",
+      "files": [
+        "/Users/enionismaili/Desktop/GreenNet/final_audit/verification/README.md"
+      ]
+    },
+    {
+      "priority": "critical",
+      "item": "Reduce or exclude the 33G SQLite DB from the final reviewer package",
+      "files": [
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/db/greennet.sqlite3",
+        "/Users/enionismaili/Desktop/GreenNet/docs/run_database.md"
+      ]
+    },
+    {
+      "priority": "important",
+      "item": "Add one compact end-to-end reproducibility test that actually runs a minimized final pipeline",
+      "files": [
+        "/Users/enionismaili/Desktop/GreenNet/tests/integration/test_official_reproduction.py"
+      ]
+    },
+    {
+      "priority": "important",
+      "item": "Normalize reviewer commands to repo-local .venv invocations",
+      "files": [
+        "/Users/enionismaili/Desktop/GreenNet/README.md",
+        "/Users/enionismaili/Desktop/GreenNet/docs/final_submission_overview.md"
+      ]
+    },
+    {
+      "priority": "important",
+      "item": "Mark archive-only evidence paths more aggressively",
+      "files": [
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/latest/README.md",
+        "/Users/enionismaili/Desktop/GreenNet/docs/final_submission_overview.md"
+      ]
+    },
+    {
+      "priority": "nice_to_have",
+      "item": "Curate artifacts/locked so it contains final evidence rather than mixed debugging history",
+      "files": [
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/locked"
+      ]
+    }
+  ]
+}

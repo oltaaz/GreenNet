@@ -1,0 +1,8 @@
+run_id,energy_weight,drop_penalty_lambda,qos_target_norm_drop,qos_min_volume,qos_violation_penalty_scale,qos_guard_margin,toggle_penalty,base_capacity,flows_per_step,traffic_model,has_robustness,folder_size_mb
+20260116_210653,190.0,0.2,,,,,0.0002,10.0,6,,True,0.25
+20260122_234613,2000.0,5.0,0.072,500.0,50000.0,,0.001,15.0,6,stochastic,False,0.21
+20260123_105331,2000.0,5.0,0.072,3000.0,30.0,,0.001,15.0,6,stochastic,False,0.21
+20260123_105855,2000.0,5.0,0.072,3000.0,30.0,0.002,0.001,15.0,6,stochastic,False,0.21
+20260123_110144,2000.0,5.0,0.072,3000.0,30.0,0.002,0.001,15.0,6,stochastic,False,0.21
+20260123_121700,2000.0,5.0,0.072,3000.0,30.0,0.003,0.0002,15.0,6,stochastic,False,0.21
+20260123_125047,2000.0,5.0,0.072,3000.0,30.0,0.003,0.0002,15.0,6,stochastic,True,0.24

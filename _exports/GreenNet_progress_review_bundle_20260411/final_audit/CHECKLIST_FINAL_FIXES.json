@@ -1,0 +1,272 @@
+[
+  {
+    "id": "GN-001",
+    "title": "Decide the final research claim",
+    "priority": "P0",
+    "category": "evaluation",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Rewrote the final claim so the repository no longer suggests an AI energy win; the official story now says heuristic is best overall and ppo is the best AI policy with a mixed result.",
+    "evidence": [
+      "README.md",
+      "experiments/official_matrix_v6/notes.md",
+      "experiments/official_matrix_v6/final_evaluation/final_evaluation_report.md"
+    ],
+    "remaining_work": "None for the final narrative.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-002",
+    "title": "Package one reproducible final evidence bundle",
+    "priority": "P0",
+    "category": "evaluation",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Added a canonical reviewer-facing bundle under artifacts/final_submission/matrix_v6 with a README, manifest, and traceability map.",
+    "evidence": [
+      "artifacts/final_submission/matrix_v6/README.md",
+      "artifacts/final_submission/matrix_v6/manifest.json",
+      "artifacts/final_submission/matrix_v6/traceability.csv",
+      "docs/final_submission_overview.md"
+    ],
+    "remaining_work": "The bundle intentionally references preserved artifacts instead of duplicating every historical raw file.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-003",
+    "title": "Unify setup and run instructions",
+    "priority": "P1",
+    "category": "docs",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Aligned the README, legacy command index, and submission overview around one official install/train/evaluate/demo path.",
+    "evidence": [
+      "README.md",
+      "COMMANDS.md",
+      "docs/final_submission_overview.md"
+    ],
+    "remaining_work": "None for the official workflow docs.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-004",
+    "title": "Define a complete reproducible environment",
+    "priority": "P0",
+    "category": "testing",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Added tracked optional dependency groups for test and training dependencies, pinned the supported Python range in pyproject.toml, and aligned the docs with the verified python3.12 environment path.",
+    "evidence": [
+      "pyproject.toml",
+      "README.md",
+      "docs/final_submission_overview.md",
+      "final_audit/verification/README.md"
+    ],
+    "remaining_work": "None for the documented submission environment.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-005",
+    "title": "Make basic verification actually pass",
+    "priority": "P0",
+    "category": "testing",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Verified clean editable install in a fresh python3.12 venv, backend import, FastAPI TestClient health smoke, run_experiment.py, final_evaluation.py, pytest, and the frontend npm ci plus npm run build path.",
+    "evidence": [
+      "final_audit/verification/README.md",
+      "final_audit/verification/final_evaluation_smoke_recheck/final_evaluation_report.md",
+      "results/20260409_164637__policy-heuristic__scenario-normal__seed-0__tag-verify_smoke_recheck/",
+      "frontend/greennet-ui/src/pages/SimulatorPage.tsx"
+    ],
+    "remaining_work": "None for the machine-verified submission checklist.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-006",
+    "title": "Resolve the Impact Predictor scope mismatch",
+    "priority": "P1",
+    "category": "docs",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Downgraded Impact Predictor to exploratory scope unless it is explicitly bundled and verified.",
+    "evidence": [
+      "README.md",
+      "docs/final_submission_overview.md"
+    ],
+    "remaining_work": "If Impact Predictor is promoted back into the final story, it still needs a real acceptance bundle.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-007",
+    "title": "Explain the real controller architecture honestly",
+    "priority": "P1",
+    "category": "docs",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Documented the simulator, explicit baseline controllers, PPO controller, API layer, and demo/internal tooling split in reviewer-facing docs.",
+    "evidence": [
+      "README.md",
+      "docs/final_submission_overview.md"
+    ],
+    "remaining_work": "None in the final docs.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-008",
+    "title": "Reconcile locked validation evidence with the final thesis result",
+    "priority": "P0",
+    "category": "evaluation",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Aligned the final thesis narrative with the official matrix result and tied that narrative back to locked validation artifacts through the final bundle traceability map.",
+    "evidence": [
+      "experiments/official_matrix_v6/final_evaluation/final_evaluation_report.md",
+      "experiments/official_matrix_v6/final_evaluation/final_evaluation_summary.json",
+      "artifacts/final_submission/matrix_v6/traceability.csv",
+      "artifacts/traffic_verify/20260220_matrix/matrix_status.md"
+    ],
+    "remaining_work": "None beyond continuing to cite the preserved official report as the authoritative shipped artifact.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-009",
+    "title": "Choose one canonical config family",
+    "priority": "P1",
+    "category": "cleanup",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Marked configs/train_*.json as canonical and moved reviewer guidance away from root-level historical config snapshots.",
+    "evidence": [
+      "configs/README.md",
+      "docs/custom_inputs.md",
+      "README.md"
+    ],
+    "remaining_work": "None for the official config story.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-010",
+    "title": "Mark legacy entrypoints and internal tools explicitly",
+    "priority": "P1",
+    "category": "cleanup",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Reframed COMMANDS.md as a legacy index and labeled the Streamlit dashboard as internal analyst tooling instead of the public demo path.",
+    "evidence": [
+      "COMMANDS.md",
+      "README.md",
+      "docs/runs_management.md"
+    ],
+    "remaining_work": "None for the reviewer-facing workflow.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-011",
+    "title": "Fix demo fallback integrity",
+    "priority": "P1",
+    "category": "frontend",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "The frontend now tracks whether run data came from the backend or demo fallback and displays explicit notices when it is showing generated data or a generated topology layout.",
+    "evidence": [
+      "frontend/greennet-ui/src/lib/api.ts",
+      "frontend/greennet-ui/src/pages/ComparePage.tsx",
+      "frontend/greennet-ui/src/pages/DashboardPage.tsx",
+      "frontend/greennet-ui/src/pages/SimulatorPage.tsx"
+    ],
+    "remaining_work": "None in the verified build path from this machine recheck.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-012",
+    "title": "Fix policy alias consistency across the frontend demo path",
+    "priority": "P1",
+    "category": "frontend",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Demo normalization now uses the same alias map as the rest of the frontend, removing the previous baseline/noop mismatch.",
+    "evidence": [
+      "frontend/greennet-ui/src/lib/demo.ts",
+      "frontend/greennet-ui/src/lib/data.ts"
+    ],
+    "remaining_work": "None in the code path or build verification path.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-013",
+    "title": "Clean reviewer-facing artifacts of machine-specific paths",
+    "priority": "P1",
+    "category": "docs",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Cleaned the official final-evaluation artifacts and reporting code so reviewer-facing outputs use repo-relative paths instead of personal machine paths.",
+    "evidence": [
+      "experiments/official_matrix_v6/final_evaluation/final_evaluation_report.md",
+      "experiments/official_matrix_v6/final_evaluation/final_evaluation_summary.json",
+      "greennet/evaluation/final_report.py"
+    ],
+    "remaining_work": "None in the cleaned reviewer-facing artifacts from this pass.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-014",
+    "title": "Add a concise final architecture and artifact glossary",
+    "priority": "P1",
+    "category": "docs",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Added a compact final submission overview and artifact glossary, and reflected the same architecture summary in the README.",
+    "evidence": [
+      "README.md",
+      "docs/final_submission_overview.md"
+    ],
+    "remaining_work": "None for the submission docs.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  },
+  {
+    "id": "GN-015",
+    "title": "Add a limitations and responsible-design section",
+    "priority": "P1",
+    "category": "ethics",
+    "original_blocker": true,
+    "current_blocker": false,
+    "status": "completed",
+    "what_was_done": "Added explicit responsible-design and limitations language around QoS gating, mixed results, and experimental scope.",
+    "evidence": [
+      "README.md",
+      "docs/final_submission_overview.md"
+    ],
+    "remaining_work": "None in the final docs.",
+    "verified": true,
+    "estimated_remaining_effort": "small"
+  }
+]

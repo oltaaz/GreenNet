@@ -2,6 +2,8 @@
 
 This note is the compact reviewer guide for the final submission. It is written to match the evidence actually present in the repository.
 
+Before following the details below, open `SUBMISSION_INDEX.md` for the top-level reviewer path and the canonical-vs-archival directory map.
+
 ## 1. Official Workflow
 
 1. Install the project in the verified `python3.12` environment path:
@@ -17,19 +19,20 @@ This note is the compact reviewer guide for the final submission. It is written 
    ```bash
    .venv/bin/python experiments/run_official_acceptance_matrix.py
    ```
-   The current official PPO artifact is a topology-specific family under `artifacts/models/official_acceptance_v1/`, not the historical single checkpoint in `runs/20260220_111755/`. If those reviewer-facing checkpoints are missing, regenerate them with:
+   The current official PPO artifact is a topology-specific family under `artifacts/models/official_acceptance_v1/`, not the historical single checkpoint in `runs/20260220_111755/`. The checked-in family was regenerated from `configs/train_normal.json` at `25000` timesteps per topology class. If those reviewer-facing checkpoints are missing, regenerate them with:
 
    ```bash
-   .venv/bin/python experiments/regenerate_official_ppo_checkpoint.py --all-topologies --config configs/train_official_ppo.json --timesteps 100000
+   .venv/bin/python experiments/regenerate_official_ppo_checkpoint.py --all-topologies --config configs/train_normal.json --timesteps 25000
    ```
 5. Verify the final repo state with `.venv/bin/python -m pytest -q` and `cd frontend/greennet-ui && npm ci && npm run build`.
 6. Use `artifacts/traffic_verify/20260220_matrix/` and `artifacts/locked/` for reproducibility evidence.
 7. Use `artifacts/final_pipeline/official_acceptance_v1/metadata/acceptance_matrix_manifest.json` and `pipeline_config.json` as the reviewer-facing map for the final runnable claim.
 8. Treat `artifacts/db/greennet.sqlite3` as the primary structured store for indexed official runs and persisted final-evaluation payloads; use the CSV/JSON/Markdown artifacts as reviewer-facing exports.
 
-Short note on the pinned canonical bundle:
+Short note on final-evidence paths:
 
-- the reviewer-facing bundle currently pinned under `artifacts/final_pipeline/latest/` reflects the preserved historical `~1.49%` PPO result
+- the canonical reviewer-facing final bundle is `artifacts/final_pipeline/official_acceptance_v1/`
+- the bundle pinned under `artifacts/final_pipeline/latest/` reflects the preserved historical `~1.49%` PPO result and should be treated as archival evidence only
 - it is historically pinned for review continuity and is not fully reproducible from the current code/checkpoint state
 - the live one-command rerun path still reproduces the official benchmark flow, but not that exact historical bundle
 
@@ -38,12 +41,18 @@ Short note on the pinned canonical bundle:
 - simulator core: routing, topology, delay, energy, and carbon accounting
 - official traditional baseline controller: `all_on`
 - energy-aware heuristic baseline controller: `heuristic`
-- learned controller: `ppo`
+- learned controller id: `ppo` (reviewer-facing label: `PPO-Based Hybrid (AI)`)
 - API layer: `api_app.py` plus the persistence layer under `greennet/`
 - public demo: `frontend/greennet-ui/`
 - internal analyst tooling: `dashboard/`
 
 The routing layer is separate from the controller layer. The simulator's default traditional routing baseline is `min_hop_single_path` with `unit` link cost, while the controller comparison is run over `all_on`, `heuristic`, and `ppo`.
+
+Important honesty note on `ppo`:
+
+- the stable benchmark policy id remains `ppo` for compatibility across manifests, CSVs, and artifacts
+- in reviewer-facing language, `ppo` should be described as the **PPO-based hybrid controller**
+- the current evaluation path wraps PPO proposals with rule-based safety, recovery, and calm-off override logic rather than exposing a raw unwrapped PPO action stream
 
 The PPO artifact should also be described honestly:
 
@@ -92,7 +101,7 @@ The correct submission claim is:
 - GreenNet demonstrates a reproducible energy-vs-QoS routing evaluation framework
 - the official traditional baseline is `all_on`
 - the heuristic baseline remains the strongest handcrafted non-AI controller in the official acceptance matrix
-- PPO is the best AI policy in the final aggregate, but it does not beat the heuristic on energy
+- the PPO-based hybrid controller is the best AI-labeled policy in the final aggregate, but it does not beat the heuristic on energy
 - the research value is the simulator, the comparison framework, and the clear reporting of a mixed outcome
 
 ## 4. Evidence Manifest

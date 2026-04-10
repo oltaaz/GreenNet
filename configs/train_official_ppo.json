@@ -1,4 +1,5 @@
 {
+  "note": "Alternate longer-run PPO recipe. This file is not the source of the currently checked-in official_acceptance_v1 checkpoint family; see checkpoint_metadata.json under artifacts/models/official_acceptance_v1/.",
   "train_seed": 42,
   "eval_seed": 123,
   "topology_seed": 0,

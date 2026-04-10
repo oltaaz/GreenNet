@@ -62,12 +62,13 @@ The repository now uses one explicit baseline taxonomy:
 
 - official traditional baseline: `all_on` on top of the default routing baseline `min_hop_single_path` with `unit` link cost
 - strongest non-AI heuristic baseline: `heuristic`
-- AI policy: `ppo`
+- AI policy id: `ppo` (reviewer-facing label: `PPO-Based Hybrid (AI)`)
 
 In the curated final evaluation:
 
 - `heuristic` is the best overall non-AI controller
-- `ppo` is the best AI policy
+- `ppo` is the best AI-labeled policy in the final benchmark
+- in the current final benchmark, `ppo` refers to the PPO-based hybrid controller rather than a raw unwrapped PPO policy
 - `ppo` remains about 4% worse than `heuristic` on energy in the final aggregate
 - the official traditional baseline remains the fixed comparison anchor for report deltas and hypothesis checks
 - QoS stays within the acceptance gates used in the final report
@@ -77,14 +78,15 @@ The defensible submission claim is therefore:
 - GreenNet provides a credible routing simulation and evaluation framework for energy/QoS tradeoffs
 - the official traditional baseline is explicit and technically honest
 - the energy-aware heuristic is not misrepresented as traditional routing
-- the AI controller is measured against both the official traditional baseline and the strongest handcrafted heuristic under the same scenarios and seeds
+- the PPO-based hybrid AI controller is measured against both the official traditional baseline and the strongest handcrafted heuristic under the same scenarios and seeds
 - the final evidence explains a mixed outcome instead of overclaiming improvement
 
-Important note on the canonical bundle:
+Important note on final-evidence paths:
 
-- the reviewer-facing canonical bundle currently pinned under `artifacts/final_pipeline/latest/` is the preserved historical `~1.49%` PPO result
-- it is a promoted historical reconstructed bundle, not the output of the current one-command rerun path from the current code/checkpoint state
-- the current codebase still reproduces the official benchmark pipeline, but not that exact historical `1.49%` result end to end
+- the **canonical reviewer-facing final bundle** is `artifacts/final_pipeline/official_acceptance_v1/`
+- the pinned bundle under `artifacts/final_pipeline/latest/` is **archival historical evidence only**
+- `latest/` is a promoted historical reconstructed bundle and is not the output of the current one-command rerun path
+- the current codebase still reproduces the official benchmark pipeline, but not that exact historical `~1.49%` result end to end
 
 ## Canonical Workflow
 
@@ -96,7 +98,9 @@ Use the tracked scenario configs in `configs/`:
 .venv/bin/python train.py --config configs/train_normal.json --timesteps 300000
 .venv/bin/python train.py --config configs/train_burst.json --timesteps 300000
 .venv/bin/python train.py --config configs/train_hotspot.json --timesteps 300000
-.venv/bin/python train.py --config configs/train_official_ppo.json --timesteps 100000
+.venv/bin/python train.py --config configs/train_normal.json --timesteps 25000 --topology-name small
+.venv/bin/python train.py --config configs/train_normal.json --timesteps 25000 --topology-name medium
+.venv/bin/python train.py --config configs/train_normal.json --timesteps 25000 --topology-name large
 ```
 
 The historical checkpoint at `runs/20260220_111755/ppo_greennet.zip` is no longer compatible with the current env because it was trained against an older observation layout. The current env emits topology-dependent Dict observations, so the canonical PPO artifact is now a topology-specific family:
@@ -105,13 +109,21 @@ The historical checkpoint at `runs/20260220_111755/ppo_greennet.zip` is no longe
 - `artifacts/models/official_acceptance_v1/medium/ppo_greennet.zip`
 - `artifacts/models/official_acceptance_v1/large/ppo_greennet.zip`
 
-To regenerate that official family with the current codebase:
+The currently checked-in official family was regenerated from `configs/train_normal.json` at `25000` timesteps per topology class. To reproduce that checked-in family with the current codebase:
 
 ```bash
-.venv/bin/python experiments/regenerate_official_ppo_checkpoint.py --all-topologies --config configs/train_official_ppo.json --timesteps 100000
+.venv/bin/python experiments/regenerate_official_ppo_checkpoint.py --all-topologies --config configs/train_normal.json --timesteps 25000
 ```
 
-That config exists because the old single checkpoint under `runs/20260220_111755/` was both observation-incompatible and under the current benchmark materially worse than the traditional baseline. The official acceptance-matrix path uses the topology-specific family automatically. Use `--ppo-model` only when you intentionally want a non-official single-checkpoint override.
+That regeneration path matches the lineage recorded in `artifacts/models/official_acceptance_v1/*/checkpoint_metadata.json`. The old single checkpoint under `runs/20260220_111755/` was both observation-incompatible and under the current benchmark materially worse than the traditional baseline. The official acceptance-matrix path uses the topology-specific family automatically. Use `--ppo-model` only when you intentionally want a non-official single-checkpoint override.
+
+`configs/train_official_ppo.json` remains in the repo as an alternate longer-run PPO recipe, but it is not the source of the currently checked-in canonical checkpoint family.
+
+Important honesty note:
+
+- the stable benchmark policy id remains `ppo` for compatibility across configs, manifests, and CSV artifacts
+- reviewer-facing references to `ppo` should be read as the **PPO-based hybrid controller**
+- the evaluation path wraps PPO proposals with rule-based safety, recovery, and calm-off override logic in `run_experiment.py`
 
 ### 2. Run a single experiment
 
@@ -316,7 +328,8 @@ Run outputs, aggregate summaries, API responses, and final evaluation artifacts 
 ## Artifact Glossary
 
 - `configs/` - canonical training configs used by the official workflow
-- `experiments/official_matrix_v6/` - curated final matrix summary and final evaluation bundle
+- `artifacts/final_pipeline/official_acceptance_v1/` - canonical reviewer-facing final evidence bundle
+- `experiments/` - active experiment scripts plus preserved historical experiment bundles
 - `artifacts/traffic_verify/20260220_matrix/` - deterministic traffic verification evidence
 - `artifacts/locked/` - locked scenario evidence and retained run bundles
 - `runs/` - operational run directory used by the codebase and scripts
@@ -324,6 +337,23 @@ Run outputs, aggregate summaries, API responses, and final evaluation artifacts 
 - `docs/` - workflow notes, input formats, and submission guidance
 
 Not every historical raw result is bundled in one place. The official submission story should cite the curated summary tables and locked verification artifacts rather than trying to imply a single monolithic `results/` folder exists.
+
+## Submission Quick Path
+
+If you are reviewing the repository as a final submission, use this order:
+
+1. `SUBMISSION_INDEX.md`
+2. `docs/final_submission_overview.md`
+3. `artifacts/final_pipeline/official_acceptance_v1/`
+
+The following directories are intentionally preserved but are **not** the primary submission path:
+
+- `_exports/`
+- `results/`
+- `tmp/official_acceptance_backup/`
+- `experiments/official_matrix_v1` through `experiments/official_matrix_v6`
+- `artifacts/final_pipeline/latest/`
+- `final_audit/`
 
 ## Canonical Config Family
 
@@ -341,6 +371,10 @@ The following paths are useful, but they are not the public-facing submission pa
 
 - `dashboard/` - internal analyst tooling
 - `COMMANDS.md` - legacy command sheet kept for reference
+- `_exports/` - archival export snapshots
+- `results/` - operational and historical run folders
+- `tmp/official_acceptance_backup/` - preserved backup material
+- `final_audit/` - internal audit and repair evidence
 - older experiment folders and ad hoc run folders under `runs/`
 
 The public demo path is the React app in `frontend/greennet-ui/`, but the official reviewer startup entrypoint is now the repo root.

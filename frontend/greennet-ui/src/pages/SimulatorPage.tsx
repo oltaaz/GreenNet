@@ -285,7 +285,7 @@ export default function SimulatorPage() {
               <select value={policy} onChange={(event) => setPolicy(event.target.value)}>
               <option value="all_on">Traditional (All-On)</option>
               <option value="heuristic">Energy-Aware Heuristic</option>
-              <option value="ppo">PPO (AI)</option>
+              <option value="ppo">PPO-Based Hybrid (AI)</option>
               </select>
             </label>
 

@@ -23,6 +23,8 @@ from greennet.policy_taxonomy import (
     is_ai_policy,
     is_heuristic_baseline_policy,
     is_traditional_baseline_policy,
+    reviewer_policy_descriptor,
+    reviewer_policy_label,
 )
 from greennet.qos import (
     QoSAcceptanceThresholds,
@@ -998,7 +1000,7 @@ def _headline_for_row(row: Mapping[str, Any] | None, *, primary_baseline_policy:
     if row is None:
         return "No overall policy row was available."
 
-    policy = str(row.get("policy") or "<unknown>")
+    policy = reviewer_policy_label(row.get("policy") or "<unknown>")
     policy_class = str(row.get("policy_class") or "other")
     energy_reduction = _fmt_pct(row.get("energy_reduction_pct_vs_baseline"))
     delivered_change = _fmt_pct(row.get("delivered_traffic_change_pct_vs_baseline"))
@@ -1008,7 +1010,7 @@ def _headline_for_row(row: Mapping[str, Any] | None, *, primary_baseline_policy:
         qos_phrase = f"{float(qos_rate_delta):+.4f}"
 
     return (
-        f"{policy} ({policy_class}) vs {primary_baseline_policy}: "
+        f"{policy} ({policy_class}) vs {reviewer_policy_label(primary_baseline_policy)}: "
         f"energy {energy_reduction}, delivered {delivered_change}, "
         f"QoS violation rate delta {qos_phrase}, stability={row.get('stability_status', 'n/a')}, "
         f"operational={row.get('stability_qualified_hypothesis_status', row.get('hypothesis_status', 'n/a'))}"
@@ -1024,7 +1026,7 @@ def _markdown_table(rows: Sequence[Mapping[str, Any]]) -> str:
     )
     lines = [header]
     for row in rows:
-        policy_label = str(row["policy"])
+        policy_label = reviewer_policy_label(row["policy"])
         if row.get("is_best_policy_for_scope"):
             policy_label += " [best]"
         elif row.get("is_best_ai_policy_for_scope"):
@@ -1089,17 +1091,18 @@ def _write_markdown_report(
         f"- Generated at: `{generated_at_utc}`",
         f"- Source selection: `{source_description}`",
         f"- Selected runs: `{selected_run_count}`",
-        f"- Official traditional baseline policy: `{primary_baseline_policy}`",
-        f"- Strongest heuristic baseline policy: `{heuristic_baseline_policy or 'n/a'}`",
-        f"- Non-AI policies in scope: `{', '.join(baseline_policies) if baseline_policies else 'n/a'}`",
-        f"- AI policies in scope: `{', '.join(ai_policies) if ai_policies else 'n/a'}`",
+        f"- Official traditional baseline policy: `{reviewer_policy_label(primary_baseline_policy)}`",
+        f"- Strongest heuristic baseline policy: `{reviewer_policy_label(heuristic_baseline_policy or 'n/a')}`",
+        f"- Non-AI policies in scope: `{', '.join(reviewer_policy_label(policy) for policy in baseline_policies) if baseline_policies else 'n/a'}`",
+        f"- AI policies in scope: `{', '.join(reviewer_policy_label(policy) for policy in ai_policies) if ai_policies else 'n/a'}`",
         f"- Routing baselines in scope: `{', '.join(routing_baselines) if routing_baselines else 'n/a'}`",
         f"- Routing link-cost models in scope: `{', '.join(routing_link_cost_models) if routing_link_cost_models else 'n/a'}`",
         f"- Routing comparison consistency: `{routing_consistency}`",
-        f"- Best overall policy: `{best_overall.get('policy') if best_overall else 'n/a'}`",
-        f"- Best AI policy: `{best_ai_overall.get('policy') if best_ai_overall else 'n/a'}`",
+        f"- Best overall policy: `{reviewer_policy_label(best_overall.get('policy') if best_overall else 'n/a')}`",
+        f"- Best AI policy: `{reviewer_policy_label(best_ai_overall.get('policy') if best_ai_overall else 'n/a')}`",
         f"- Overall best-policy summary: {_headline_for_row(best_overall, primary_baseline_policy=primary_baseline_policy)}",
         f"- Overall best-AI summary: {_headline_for_row(best_ai_overall, primary_baseline_policy=primary_baseline_policy)}",
+        f"- AI policy note: `{reviewer_policy_descriptor('ppo')}`",
         "",
         "## Hypothesis Gate",
         (

@@ -16,13 +16,15 @@ python3 -m pip install -e .[test,train]
 python3 train.py --config configs/train_normal.json --timesteps 300000
 python3 train.py --config configs/train_burst.json --timesteps 300000
 python3 train.py --config configs/train_hotspot.json --timesteps 300000
-python3 train.py --config configs/train_official_ppo.json --timesteps 100000
+python3 train.py --config configs/train_normal.json --timesteps 25000 --topology-name small
+python3 train.py --config configs/train_normal.json --timesteps 25000 --topology-name medium
+python3 train.py --config configs/train_normal.json --timesteps 25000 --topology-name large
 ```
 
-Regenerate the canonical official PPO family for the current env/topology definitions:
+Regenerate the currently checked-in canonical official PPO family for the current env/topology definitions:
 
 ```bash
-python3 experiments/regenerate_official_ppo_checkpoint.py --all-topologies --config configs/train_official_ppo.json --timesteps 100000
+python3 experiments/regenerate_official_ppo_checkpoint.py --all-topologies --config configs/train_normal.json --timesteps 25000
 ```
 
 This writes the official reviewer-facing PPO checkpoints to:
@@ -30,6 +32,8 @@ This writes the official reviewer-facing PPO checkpoints to:
 - `artifacts/models/official_acceptance_v1/small/ppo_greennet.zip`
 - `artifacts/models/official_acceptance_v1/medium/ppo_greennet.zip`
 - `artifacts/models/official_acceptance_v1/large/ppo_greennet.zip`
+
+`configs/train_official_ppo.json` remains available as an alternate longer-run PPO recipe, but it is not the source of the currently checked-in canonical checkpoint family.
 
 ### Run A Single Experiment
 

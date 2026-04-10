@@ -1,0 +1,202 @@
+{
+  "scope": "backend_simulator_experiment_pipeline",
+  "readiness_score": 6.9,
+  "verdict": "Ready with minor fixes",
+  "summary": "The backend is genuinely implemented and reproducible, but final-submission credibility depends on tightening the explanation layer around simulator realism, hybrid PPO control, and the canonical official result path.",
+  "status_items": [
+    {
+      "category": "proposal",
+      "item": "routing/network simulator",
+      "status": "PASS",
+      "evidence": [
+        "greennet/simulator.py",
+        "greennet/env.py"
+      ]
+    },
+    {
+      "category": "proposal",
+      "item": "AI-driven routing / optimization",
+      "status": "PARTIAL",
+      "evidence": [
+        "run_experiment.py",
+        "greennet/cli/train_cli.py"
+      ],
+      "note": "PPO exists, but evaluated policy behavior is safety-constrained and hybridized."
+    },
+    {
+      "category": "proposal",
+      "item": "energy-aware behavior",
+      "status": "PASS",
+      "evidence": [
+        "greennet/power.py",
+        "greennet/simulator.py",
+        "run_experiment.py"
+      ]
+    },
+    {
+      "category": "proposal",
+      "item": "comparative evaluation",
+      "status": "PASS",
+      "evidence": [
+        "configs/acceptance_matrices/official_acceptance_v1.json",
+        "experiments/run_matrix.py",
+        "greennet/evaluation/final_pipeline.py"
+      ]
+    },
+    {
+      "category": "stage2",
+      "item": "system architecture",
+      "status": "PASS",
+      "evidence": [
+        "greennet/env.py",
+        "greennet/persistence/sqlite_store.py",
+        "api_app.py"
+      ]
+    },
+    {
+      "category": "stage2",
+      "item": "reproducibility",
+      "status": "PASS",
+      "evidence": [
+        "greennet/evaluation/reproduction.py",
+        "run_experiment.py"
+      ]
+    },
+    {
+      "category": "stage2",
+      "item": "RL / forecasting / cost-modeling claims",
+      "status": "PARTIAL",
+      "evidence": [
+        "greennet/forecasting.py",
+        "greennet/impact_predictor.py",
+        "greennet/env.py"
+      ]
+    },
+    {
+      "category": "final_review",
+      "item": "technical soundness",
+      "status": "PARTIAL",
+      "evidence": [
+        "greennet/routing.py",
+        "greennet/power.py",
+        "greennet/stability.py"
+      ]
+    },
+    {
+      "category": "final_review",
+      "item": "ethical/responsible design",
+      "status": "PASS",
+      "evidence": [
+        "greennet/qos.py",
+        "greennet/stability.py",
+        "greennet/env.py"
+      ]
+    },
+    {
+      "category": "final_review",
+      "item": "communication of complex ideas",
+      "status": "PARTIAL",
+      "evidence": [
+        "greennet/evaluation/reproduction.py",
+        "configs/acceptance_matrices/official_acceptance_v1.json",
+        "experiments"
+      ],
+      "note": "Canonical path exists, but repository contains multiple competing historical result trees."
+    }
+  ],
+  "major_risks": [
+    "Repo may overstate the autonomy of the PPO controller because the evaluated path includes substantial rule-based override and safety logic.",
+    "Repo may overstate routing realism if OSPF-like forwarding baselines are described as full routing protocol simulation.",
+    "Multiple historical and 'official' result directories can confuse reviewers about which outputs are canonical.",
+    "Optional forecasting and impact-predictor components are implemented, but can be misrepresented as central if not described carefully."
+  ],
+  "checklist": {
+    "critical_before_submission": [
+      {
+        "item": "State simulator assumptions and abstraction level clearly.",
+        "why": "Avoids reviewer confusion about realism.",
+        "files": [
+          "greennet/routing.py",
+          "greennet/power.py",
+          "greennet/env.py"
+        ],
+        "done": "Reviewer docs explicitly say forwarding-level routing, simplified energy model, and QoS/stability guard abstractions."
+      },
+      {
+        "item": "Describe PPO as a hybrid safety-constrained controller.",
+        "why": "Prevents overclaiming what RL alone achieved.",
+        "files": [
+          "run_experiment.py"
+        ],
+        "done": "Submission language matches the implemented evaluation path."
+      },
+      {
+        "item": "Declare one canonical official benchmark path.",
+        "why": "Improves reviewer trust and reproducibility.",
+        "files": [
+          "configs/acceptance_matrices/official_acceptance_v1.json",
+          "greennet/evaluation/reproduction.py",
+          "experiments"
+        ],
+        "done": "One command, one manifest, one output folder are clearly named."
+      },
+      {
+        "item": "Quarantine stale exports and legacy official-looking result trees.",
+        "why": "Reduces submission noise.",
+        "files": [
+          "_exports",
+          "experiments"
+        ],
+        "done": "Submission bundle excludes or clearly labels historical artifacts."
+      }
+    ],
+    "important_but_not_blocking": [
+      {
+        "item": "Explain forecasting and impact-predictor scope honestly.",
+        "why": "These are easy to overclaim.",
+        "files": [
+          "greennet/forecasting.py",
+          "greennet/impact_predictor.py",
+          "greennet/env.py"
+        ],
+        "done": "Docs specify that forecasting is online heuristic forecasting and the impact predictor is optional."
+      },
+      {
+        "item": "Clarify baseline naming and aliases.",
+        "why": "Prevents reviewers from misreading duplicates as extra baselines.",
+        "files": [
+          "greennet/policy_taxonomy.py"
+        ],
+        "done": "Canonical baseline taxonomy table appears in submission docs."
+      },
+      {
+        "item": "Document that file artifacts are primary and SQLite is secondary.",
+        "why": "Matches best-effort DB persistence design.",
+        "files": [
+          "run_experiment.py",
+          "greennet/persistence/sqlite_store.py"
+        ],
+        "done": "Reviewer docs explain artifact authority and DB role."
+      }
+    ],
+    "nice_to_have_polish": [
+      {
+        "item": "Refactor oversized environment/controller logic after submission.",
+        "why": "Improves maintainability and explainability.",
+        "files": [
+          "greennet/env.py",
+          "run_experiment.py"
+        ],
+        "done": "Control logic is split into smaller modules."
+      },
+      {
+        "item": "Add stronger evaluation-semantics tests.",
+        "why": "Current integration tests skew toward wiring and shape checks.",
+        "files": [
+          "tests/integration"
+        ],
+        "done": "Tests assert hypothesis classification and canonical filtering semantics."
+      }
+    ]
+  }
+}

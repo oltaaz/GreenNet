@@ -62,7 +62,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
       },
       ...init,
     });
-  } catch (error) {
+  } catch {
     throw new BackendUnavailableError();
   }
 

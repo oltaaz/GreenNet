@@ -1,0 +1,11 @@
+# generated_at_utc=2026-02-20T15:39:21Z
+# model=/Users/enionismaili/Desktop/GreenNet/artifacts/locked/20260220_111755_100k/ppo_greennet.zip
+# run_id=20260220_111755_100k
+# lock_scenario=normal
+# eval_scenario=normal
+# initial_off_edges=0
+# topology_seeds=10,11,12,13,14,15,16,17,18,19
+# episodes=100
+# config=artifacts/locked/20260220_111755_100k/train_config.json
+# cmd=.venv/bin/python train.py --eval --model /Users/enionismaili/Desktop/GreenNet/artifacts/locked/20260220_111755_100k/ppo_greennet.zip --episodes 100 --eval-traffic-scenario normal --eval-initial-off-edges 0 --eval-topology-seeds 10\,11\,12\,13\,14\,15\,16\,17\,18\,19 --config artifacts/locked/20260220_111755_100k/train_config.json 
+

@@ -1,0 +1,121 @@
+{
+  "audit_scope": "AI/ML/RL validity",
+  "verdict": "PARTIAL / CAUTION",
+  "overall_assessment": {
+    "ppo_integration": "real",
+    "ppo_final_eval_purity": "not_pure_ppo",
+    "forecasting": "real_but_lightweight_and_not_strongly_validated",
+    "impact_predictor": "real_but_exploratory_and_weakly_validated",
+    "cost_modeling_claim_strength": "weak",
+    "claim_honesty_risk": "high"
+  },
+  "key_findings": [
+    {
+      "id": "ppo_hybrid_eval_path",
+      "severity": "high",
+      "status": "verified",
+      "summary": "The reviewer-facing `ppo` controller is a hybrid policy path, not raw PPO.",
+      "evidence": [
+        "/Users/enionismaili/Desktop/GreenNet/run_experiment.py"
+      ],
+      "details": {
+        "control_mode": "ppo_safe_hybrid_calm_off",
+        "signals": [
+          "_action_ppo_safe",
+          "_calm_off_action",
+          "_ensure_controller_predictor"
+        ]
+      }
+    },
+    {
+      "id": "official_ppo_artifact_mismatch",
+      "severity": "high",
+      "status": "verified",
+      "summary": "The canonical checked-in official PPO artifacts do not match the documented canonical training config/path.",
+      "evidence": [
+        "/Users/enionismaili/Desktop/GreenNet/README.md",
+        "/Users/enionismaili/Desktop/GreenNet/configs/README.md",
+        "/Users/enionismaili/Desktop/GreenNet/configs/train_official_ppo.json",
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/models/official_acceptance_v1/small/checkpoint_metadata.json",
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/models/official_acceptance_v1/medium/checkpoint_metadata.json",
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/models/official_acceptance_v1/large/checkpoint_metadata.json"
+      ],
+      "details": {
+        "documented_config": "/Users/enionismaili/Desktop/GreenNet/configs/train_official_ppo.json",
+        "documented_timesteps": 100000,
+        "actual_config": "/Users/enionismaili/Desktop/GreenNet/configs/train_normal.json",
+        "actual_timesteps": 25000
+      }
+    },
+    {
+      "id": "forecasting_claim_strength",
+      "severity": "medium",
+      "status": "verified",
+      "summary": "Forecasting is implemented and used in the env, but there is no strong evidence it materially improves final results.",
+      "evidence": [
+        "/Users/enionismaili/Desktop/GreenNet/greennet/forecasting.py",
+        "/Users/enionismaili/Desktop/GreenNet/greennet/env.py",
+        "/Users/enionismaili/Desktop/GreenNet/tests/unit/test_forecasting.py"
+      ]
+    },
+    {
+      "id": "impact_predictor_validation_weak",
+      "severity": "high",
+      "status": "verified",
+      "summary": "The impact predictor exists and is integrated, but the checked-in validation is weak.",
+      "evidence": [
+        "/Users/enionismaili/Desktop/GreenNet/greennet/impact_predictor.py",
+        "/Users/enionismaili/Desktop/GreenNet/scripts/train_cost_estimator_torch.py",
+        "/Users/enionismaili/Desktop/GreenNet/models/impact_predictor/meta.json",
+        "/Users/enionismaili/Desktop/GreenNet/models/impact_predictor/report.json"
+      ],
+      "details": {
+        "qos_auc": 0.5799078693430262,
+        "epochs": 1,
+        "split_mode": "random"
+      }
+    },
+    {
+      "id": "ai_driven_routing_precision",
+      "severity": "medium",
+      "status": "verified",
+      "summary": "The learned controller optimizes link toggling under a fixed routing baseline; it does not learn path routing directly.",
+      "evidence": [
+        "/Users/enionismaili/Desktop/GreenNet/greennet/env.py",
+        "/Users/enionismaili/Desktop/GreenNet/README.md"
+      ]
+    }
+  ],
+  "tests_run": [
+    {
+      "command": ".venv/bin/python -m pytest -q tests/unit/test_forecasting.py tests/unit/test_impact_predictor.py tests/unit/test_official_ppo.py",
+      "result": "passed",
+      "summary": "7 passed"
+    }
+  ],
+  "claim_classification": {
+    "real_and_integrated": [
+      "PPO training and evaluation code exists",
+      "RL environment with structured observations/actions exists",
+      "Forecast features are computed and used",
+      "Impact predictor runtime integration exists"
+    ],
+    "partial": [
+      "AI-driven routing",
+      "forecasting as a meaningful contribution",
+      "cost modeling as a meaningful contribution",
+      "reproducible official PPO lineage"
+    ],
+    "misleading_if_unqualified": [
+      "presenting the final `ppo` policy as raw PPO",
+      "presenting official PPO artifacts as coming from the documented 100k official config",
+      "presenting forecasting or impact prediction as validated headline results"
+    ]
+  },
+  "recommended_positioning": [
+    "Describe the final controller as a PPO-based hybrid controller with rule-based safety logic.",
+    "Describe forecasting as lightweight online demand forecasting features.",
+    "Describe impact prediction / cost modeling as exploratory unless stronger evidence is added.",
+    "Clarify that learning acts on link-state control over a fixed routing baseline."
+  ]
+}
