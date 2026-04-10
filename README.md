@@ -11,6 +11,7 @@ npm run dev
 ```
 
 This root script is intentionally lightweight: it reuses the existing backend command (`uvicorn api_app:app --reload --port 8000`) and the existing frontend command (`npm --prefix frontend run dev`) and starts them together for reviewers from one place.
+If `.venv` exists, the backend side of this command uses that repo-local interpreter automatically, so reviewers do not need to activate the virtual environment in a separate shell first.
 
 One-time setup before that command:
 

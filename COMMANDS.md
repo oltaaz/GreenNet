@@ -96,7 +96,7 @@ python3 -m greennet.persistence export-summary --base both --output /tmp/results
 npm run dev
 ```
 
-This is the official local demo command from the repo root. It uses a small root `package.json` wrapper to run the existing backend and frontend dev commands together.
+This is the official local demo command from the repo root. It uses a small root `package.json` wrapper to run the existing backend and frontend dev commands together. If the repo-local `.venv` exists, the backend launcher will use it automatically.
 
 Fallback direct commands:
 
