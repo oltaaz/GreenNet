@@ -236,14 +236,15 @@ def default_train_env_config() -> EnvConfig:
         # Keep action responsiveness but avoid flapping.
         toggle_cooldown_steps=8,
         global_toggle_cooldown_steps=3,
-        decision_interval_steps=10,
+        decision_interval_steps=1,
         max_off_toggles_per_episode=2,
-        max_total_toggles_per_episode=4,
+        max_total_toggles_per_episode=6,
         max_emergency_on_toggles_per_episode=8,
         disable_off_actions=False,
-        initial_off_edges=3,
+        initial_off_edges=0,
         initial_off_seed=123,
-        off_start_guard_decision_steps=3,  # block OFF actions for first N decision steps when starting all-on
+        off_start_guard_decision_steps=3,  # block OFF actions for the first N controller opportunities when starting all-on
+        off_calm_steps_required=5,
         util_block_threshold=0.80,
         max_util_off_allow_threshold=0.80,
         util_unblock_threshold=0.95,

@@ -51,6 +51,9 @@ def test_run_experiment_writes_expected_artifacts(tmp_path, run_experiment_cli) 
     assert run_meta["qos_policy_name"] == "official_qos_v1"
     assert run_meta["qos_policy_signature"]
     assert env_config["max_steps"] == 4
+    assert env_config["initial_off_edges"] == 0
+    assert env_config["disable_off_actions"] is True
+    assert env_config["max_total_toggles_per_episode"] == 0
     assert env_config["routing_baseline"] == "min_hop_single_path"
     assert summary["overall"]["qos_policy_name"] == "official_qos_v1"
     assert "qos_acceptance_status" in summary["overall"]
@@ -59,6 +62,36 @@ def test_run_experiment_writes_expected_artifacts(tmp_path, run_experiment_cli) 
     )
     assert rows[0]["policy"] == "all_on"
     assert rows[0]["scenario"] == "normal"
+
+
+def test_run_experiment_normalizes_learned_policy_eval_start_to_all_on(tmp_path, run_experiment_cli) -> None:
+    model_path = Path(
+        "/Users/enionismaili/Desktop/GreenNet/artifacts/models/official_acceptance_v1/small/ppo_greennet.zip"
+    )
+    if not model_path.exists():
+        pytest.skip("official small PPO checkpoint missing")
+
+    run_dir, completed = run_experiment_cli(
+        tmp_path,
+        policy="ppo",
+        scenario="normal",
+        seed=13,
+        steps=3,
+        episodes=1,
+        extra_args=["--topology-name", "small", "--model", str(model_path)],
+    )
+
+    env_config = json.loads((run_dir / "env_config.json").read_text(encoding="utf-8"))
+    run_meta = json.loads((run_dir / "run_meta.json").read_text(encoding="utf-8"))
+
+    assert completed.returncode == 0
+    assert env_config["initial_off_edges"] == 0
+    assert env_config["disable_off_actions"] is False
+    assert env_config["cost_estimator_enabled"] is False
+    assert env_config["decision_interval_steps"] == 1
+    assert env_config["off_calm_steps_required"] == 5
+    assert env_config["util_block_threshold"] == pytest.approx(0.85)
+    assert run_meta["policy"] == "ppo"
 
 
 def test_run_experiment_accepts_explicit_routing_baseline(tmp_path, run_experiment_cli) -> None:

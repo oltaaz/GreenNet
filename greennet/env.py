@@ -16,7 +16,7 @@ from gymnasium import spaces
 from greennet.carbon import CarbonModel
 from greennet.impact_predictor import ImpactPredictor
 from greennet.power import PowerModel
-from greennet.qos import runtime_thresholds_from_config, runtime_thresholds_metadata
+from greennet.qos import delay_threshold_ms, runtime_thresholds_from_config, runtime_thresholds_metadata
 from greennet.routing import (
     DEFAULT_ROUTING_COST_ATTR,
     annotate_routing_costs,
@@ -177,13 +177,13 @@ class EnvConfig:
     max_util_off_allow_threshold: float = 0.80  # block turning OFF any edge when global max utilization is high
     util_unblock_threshold: float = 0.90  # allow turning ON an edge only when utilization is above this threshold (or QoS violated)
     global_toggle_cooldown_steps: int = 5  # after any toggle, block all toggles for this many steps (prevents rapid toggling that can lead to instability)
-    decision_interval_steps: int = 10  # allow toggles only every N steps; NOOP always allowed
-    max_off_toggles_per_episode: int = 1
-    max_total_toggles_per_episode: int = 4
+    decision_interval_steps: int = 1  # evaluate toggle opportunities every step; stability is handled by cooldowns and budgets
+    max_off_toggles_per_episode: int = 2
+    max_total_toggles_per_episode: int = 6
     max_emergency_on_toggles_per_episode: int = 8
-    off_calm_steps_required: int = 20
+    off_calm_steps_required: int = 5
     disable_off_actions: bool = False
-    initial_off_edges: int = 3
+    initial_off_edges: int = 0
     initial_off_seed: int | None = 123
     off_start_guard_decision_steps: int = 10  # block OFF actions for first N decision steps when starting all-on
     stability_reversal_window_steps: int = 20
@@ -272,6 +272,7 @@ class GreenNetEnv(gym.Env):
         # ---- Forecasting state ----
         self._demand_forecaster: DemandForecaster | None = None
         self._demand_norm_scale: float = 1.0
+        self._last_avg_util: float = 0.0
         self._last_demand_now_norm: float = 0.0
         self._last_demand_forecast_norm: float = 0.0
         self._off_toggles_used: int = 0
@@ -281,6 +282,7 @@ class GreenNetEnv(gym.Env):
         self._decision_step_count: int = 0
         self._mask_calls: int = 0
         self._last_qos_viol_step: bool = False
+        self._last_qos_stress_step: bool = False
         self._edge_last_transition: Dict[Tuple[int, int], Tuple[int, int]] = {}
         self._episode_flap_event_count: int = 0
         self._last_flap_event_count: int = 0
@@ -396,7 +398,9 @@ class GreenNetEnv(gym.Env):
         self._last_norm_drop_step = 0.0
         self._last_qos_allow_on = False
         self._last_qos_viol_step = False
+        self._last_qos_stress_step = False
         self._last_max_util = 0.0
+        self._last_avg_util = 0.0
         self._last_demand_now_norm = 0.0
         self._last_demand_forecast_norm = 0.0
         self._off_toggles_used = 0
@@ -1060,6 +1064,7 @@ class GreenNetEnv(gym.Env):
         max_util = max(util_values, default=0.0)
         min_util = min(util_values, default=0.0)
         p95_util = float(np.percentile(util_values, 95)) if util_values else 0.0
+        self._last_avg_util = float(metrics.avg_utilization)
         self._last_max_util = float(max_util)
         near_sat = sum(1 for u in util_values if u >= self.config.saturation_util_threshold)
         edge_active, edge_util = self._edge_feature_vectors()
@@ -1105,12 +1110,29 @@ class GreenNetEnv(gym.Env):
         if volume >= float(self.config.qos_min_volume):
             qos_excess = max(0.0, float(norm_drop_total) - float(qos_target))
             qos_violation = qos_excess > 0.0
-        # Canonical per-step QoS-violation flag used by both penalty and ON-recovery gates.
+        runtime_thresholds = runtime_thresholds_from_config(self.config)
+        delay_guard = delay_threshold_ms(
+            float(getattr(metrics, "avg_path_latency_ms", 0.0)),
+            runtime_thresholds,
+            recovery=False,
+        )
+        delay_stress = bool(
+            delay_guard is not None and float(getattr(metrics, "avg_delay_ms", 0.0)) > float(delay_guard)
+        )
+        qos_stress_step = bool(float(norm_drop_step) > float(qos_target) or delay_stress)
+        # Reported QoS violation remains cumulative; controller stress is recent-step based.
         self._last_qos_viol_step = bool(qos_violation)
-        self._last_qos_allow_on = bool(self._last_qos_viol_step)
-        calm_now = (not self._last_qos_viol_step) and (
-            float(getattr(self, "_last_max_util", 0.0))
-            < float(getattr(self.config, "util_block_threshold", 0.85))
+        self._last_qos_stress_step = bool(qos_stress_step)
+        self._last_qos_allow_on = bool(self._last_qos_stress_step)
+        calm_util_threshold = float(
+            getattr(
+                self.config,
+                "max_util_off_allow_threshold",
+                getattr(self.config, "util_block_threshold", 0.85),
+            )
+        )
+        calm_now = (not self._last_qos_stress_step) and (
+            float(getattr(self, "_last_avg_util", 0.0)) < calm_util_threshold
         )
         self._calm_streak = int(getattr(self, "_calm_streak", 0) + 1) if calm_now else 0
         # Cap overshoot to prevent rare spikes from nuking reward (stabilizes training).
@@ -1123,15 +1145,14 @@ class GreenNetEnv(gym.Env):
         toggle_off_penalty_applied = float(self.config.toggle_off_penalty_scale) if bool(toggled_off) else 0.0
         # In QoS-violation regime, discount ON-toggle costs to favor recovery over prolonged violations.
         qos_toggle_discount_on = float(getattr(self.config, "qos_toggle_discount_on", 1.0))
-        discount_on = bool(getattr(self, "_last_qos_viol_step", False)) and bool(toggled_on)
+        discount_on = bool(getattr(self, "_last_qos_stress_step", False)) and bool(toggled_on)
         if discount_on and qos_toggle_discount_on < 1.0:
             toggle_cost = float(toggle_cost) * float(qos_toggle_discount_on)
             toggle_apply_cost = float(toggle_apply_cost) * float(qos_toggle_discount_on)
             toggle_on_penalty_applied = float(toggle_on_penalty_applied) * float(qos_toggle_discount_on)
         calm_toggle_multiplier_off = float(getattr(self.config, "calm_toggle_multiplier_off", 1.0))
-        calm_for_off = (not bool(getattr(self, "_last_qos_viol_step", False))) and (
-            float(getattr(self, "_last_max_util", 0.0))
-            < float(getattr(self.config, "util_block_threshold", 0.85))
+        calm_for_off = (not bool(getattr(self, "_last_qos_stress_step", False))) and (
+            float(getattr(self, "_last_avg_util", 0.0)) < calm_util_threshold
         )
         discount_off_calm = bool(calm_for_off and bool(toggled_off) and calm_toggle_multiplier_off > 1.0)
         if discount_off_calm:
@@ -1266,6 +1287,7 @@ class GreenNetEnv(gym.Env):
             "delta_carbon_g": float(delta_carbon),
             "norm_drop_step": float(norm_drop_step),
             "norm_drop": float(norm_drop_total),
+            "qos_stress_step": bool(qos_stress_step),
             "reward_qos": reward_qos,
             "reward_toggle": reward_toggle,
             "reward_toggle_on": reward_toggle_on,
@@ -1450,7 +1472,7 @@ class GreenNetEnv(gym.Env):
             base_tau,
             float(getattr(self.config, "cost_estimator_relaxed_tau", base_tau)),
         )
-        qos_violation = bool(getattr(self, "_last_qos_viol_step", False))
+        qos_violation = bool(getattr(self, "_last_qos_stress_step", False))
         qos_target = float(getattr(self.config, "qos_target_norm_drop", 0.0))
         qos_margin_off = float(
             getattr(self.config, "qos_guard_margin_off", getattr(self.config, "qos_guard_margin", 0.0))
@@ -1562,7 +1584,7 @@ class GreenNetEnv(gym.Env):
         near_saturated_edges = float(self._obs_scalar(obs, "near_saturated_edges", 0.0))
         norm_drop_step = float(getattr(self, "_last_norm_drop_step", 0.0))
         norm_drop_total = float(getattr(self, "_last_norm_drop_total", 0.0))
-        qos_violation_step = 1.0 if bool(getattr(self, "_last_qos_viol_step", False)) else 0.0
+        qos_violation_step = 1.0 if bool(getattr(self, "_last_qos_stress_step", False)) else 0.0
         global_cd_rem = float(getattr(self, "_global_toggle_cooldown_remaining", 0))
         global_cd_norm = global_cd_rem / float(max(1, int(getattr(self.config, "global_toggle_cooldown_steps", 1))))
         decision_step_norm = float(getattr(self, "_decision_step_count", 0)) / float(denom_steps)
@@ -1815,25 +1837,13 @@ class GreenNetEnv(gym.Env):
         nd_signal = float(getattr(self, "_last_norm_drop_step", getattr(self, "_last_norm_drop_total", 0.0)))
         target = float(self.config.qos_target_norm_drop)
         margin_off = float(getattr(self.config, "qos_guard_margin_off", getattr(self.config, "qos_guard_margin", 0.0)))
-        qos_viol_step = bool(getattr(self, "_last_qos_viol_step", False))
+        qos_viol_step = bool(getattr(self, "_last_qos_stress_step", False))
         qos_allow_on = bool(qos_viol_step)
         qos_block_off = bool(nd_signal > (target - margin_off))
         last_max_util = float(getattr(self, "_last_max_util", 0.0))
         calm_streak = int(getattr(self, "_calm_streak", 0))
         off_calm_steps_required = int(getattr(self.config, "off_calm_steps_required", 0))
         max_util_off_allow_threshold = float(getattr(self.config, "max_util_off_allow_threshold", 0.80))
-        # "No-first-OFF in calm all-on state":
-        # if episode started all-on and we are still all-on + calm, mask OFF actions.
-        episode_started_all_on = int(getattr(self, "_episode_initial_off_edges", 0)) == 0
-        off_edges_now = int(
-            sum(1 for e in self._edge_universe if not bool(self.simulator.active.get(e, True)))
-        )
-        all_on_and_calm = bool(
-            episode_started_all_on
-            and off_edges_now == 0
-            and (not qos_viol_step)
-            and (last_max_util < float(getattr(self.config, "util_block_threshold", 0.80)))
-        )
         util_unblock_threshold = float(
             getattr(
                 self.config,
@@ -1897,12 +1907,7 @@ class GreenNetEnv(gym.Env):
 
             # High-util gate blocks only when trying to turn an edge OFF
             if current_state:
-                if all_on_and_calm:
-                    mask[a] = False
-                    reasons["off_all_on_calm"] += 1
-                    continue
                 # In normal all-on mode (no seeded OFF edges), keep links ON by default.
-                # This prevents rare harmful OFF toggles that make policy worse than NOOP.
                 # OFF start guard: when starting all-on (initial_off_edges==0),
                 # keep OFF actions masked only for the first N decision steps.
                 if int(getattr(self.config, "initial_off_edges", 0)) == 0 and decision_idx < warmup_decisions:
@@ -2342,7 +2347,7 @@ class GreenNetEnv(gym.Env):
         qos_target = float(getattr(self.config, "qos_target_norm_drop", 0.0))
         qos_margin_off = float(getattr(self.config, "qos_guard_margin_off", getattr(self.config, "qos_guard_margin", 0.0)))
         qos_block_off = bool(norm_drop_signal > (qos_target - qos_margin_off))
-        qos_viol_step = bool(getattr(self, "_last_qos_viol_step", False))
+        qos_viol_step = bool(getattr(self, "_last_qos_stress_step", False))
         # Canonical ON-recovery gate: use the exact QoS-violation flag that drives reward_qos.
         qos_allow_on = bool(qos_viol_step)
         is_turning_on = bool((not prev_state) and next_state)
@@ -2406,24 +2411,6 @@ class GreenNetEnv(gym.Env):
         # IMPORTANT: apply only if this toggle would turn an edge OFF.
         is_turning_off = bool(prev_state and (not next_state))
         if is_turning_off:
-            episode_started_all_on = int(getattr(self, "_episode_initial_off_edges", 0)) == 0
-            off_edges_now = int(
-                sum(1 for e in self._edge_universe if not bool(self.simulator.active.get(e, True)))
-            )
-            all_on_now = bool(off_edges_now == 0)
-            calm_now = bool(
-                (not bool(getattr(self, "_last_qos_viol_step", False)))
-                and (
-                    float(getattr(self, "_last_max_util", 0.0))
-                    < float(getattr(self.config, "util_block_threshold", 0.80))
-                )
-            )
-            if episode_started_all_on and all_on_now and calm_now:
-                toggle_blocked = True
-                toggle_cost = float(getattr(self.config, "toggle_attempt_penalty", 0.0))
-                internal_noop_reason_hint = "other"
-                return _finish()
-
             req_calm = int(getattr(self.config, "off_calm_steps_required", 0))
             if req_calm > 0 and int(getattr(self, "_calm_streak", 0)) < req_calm:
                 toggle_blocked = True

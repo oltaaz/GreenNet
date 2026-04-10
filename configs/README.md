@@ -5,6 +5,7 @@ Use these tracked configs for scenario-specific training runs. This directory is
 - `configs/train_normal.json`
 - `configs/train_burst.json`
 - `configs/train_hotspot.json`
+- `configs/train_official_ppo.json`
 
 Example:
 
@@ -21,10 +22,10 @@ For the official acceptance-matrix rerun, PPO is no longer represented by one ge
 Regenerate that family from the current codebase with:
 
 ```bash
-python3 experiments/regenerate_official_ppo_checkpoint.py --all-topologies --timesteps 25000
+python3 experiments/regenerate_official_ppo_checkpoint.py --all-topologies --config configs/train_official_ppo.json --timesteps 100000
 ```
 
-This preserves the official acceptance matrix while avoiding brittle observation-space shims for older checkpoints.
+This preserves the official acceptance matrix while avoiding brittle observation-space shims for older checkpoints. `train_official_ppo.json` is the current canonical PPO regeneration config for the acceptance-matrix family.
 
 These files define both PPO hyperparameters and training-time env overrides (`env.*`), including `traffic_scenario` and scenario-specific traffic/reward knobs. Prefer these files over the historical root-level `train_*.json` snapshots when describing the official workflow.
 

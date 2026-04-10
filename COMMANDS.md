@@ -16,12 +16,13 @@ python3 -m pip install -e .[test,train]
 python3 train.py --config configs/train_normal.json --timesteps 300000
 python3 train.py --config configs/train_burst.json --timesteps 300000
 python3 train.py --config configs/train_hotspot.json --timesteps 300000
+python3 train.py --config configs/train_official_ppo.json --timesteps 100000
 ```
 
 Regenerate the canonical official PPO family for the current env/topology definitions:
 
 ```bash
-python3 experiments/regenerate_official_ppo_checkpoint.py --all-topologies --timesteps 25000
+python3 experiments/regenerate_official_ppo_checkpoint.py --all-topologies --config configs/train_official_ppo.json --timesteps 100000
 ```
 
 This writes the official reviewer-facing PPO checkpoints to:

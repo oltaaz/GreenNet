@@ -65,6 +65,7 @@ Use the tracked scenario configs in `configs/`:
 .venv/bin/python train.py --config configs/train_normal.json --timesteps 300000
 .venv/bin/python train.py --config configs/train_burst.json --timesteps 300000
 .venv/bin/python train.py --config configs/train_hotspot.json --timesteps 300000
+.venv/bin/python train.py --config configs/train_official_ppo.json --timesteps 100000
 ```
 
 The historical checkpoint at `runs/20260220_111755/ppo_greennet.zip` is no longer compatible with the current env because it was trained against an older observation layout. The current env emits topology-dependent Dict observations, so the canonical PPO artifact is now a topology-specific family:
@@ -76,10 +77,10 @@ The historical checkpoint at `runs/20260220_111755/ppo_greennet.zip` is no longe
 To regenerate that official family with the current codebase:
 
 ```bash
-.venv/bin/python experiments/regenerate_official_ppo_checkpoint.py --all-topologies --timesteps 25000
+.venv/bin/python experiments/regenerate_official_ppo_checkpoint.py --all-topologies --config configs/train_official_ppo.json --timesteps 100000
 ```
 
-The official acceptance-matrix path uses those topology-specific checkpoints automatically. Use `--ppo-model` only when you intentionally want a non-official single-checkpoint override.
+That config exists because the old single checkpoint under `runs/20260220_111755/` was both observation-incompatible and under the current benchmark materially worse than the traditional baseline. The official acceptance-matrix path uses the topology-specific family automatically. Use `--ppo-model` only when you intentionally want a non-official single-checkpoint override.
 
 ### 2. Run a single experiment
 

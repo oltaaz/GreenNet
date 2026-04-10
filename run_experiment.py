@@ -18,6 +18,7 @@ from baselines import (
     action_sleep_if_idle,
 )
 from greennet.env import EnvConfig, GreenNetEnv
+from greennet.impact_predictor import ImpactPredictor
 from greennet.persistence import persist_run_directory
 from greennet.policy_taxonomy import (
     canonical_controller_policy_name,
@@ -360,6 +361,53 @@ def build_env_config(scenario: str, max_steps: int | None, base_config: EnvConfi
     return cfg
 
 
+def apply_reference_model_topology_compatibility(
+    env_config: EnvConfig,
+    *,
+    reference_config: EnvConfig | None,
+    explicit_topology_identity: bool,
+) -> EnvConfig:
+    if reference_config is None or explicit_topology_identity:
+        return env_config
+
+    if getattr(reference_config, "topology_name", None):
+        env_config.topology_name = reference_config.topology_name
+    if getattr(reference_config, "topology_path", None):
+        env_config.topology_path = reference_config.topology_path
+
+    if bool(getattr(reference_config, "topology_randomize", False)):
+        env_config.topology_randomize = True
+        if getattr(reference_config, "topology_seeds", None):
+            env_config.topology_seeds = tuple(int(v) for v in reference_config.topology_seeds)
+        env_config.node_count = int(getattr(reference_config, "node_count", env_config.node_count))
+        env_config.edge_prob = float(getattr(reference_config, "edge_prob", env_config.edge_prob))
+        env_config.directed = bool(getattr(reference_config, "directed", env_config.directed))
+
+    return env_config
+
+
+def apply_policy_control_semantics(
+    env_config: EnvConfig,
+    *,
+    policy: str,
+    explicit_initial_off_edges: bool = False,
+) -> EnvConfig:
+    canonical_policy = canonical_experiment_policy_name(policy)
+
+    if canonical_policy == "all_on":
+        env_config.initial_off_edges = 0
+        env_config.disable_off_actions = True
+        env_config.max_off_toggles_per_episode = 0
+        env_config.max_total_toggles_per_episode = 0
+        env_config.max_emergency_on_toggles_per_episode = 0
+        return env_config
+
+    if canonical_policy in {"heuristic", "ppo"} and (not explicit_initial_off_edges):
+        env_config.initial_off_edges = 0
+
+    return env_config
+
+
 def find_latest_model(runs_dir: Path) -> Path:
     candidates: List[Path] = []
     if runs_dir.exists():
@@ -512,6 +560,18 @@ def load_policy(
             return None
         return pred if isinstance(pred, dict) else None
 
+    def _ensure_controller_predictor(env: GreenNetEnv) -> None:
+        if getattr(env, "_impact_predictor", None) is not None:
+            return
+        predictor_dir = _resolve_impact_predictor_model_dir()
+        if predictor_dir is None:
+            return
+        try:
+            env._impact_predictor = ImpactPredictor(str(predictor_dir))  # type: ignore[attr-defined]
+            env._cost_estimator_model_dir = str(predictor_dir)  # type: ignore[attr-defined]
+        except Exception:
+            return
+
     def _set_controller_cost_estimator_override(env: GreenNetEnv, action_int: int | None) -> None:
         setter = getattr(env, "set_controller_cost_estimator_override", None)
         if callable(setter):
@@ -615,7 +675,7 @@ def load_policy(
         if callable(is_decision_step) and not bool(is_decision_step()):
             return 0, False
 
-        qos_violation = bool(info.get("qos_violation", getattr(env, "_last_qos_viol_step", False)))
+        qos_violation = bool(info.get("qos_stress_step", getattr(env, "_last_qos_stress_step", False)))
         if qos_violation:
             return 0, False
 
@@ -624,34 +684,28 @@ def load_policy(
         guard_ddrop_max = float(info.get("cost_estimator_ddrop_max", 0.0) or 0.0)
         guard_tau = float(info.get("cost_estimator_tau", 0.0) or 0.0)
         calm_factor = float(info.get("cost_estimator_calm_factor", 0.0) or 0.0)
-        if callable(guard_fn):
+        _ensure_controller_predictor(env)
+        predictor_available = bool(
+            getattr(env, "_impact_predictor", None) is not None
+        )
+        if predictor_available and callable(guard_fn):
             try:
                 guard_p_qos_max, guard_ddrop_max, guard_tau, calm_factor = [
                     float(v) for v in guard_fn()
                 ]
             except Exception:
                 pass
+        elif not predictor_available:
+            calm_factor = 1.0
         if calm_factor < 0.35:
             return 0, False
 
         metrics = info.get("metrics")
         qos_target = float(getattr(env.config, "qos_target_norm_drop", 0.0))
-        qos_margin_off = float(getattr(env.config, "qos_guard_margin_off", 0.0))
-        norm_drop_total = float(info.get("norm_drop", getattr(env, "_last_norm_drop_total", 0.0)))
-        norm_drop_step = float(info.get("norm_drop_step", getattr(env, "_last_norm_drop_step", 0.0)))
-        avg_delay_ms = float(getattr(metrics, "avg_delay_ms", 0.0)) if metrics is not None else 0.0
-        avg_path_latency_ms = float(getattr(metrics, "avg_path_latency_ms", 0.0)) if metrics is not None else 0.0
-        if norm_drop_total > max(0.0, qos_target - max(qos_margin_off * 1.5, 0.01)):
-            return 0, False
-        if norm_drop_step > max(0.03, qos_target * 0.75):
-            return 0, False
-        delay_limit = _delay_guard_limit(avg_path_latency_ms, env, recovery=False)
-        if delay_limit is not None and avg_delay_ms > float(delay_limit):
-            return 0, False
 
         demand_now = float(np.asarray(obs.get("demand_now", [0.0]), dtype=np.float32).reshape(-1)[0])
         demand_forecast = float(np.asarray(obs.get("demand_forecast", [0.0]), dtype=np.float32).reshape(-1)[0])
-        if max(demand_now, demand_forecast) > 0.60:
+        if max(demand_now, demand_forecast) > 0.95:
             return 0, False
 
         max_util = float(np.asarray(obs.get("max_util", [0.0]), dtype=np.float32).reshape(-1)[0])
@@ -662,7 +716,7 @@ def load_policy(
                 getattr(env.config, "util_block_threshold", 0.80),
             )
         )
-        if max_util >= max(0.05, util_gate * 0.90):
+        if max_util >= max(0.05, util_gate + 0.10):
             return 0, False
 
         calm_required = int(getattr(env.config, "off_calm_steps_required", 0))
@@ -705,7 +759,7 @@ def load_policy(
 
             score = _edge_pressure(env, action_int)
             pred = _predict_off_impact(obs, env, action_int, precomputed_state=precomputed_state)
-            allowed_by_mask = _action_allowed(env, action_int, mask)
+            allowed_by_mask = True if not predictor_available else _action_allowed(env, action_int, mask)
             override_needed = False
             if not allowed_by_mask:
                 if not _controller_can_override_cost_estimator(
@@ -743,22 +797,33 @@ def load_policy(
         qos_margin_off = float(getattr(env.config, "qos_guard_margin_off", 0.0))
         norm_drop_total = float(info.get("norm_drop", getattr(env, "_last_norm_drop_total", 0.0)))
         norm_drop_step = float(info.get("norm_drop_step", getattr(env, "_last_norm_drop_step", 0.0)))
-        qos_violation = bool(info.get("qos_violation", getattr(env, "_last_qos_viol_step", False)))
+        qos_violation = bool(info.get("qos_stress_step", getattr(env, "_last_qos_stress_step", False)))
         avg_delay_ms = float(getattr(metrics, "avg_delay_ms", 0.0)) if metrics is not None else 0.0
         avg_path_latency_ms = float(getattr(metrics, "avg_path_latency_ms", 0.0)) if metrics is not None else 0.0
+        demand_now = float(np.asarray(obs.get("demand_now", [0.0]), dtype=np.float32).reshape(-1)[0])
+        demand_forecast = float(np.asarray(obs.get("demand_forecast", [0.0]), dtype=np.float32).reshape(-1)[0])
+        max_util = float(np.asarray(obs.get("max_util", [0.0]), dtype=np.float32).reshape(-1)[0])
+        near_saturated_edges = float(
+            np.asarray(obs.get("near_saturated_edges", [0.0]), dtype=np.float32).reshape(-1)[0]
+        )
+        volume_total = float(getattr(env, "_prev_delivered_total", 0.0)) + float(
+            getattr(env, "_prev_dropped_total", 0.0)
+        )
+        qos_min_volume = float(getattr(env.config, "qos_min_volume", 0.0))
 
-        recovery_mode = bool(
-            qos_violation
-            or norm_drop_total > max(0.0, qos_target - qos_margin_off)
-            or norm_drop_step > max(0.05, qos_target * 1.5)
-            or (
-                avg_path_latency_ms > 0.0
-                and (
-                    (delay_limit := _delay_guard_limit(avg_path_latency_ms, env, recovery=True)) is not None
-                    and avg_delay_ms > float(delay_limit)
-                )
-                and norm_drop_step > 0.0
+        recovery_mode = False
+        util_unblock_threshold = float(
+            getattr(
+                env.config,
+                "util_unblock_threshold",
+                getattr(env.config, "util_block_threshold", 0.80),
             )
+        )
+        on_action_stress = bool(
+            max_util >= util_unblock_threshold
+            or near_saturated_edges > 0.0
+            or max(demand_now, demand_forecast) >= 0.85
+            or norm_drop_step > max(0.02, qos_target * 0.50)
         )
 
         if recovery_mode:
@@ -769,15 +834,18 @@ def load_policy(
                 return int(proposed)
             return 0
 
+        calm_off, calm_override = _calm_off_action(obs, info, env, mask=mask)
+        if calm_off > 0:
+            if calm_override:
+                _set_controller_cost_estimator_override(env, calm_off)
+            return int(calm_off)
+
         proposed_allowed = _action_allowed(env, proposed, mask)
         if proposed > 0 and _action_turns_off(env, proposed) and proposed_allowed:
             return int(proposed)
 
-        calm_off, calm_override = _calm_off_action(obs, info, env, mask=mask)
-        if calm_off > 0 and (proposed <= 0 or _action_turns_on(env, proposed) or not proposed_allowed):
-            if calm_override:
-                _set_controller_cost_estimator_override(env, calm_off)
-            return int(calm_off)
+        if proposed > 0 and _action_turns_on(env, proposed) and not recovery_mode:
+            return 0
 
         if proposed > 0 and not proposed_allowed:
             fallback = action_sleep_if_idle(obs, info, env)
@@ -1422,7 +1490,7 @@ def main() -> None:
         load_env_config_from_run(reference_run_dir, verbose=False) if reference_run_dir is not None else None
     )
 
-    env_config = build_env_config(scenario, max_steps, reference_env_config)
+    env_config = build_env_config(scenario, max_steps, None)
     for key, value in env_overrides.items():
         setattr(env_config, key, value)
     if args.topology_name is not None:
@@ -1463,11 +1531,6 @@ def main() -> None:
         env_config.power_transition_on_joules = float(args.power_transition_on_joules)
     if args.power_transition_off_joules is not None:
         env_config.power_transition_off_joules = float(args.power_transition_off_joules)
-
-    impact_model_dir = _resolve_impact_predictor_model_dir()
-    if policy == "ppo" and impact_model_dir is not None:
-        env_config.cost_estimator_enabled = True
-        env_config.cost_estimator_model_dir = str(impact_model_dir)
 
     action_fn, policy_meta = load_policy(
         policy,
@@ -1516,11 +1579,24 @@ def main() -> None:
     elif config.get("routing_link_cost_model") is not None:
         env_config.routing_link_cost_model = str(config.get("routing_link_cost_model"))
 
+    env_config = apply_reference_model_topology_compatibility(
+        env_config,
+        reference_config=reference_env_config,
+        explicit_topology_identity=bool(
+            getattr(env_config, "topology_name", None) or getattr(env_config, "topology_path", None)
+        ),
+    )
+
     env_config.routing_baseline = canonicalize_routing_baseline_name(
         getattr(env_config, "routing_baseline", "min_hop_single_path")
     )
     env_config.routing_link_cost_model = canonicalize_routing_link_cost_model(
         getattr(env_config, "routing_link_cost_model", "unit")
+    )
+    env_config = apply_policy_control_semantics(
+        env_config,
+        policy=policy,
+        explicit_initial_off_edges=("initial_off_edges" in env_overrides),
     )
 
     now = datetime.now(timezone.utc)

@@ -136,6 +136,39 @@ def test_action_mask_blocks_off_toggles_when_qos_guard_is_active() -> None:
         env.close()
 
 
+def test_action_mask_allows_off_toggles_after_warmup_when_starting_all_on() -> None:
+    env = GreenNetEnv(
+        EnvConfig(
+            node_count=4,
+            edge_prob=1.0,
+            topology_seed=0,
+            max_steps=5,
+            decision_interval_steps=1,
+            initial_off_edges=0,
+            off_calm_steps_required=0,
+            off_start_guard_decision_steps=0,
+            flows_per_step=0,
+            enable_forecasting=False,
+        )
+    )
+    try:
+        env.reset(seed=7)
+        env._last_qos_viol_step = False
+        env._last_norm_drop_step = 0.0
+        env._last_max_util = 0.0
+        env._last_demand_now_norm = 0.0
+        env._last_demand_forecast_norm = 0.0
+
+        mask = env.get_action_mask()
+        off_actions = [action for action in range(1, env.action_space.n) if env._is_off_toggle_action(action)]
+
+        assert off_actions
+        assert any(mask[action] for action in off_actions)
+        assert env._last_mask_reason_counts["off_all_on_calm"] == 0
+    finally:
+        env.close()
+
+
 def test_env_tracks_flap_event_and_reversal_penalty_on_emergency_recovery() -> None:
     env = GreenNetEnv(
         EnvConfig(

@@ -20,7 +20,7 @@ This note is the compact reviewer guide for the final submission. It is written 
    The current official PPO artifact is a topology-specific family under `artifacts/models/official_acceptance_v1/`, not the historical single checkpoint in `runs/20260220_111755/`. If those reviewer-facing checkpoints are missing, regenerate them with:
 
    ```bash
-   .venv/bin/python experiments/regenerate_official_ppo_checkpoint.py --all-topologies --timesteps 25000
+   .venv/bin/python experiments/regenerate_official_ppo_checkpoint.py --all-topologies --config configs/train_official_ppo.json --timesteps 100000
    ```
 5. Verify the final repo state with `.venv/bin/python -m pytest -q` and `cd frontend/greennet-ui && npm ci && npm run build`.
 6. Use `artifacts/traffic_verify/20260220_matrix/` and `artifacts/locked/` for reproducibility evidence.

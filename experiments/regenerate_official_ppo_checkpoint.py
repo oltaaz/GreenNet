@@ -52,8 +52,8 @@ def main(argv: list[str] | None = None) -> None:
             "canonical official acceptance-matrix PPO artifact."
         )
     )
-    parser.add_argument("--config", type=Path, default=Path("configs/train_normal.json"))
-    parser.add_argument("--timesteps", type=int, default=25000)
+    parser.add_argument("--config", type=Path, default=Path("configs/train_official_ppo.json"))
+    parser.add_argument("--timesteps", type=int, default=100000)
     parser.add_argument("--python", type=str, default=sys.executable)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--topology-name", choices=list(OFFICIAL_TOPOLOGY_ORDER), default=None)
