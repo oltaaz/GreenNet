@@ -27,6 +27,12 @@ This note is the compact reviewer guide for the final submission. It is written 
 7. Use `artifacts/final_pipeline/official_acceptance_v1/metadata/acceptance_matrix_manifest.json` and `pipeline_config.json` as the reviewer-facing map for the final runnable claim.
 8. Treat `artifacts/db/greennet.sqlite3` as the primary structured store for indexed official runs and persisted final-evaluation payloads; use the CSV/JSON/Markdown artifacts as reviewer-facing exports.
 
+Short note on the pinned canonical bundle:
+
+- the reviewer-facing bundle currently pinned under `artifacts/final_pipeline/latest/` reflects the preserved historical `~1.49%` PPO result
+- it is historically pinned for review continuity and is not fully reproducible from the current code/checkpoint state
+- the live one-command rerun path still reproduces the official benchmark flow, but not that exact historical bundle
+
 ## 2. What The System Actually Contains
 
 - simulator core: routing, topology, delay, energy, and carbon accounting
