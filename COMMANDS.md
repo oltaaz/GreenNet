@@ -48,6 +48,12 @@ python3 experiments/run_official_acceptance_matrix.py
 
 This is now the canonical one-command reviewer path. It always uses `configs/acceptance_matrices/official_acceptance_v1.json`, initializes the SQLite run store, executes the official matrix, aggregates results, writes the final evaluation bundle, and mirrors indexed runs plus the final-evaluation payload into `artifacts/db/greennet.sqlite3`.
 
+Important note:
+
+- the reviewer-facing bundle currently pinned in `artifacts/final_pipeline/latest/` is a preserved historical `~1.49%` PPO bundle
+- it is not regenerated exactly by the current code/checkpoint state
+- use the rerun command for the current live reproducible benchmark path, and treat `latest` as the pinned historical review bundle
+
 For PPO, this command now resolves the canonical topology-specific checkpoint family automatically. The older single checkpoint under `runs/20260220_111755/ppo_greennet.zip` is not compatible with the current observation space and should not be used as the official artifact.
 
 Main outputs:

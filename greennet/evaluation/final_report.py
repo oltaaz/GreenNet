@@ -123,6 +123,18 @@ def _to_bool(value: Any) -> bool | None:
     return None
 
 
+def _to_json_mapping(value: Any) -> Mapping[str, Any] | None:
+    if isinstance(value, Mapping):
+        return value
+    if value in ("", None):
+        return None
+    try:
+        parsed = json.loads(str(value))
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, Mapping) else None
+
+
 def _mean(values: Sequence[float]) -> float | None:
     return float(fmean(values)) if values else None
 
@@ -306,6 +318,9 @@ def _build_run_row_from_summary_csv_row(
 
     return {
         "run_id": str(row.get("run_id") or results_dir_text or ""),
+        "matrix_id": str(row.get("matrix_id") or ""),
+        "matrix_name": str(row.get("matrix_name") or ""),
+        "matrix_manifest": str(row.get("matrix_manifest") or ""),
         "policy": policy,
         "policy_class": str(row.get("policy_class") or _policy_class(policy, baseline_policies=baseline_policies, ai_policies=ai_policies)),
         "controller_policy": canonical_controller_policy_name(row.get("controller_policy") or policy),
@@ -326,6 +341,11 @@ def _build_run_row_from_summary_csv_row(
         "routing_link_cost_model": str(row.get("routing_link_cost_model") or "unit"),
         "routing_forwarding_model": str(row.get("routing_forwarding_model") or "single_shortest_path"),
         "routing_path_split": str(row.get("routing_path_split") or "single_path"),
+        "stability_policy_name": str(row.get("stability_policy_name") or ""),
+        "stability_policy_signature": str(row.get("stability_policy_signature") or ""),
+        "stability_thresholds": _to_json_mapping(row.get("stability_thresholds")),
+        "stability_status": str(row.get("stability_status") or ""),
+        "stability_missing": str(row.get("stability_missing") or ""),
         "steps_total": steps_total,
         "energy_kwh": _to_float(row.get("energy_kwh_total_mean") or row.get("energy_kwh_mean")),
         "delivered_traffic": _to_float(row.get("delivered_total_mean") or row.get("delivered_traffic_mean")),
@@ -335,6 +355,10 @@ def _build_run_row_from_summary_csv_row(
         "avg_path_latency_ms": _to_float(row.get("avg_path_latency_ms_mean")),
         "qos_violation_rate": _to_float(row.get("qos_violation_rate_mean") or row.get("qos_violation_rate")),
         "qos_violation_count": _to_float(row.get("qos_violation_count_mean") or row.get("qos_violation_count")),
+        "transition_count_total": _to_float(row.get("transition_count_total_mean") or row.get("transition_count_total")),
+        "transition_rate": _to_float(row.get("transition_rate_mean") or row.get("transition_rate")),
+        "flap_event_count_total": _to_float(row.get("flap_event_count_total_mean") or row.get("flap_event_count_total")),
+        "flap_rate": _to_float(row.get("flap_rate_mean") or row.get("flap_rate")),
         "carbon_g": _to_float(row.get("carbon_g_total_mean") or row.get("carbon_g_mean")),
     }
 

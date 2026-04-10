@@ -80,6 +80,12 @@ The defensible submission claim is therefore:
 - the AI controller is measured against both the official traditional baseline and the strongest handcrafted heuristic under the same scenarios and seeds
 - the final evidence explains a mixed outcome instead of overclaiming improvement
 
+Important note on the canonical bundle:
+
+- the reviewer-facing canonical bundle currently pinned under `artifacts/final_pipeline/latest/` is the preserved historical `~1.49%` PPO result
+- it is a promoted historical reconstructed bundle, not the output of the current one-command rerun path from the current code/checkpoint state
+- the current codebase still reproduces the official benchmark pipeline, but not that exact historical `1.49%` result end to end
+
 ## Canonical Workflow
 
 ### 1. Train or rerun a policy
