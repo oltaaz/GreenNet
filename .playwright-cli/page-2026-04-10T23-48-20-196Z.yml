@@ -1,0 +1,231 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - link "Go to GreenNet home" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - img [ref=e8]
+        - generic [ref=e10]:
+          - strong [ref=e11]: GreenNet
+          - generic [ref=e12]: AI-Driven Sustainable Networking
+      - navigation "Primary" [ref=e13]:
+        - generic [ref=e14]: Backend connected
+        - link "Home" [ref=e16] [cursor=pointer]:
+          - /url: /
+        - link "Dashboard" [ref=e17] [cursor=pointer]:
+          - /url: /dashboard
+        - link "Results" [ref=e18] [cursor=pointer]:
+          - /url: /results
+        - link "Simulator" [ref=e19] [cursor=pointer]:
+          - /url: /simulator
+        - link "About" [ref=e20] [cursor=pointer]:
+          - /url: /about
+  - main [ref=e21]:
+    - generic [ref=e22]:
+      - generic [ref=e24]:
+        - paragraph [ref=e25]: Current Run Overview
+        - heading "Inspect the selected run with the same energy, QoS, and activity labels used in reporting" [level=1] [ref=e26]
+      - status [ref=e27]:
+        - generic [ref=e29]:
+          - strong [ref=e30]: Loading runs
+          - paragraph [ref=e31]: Fetching available simulation outputs.
+      - generic [ref=e32]:
+        - generic [ref=e33]:
+          - paragraph [ref=e34]: Official Locked Results
+          - heading "Burst and hotspot acceptance bundles" [level=3] [ref=e35]
+        - generic [ref=e36]:
+          - article [ref=e37]:
+            - generic [ref=e38]:
+              - generic [ref=e39]:
+                - paragraph [ref=e40]: Official Locked Result
+                - heading "Burst" [level=3] [ref=e41]
+              - generic [ref=e43]: PASS
+            - paragraph [ref=e44]:
+              - text: Locked acceptance bundle
+              - strong [ref=e45]: 20260220_111755_100k_ctrl_cap16
+              - text: with controller-evaluated held-out traffic.
+            - generic [ref=e46]:
+              - generic [ref=e47]: OFF4
+              - generic [ref=e48]: 100 eps
+              - generic [ref=e49]: seeds 10-19
+              - generic [ref=e50]: cap 16
+            - generic [ref=e51]:
+              - generic [ref=e52]:
+                - generic [ref=e53]: Delivered Traffic
+                - strong [ref=e54]: "33939"
+                - generic [ref=e55]: pkts
+              - generic [ref=e56]:
+                - generic [ref=e57]: Dropped Traffic
+                - strong [ref=e58]: "2377"
+                - generic [ref=e59]: pkts
+              - generic [ref=e60]:
+                - generic [ref=e61]: Drop Rate
+                - strong [ref=e62]: "6.5"
+                - generic [ref=e63]: "%"
+              - generic [ref=e64]:
+                - generic [ref=e65]: Total Energy
+                - strong [ref=e66]: "1.665"
+                - generic [ref=e67]: kWh
+              - generic [ref=e68]:
+                - generic [ref=e69]: Dropped vs Traditional
+                - strong [ref=e70]: "-269"
+                - generic [ref=e71]: pkts
+              - generic [ref=e72]:
+                - generic [ref=e73]: Energy vs Traditional
+                - strong [ref=e74]: "0.109"
+                - generic [ref=e75]: kWh
+            - paragraph [ref=e76]: "pass: offstart(dropped+energy). Reward Delta vs Traditional 311.13. Scenario: burst Model artifact: artifacts/locked/normal/20260220_111755_100k/model.zip Eval-time controller applied: --eval-max-on-edges 16 Seeds: 10..19 Episodes: 100 This lock contains eval logs for off0/off2/off4 and scenario CSV summary."
+          - article [ref=e77]:
+            - generic [ref=e78]:
+              - generic [ref=e79]:
+                - paragraph [ref=e80]: Official Locked Result
+                - heading "Hotspot" [level=3] [ref=e81]
+              - generic [ref=e83]: PASS
+            - paragraph [ref=e84]:
+              - text: Locked acceptance bundle
+              - strong [ref=e85]: 20260220_111755_100k_ctrl_cap16
+              - text: with controller-evaluated held-out traffic.
+            - generic [ref=e86]:
+              - generic [ref=e87]: OFF4
+              - generic [ref=e88]: 100 eps
+              - generic [ref=e89]: seeds 10-19
+              - generic [ref=e90]: cap 16
+            - generic [ref=e91]:
+              - generic [ref=e92]:
+                - generic [ref=e93]: Delivered Traffic
+                - strong [ref=e94]: "13496"
+                - generic [ref=e95]: pkts
+              - generic [ref=e96]:
+                - generic [ref=e97]: Dropped Traffic
+                - strong [ref=e98]: "1076"
+                - generic [ref=e99]: pkts
+              - generic [ref=e100]:
+                - generic [ref=e101]: Drop Rate
+                - strong [ref=e102]: "7.4"
+                - generic [ref=e103]: "%"
+              - generic [ref=e104]:
+                - generic [ref=e105]: Total Energy
+                - strong [ref=e106]: "1.665"
+                - generic [ref=e107]: kWh
+              - generic [ref=e108]:
+                - generic [ref=e109]: Dropped vs Traditional
+                - strong [ref=e110]: "-20"
+                - generic [ref=e111]: pkts
+              - generic [ref=e112]:
+                - generic [ref=e113]: Energy vs Traditional
+                - strong [ref=e114]: "0.109"
+                - generic [ref=e115]: kWh
+            - paragraph [ref=e116]: "pass: offstart(dropped+energy). Reward Delta vs Traditional 13.26. Scenario: hotspot Model artifact: artifacts/locked/normal/20260220_111755_100k/model.zip Eval-time controller applied: --eval-max-on-edges 16 Seeds: 10..19 Episodes: 100 This lock contains eval logs for off0/off2/off4 and scenario CSV summary."
+      - generic [ref=e117]:
+        - generic [ref=e118]:
+          - generic [ref=e119]:
+            - generic [ref=e120]:
+              - paragraph [ref=e121]: kWh per step
+              - heading "Energy by Step" [level=3] [ref=e122]
+            - generic [ref=e125]:
+              - list [ref=e127]:
+                - listitem [ref=e128]:
+                  - img "Selected Run legend icon" [ref=e129]
+                  - text: Selected Run
+              - application [ref=e131]
+          - generic [ref=e136]:
+            - generic [ref=e137]:
+              - paragraph [ref=e138]: routing latency in ms
+              - heading "Path Latency by Step" [level=3] [ref=e139]
+            - generic [ref=e142]:
+              - list [ref=e144]:
+                - listitem [ref=e145]:
+                  - img "Path Latency legend icon" [ref=e146]
+                  - text: Path Latency
+              - application [ref=e148]
+          - generic [ref=e153]:
+            - generic [ref=e154]:
+              - paragraph [ref=e155]: packets per step
+              - heading "Dropped Traffic by Step" [level=3] [ref=e156]
+            - generic [ref=e159]:
+              - list [ref=e161]:
+                - listitem [ref=e162]:
+                  - img "Dropped legend icon" [ref=e163]
+                  - text: Dropped
+              - application [ref=e165]
+          - generic [ref=e170]:
+            - generic [ref=e171]:
+              - paragraph [ref=e172]: "%"
+              - heading "Active Links by Step" [level=3] [ref=e173]
+            - generic [ref=e176]:
+              - list [ref=e178]:
+                - listitem [ref=e179]:
+                  - img "Active Links legend icon" [ref=e180]
+                  - text: Active Links
+              - application [ref=e182]
+        - complementary [ref=e187]:
+          - generic [ref=e188]:
+            - generic [ref=e189]:
+              - paragraph [ref=e190]: Run Controls
+              - heading "Configure Simulation" [level=3] [ref=e191]
+            - generic [ref=e192]:
+              - generic [ref=e193]:
+                - text: Policy
+                - combobox "Policy" [ref=e194]:
+                  - option "Traditional (All-On)"
+                  - option "Energy-Aware Heuristic"
+                  - option "PPO-Based Hybrid (AI)" [selected]
+              - generic [ref=e195]:
+                - text: Traffic Scenario
+                - combobox "Traffic Scenario" [ref=e196]:
+                  - option "Normal" [selected]
+                  - option "Burst"
+                  - option "Hotspot"
+              - generic [ref=e197]:
+                - text: Seed
+                - textbox "Seed" [ref=e198]
+              - generic [ref=e199]:
+                - text: Steps
+                - textbox "Steps" [ref=e200]
+            - generic [ref=e201]:
+              - button "Run Simulation" [disabled] [ref=e202]
+              - button "Reset" [ref=e203] [cursor=pointer]
+          - generic [ref=e204]:
+            - generic [ref=e205]:
+              - paragraph [ref=e206]: Topology Step
+              - heading "t = 0 | active 100.0%" [level=3] [ref=e207]
+            - slider [disabled] [ref=e208]: "0"
+          - generic [ref=e209]:
+            - generic [ref=e210]:
+              - paragraph [ref=e211]: Topology
+              - heading "Network Topology" [level=3] [ref=e212]
+            - paragraph [ref=e213]: Simulated packet flow and real link-state playback. Switching links can trigger reroutes or drops.
+            - generic [ref=e214]:
+              - article [ref=e215]:
+                - generic [ref=e216]: ON Links
+                - strong [ref=e217]: "26"
+              - article [ref=e218]:
+                - generic [ref=e219]: OFF Links
+                - strong [ref=e220]: "0"
+              - article [ref=e221]:
+                - generic [ref=e222]: Switches
+                - strong [ref=e223]: "0"
+              - article [ref=e224]:
+                - generic [ref=e225]: Step Energy
+                - strong [ref=e226]: 0.000 kWh
+                - generic [ref=e227]: "+0.000"
+              - article [ref=e228]:
+                - generic [ref=e229]: Link Power (visual est.)
+                - strong [ref=e230]: 736.1 W
+            - img "Network topology graph" [ref=e231]:
+              - generic [ref=e303]: N1
+              - generic [ref=e307]: N2
+              - generic [ref=e311]: N3
+              - generic [ref=e315]: N4
+              - generic [ref=e319]: N5
+              - generic [ref=e323]: N6
+              - generic [ref=e327]: N7
+              - generic [ref=e331]: N8
+              - generic [ref=e335]: N9
+              - generic [ref=e339]: N10
+              - generic [ref=e343]: N11
+              - generic [ref=e347]: N12
+            - generic [ref=e348]:
+              - generic [ref=e349]: ON link
+              - generic [ref=e351]: OFF link
+              - generic [ref=e353]: Rerouted packet
+              - generic [ref=e355]: Dropped packet

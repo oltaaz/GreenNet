@@ -37,6 +37,9 @@ if (REPO_ROOT / "runs").exists() is False and (REPO_ROOT / "results").exists() i
 RESULTS_DIR = REPO_ROOT / "results"
 RUNS_DIR = REPO_ROOT / "runs"
 LOCKED_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "locked"
+CANONICAL_FINAL_EVALUATION_DIR = (
+    REPO_ROOT / "artifacts" / "final_pipeline" / "official_acceptance_v1" / "summary" / "final_evaluation"
+)
 
 BaseChoice = Literal["results", "runs", "both"]
 GROUP_BY_FIELDS = {"policy", "scenario", "tag", "topology_seed", "deterministic"}
@@ -206,10 +209,28 @@ def _path_within_repo(path_text: Any) -> bool:
         return False
 
 
+def _path_within_canonical_final_bundle(path_text: Any) -> bool:
+    if path_text in ("", None):
+        return False
+    try:
+        candidate = Path(str(path_text)).expanduser()
+        resolved = candidate.resolve() if candidate.is_absolute() else (REPO_ROOT / candidate).resolve()
+        canonical_root = CANONICAL_FINAL_EVALUATION_DIR.resolve()
+        resolved.relative_to(canonical_root)
+        return True
+    except Exception:
+        return False
+
+
 def _db_final_evaluation_matches_repo(payload: Dict[str, Any]) -> bool:
     artifact = payload.get("artifact")
     if not isinstance(artifact, dict):
         return False
+
+    if CANONICAL_FINAL_EVALUATION_DIR.exists():
+        for key in ("output_dir", "summary_path", "report_path"):
+            if _path_within_canonical_final_bundle(artifact.get(key)):
+                return True
 
     for key in ("output_dir", "summary_path", "report_path"):
         if _path_within_repo(artifact.get(key)):
@@ -338,6 +359,7 @@ def _read_locked_note(bundle_dir: Path) -> Optional[str]:
 
 def _final_evaluation_candidate_paths() -> List[Path]:
     preferred = [
+        CANONICAL_FINAL_EVALUATION_DIR / FINAL_EVALUATION_SUMMARY_FILENAME,
         REPO_ROOT / "artifacts" / "final_evaluation" / "latest" / FINAL_EVALUATION_SUMMARY_FILENAME,
     ]
 
@@ -355,7 +377,7 @@ def _final_evaluation_candidate_paths() -> List[Path]:
 
 @lru_cache(maxsize=4)
 def _latest_final_evaluation_artifact() -> Optional[Dict[str, Any]]:
-    ranked: List[Tuple[float, int, str, Path, Optional[Path], Dict[str, Any]]] = []
+    ranked: List[Tuple[int, float, int, str, Path, Optional[Path], Dict[str, Any]]] = []
     for summary_path in _final_evaluation_candidate_paths():
         payload = load_json(summary_path)
         if not payload or not isinstance(payload.get("summary_rows"), list):
@@ -365,6 +387,7 @@ def _latest_final_evaluation_artifact() -> Optional[Dict[str, Any]]:
         generated_at = _parse_iso_timestamp(payload.get("generated_at_utc"))
         ranked.append(
             (
+                1 if summary_path.is_relative_to(CANONICAL_FINAL_EVALUATION_DIR) else 0,
                 generated_at.timestamp() if generated_at is not None else float(summary_path.stat().st_mtime),
                 1 if "artifacts" in summary_path.parts else 0,
                 str(summary_path),
@@ -375,7 +398,7 @@ def _latest_final_evaluation_artifact() -> Optional[Dict[str, Any]]:
         )
 
     if ranked:
-        _, _, _, summary_path, report_path, payload = max(ranked)
+        _, _, _, _, summary_path, report_path, payload = max(ranked)
         return {
             "summary_path": summary_path,
             "report_path": report_path,

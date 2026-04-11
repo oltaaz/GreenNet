@@ -12,6 +12,7 @@ export type RunSummary = {
   started_at?: string | null;
   policy?: PolicyType | null;
   scenario?: string | null;
+  matrix_id?: string | null;
   seed?: number | null;
   topology_seed?: number | null;
   max_steps?: number | null;

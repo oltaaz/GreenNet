@@ -99,6 +99,7 @@ export default function RunControls({
                 </option>
               ))}
             </select>
+            <small className="input-help">Official reviewer-safe runs are listed first. Historical/internal runs are labeled as Other.</small>
           </label>
         ) : null}
 

@@ -186,6 +186,7 @@ function normalizeRun(row: unknown): RunSummary {
     started_at: (item.started_at as string | null | undefined) ?? null,
     policy: normalizePolicy(item.policy),
     scenario: (item.scenario as string | null | undefined) ?? null,
+    matrix_id: (item.matrix_id as string | null | undefined) ?? null,
     seed: item.seed == null ? null : toNumber(item.seed, 0),
     topology_seed: item.topology_seed == null ? null : toNumber(item.topology_seed, 0),
     max_steps: item.max_steps == null ? null : toNumber(item.max_steps, 0),

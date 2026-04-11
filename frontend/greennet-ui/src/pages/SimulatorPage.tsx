@@ -12,6 +12,7 @@ import {
   latestRunByPolicy,
   linkStateFromRatio,
   normalizePerStep,
+  selectTopRuns,
   timelineFromRows,
 } from "../lib/data";
 import type { RunSummary, StepState, TopologyData } from "../lib/types";
@@ -45,6 +46,7 @@ export default function SimulatorPage() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [topologyFallbackNotice, setTopologyFallbackNotice] = useState("");
+  const visibleRuns = useMemo(() => selectTopRuns(runs, 20), [runs]);
 
   useEffect(() => {
     let alive = true;
@@ -292,12 +294,13 @@ export default function SimulatorPage() {
           <label>
             Run
             <select value={selectedRunId} onChange={(event) => setSelectedRunId(event.target.value)}>
-              {runs.map((run) => (
+              {visibleRuns.map((run) => (
                 <option key={run.run_id} value={run.run_id}>
                   {formatRunOptionLabel(run)}
                 </option>
               ))}
             </select>
+            <small className="input-help">Official reviewer-safe runs are listed first. Other entries are retained only for fallback/demo use.</small>
           </label>
 
           <div className="button-row">

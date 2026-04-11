@@ -264,6 +264,8 @@ export default function ComparePage() {
   }, [finalReport]);
 
   const backendOnline = backendStatus === "online";
+  const canonicalEvidence =
+    finalReport?.artifact?.summary_path?.includes("artifacts/final_pipeline/official_acceptance_v1/") ?? false;
 
   const headline = useMemo(() => {
     if (!bestAiOverall || !bestBaselineOverall) {
@@ -316,6 +318,12 @@ export default function ComparePage() {
             <div className="card-heading">
               <p>Final Comparison</p>
               <h3>{headline ?? "Best AI outcome"}</h3>
+            </div>
+            <div className="status-badge-row">
+              <StatusBadge
+                label={canonicalEvidence ? "Canonical Official Acceptance Evidence" : "Non-canonical Reporting Artifact"}
+                tone={canonicalEvidence ? "success" : "warning"}
+              />
             </div>
             <p className="report-lead">
               {finalReport.source?.selected_run_count ?? overallRows.reduce((sum, row) => sum + (row.run_count ?? 0), 0)} runs

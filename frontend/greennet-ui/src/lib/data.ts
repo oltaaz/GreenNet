@@ -27,13 +27,6 @@ export function edgeId(source: string, target: string): string {
   return source < target ? `${source}__${target}` : `${target}__${source}`;
 }
 
-function capitalize(value: string): string {
-  if (!value) {
-    return "";
-  }
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
 function toNumber(value: unknown, fallback = 0): number {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -307,7 +300,101 @@ export function latestRunByPolicy(runs: RunSummary[], policy: string): RunSummar
   if (!filtered.length) {
     return null;
   }
-  return filtered[0];
+
+  const scenarioRank = (scenario: string | null | undefined): number => {
+    switch ((scenario ?? "").toLowerCase()) {
+      case "normal":
+        return 0;
+      case "hotspot":
+        return 1;
+      case "burst":
+        return 2;
+      case "diurnal":
+        return 3;
+      case "flash_crowd":
+        return 4;
+      case "custom":
+        return 5;
+      default:
+        return 6;
+    }
+  };
+
+  return [...filtered].sort((left, right) => {
+    const leftOfficial = left.tag === "official_acceptance_v1" || left.matrix_id === "official_acceptance_v1";
+    const rightOfficial = right.tag === "official_acceptance_v1" || right.matrix_id === "official_acceptance_v1";
+    if (leftOfficial !== rightOfficial) {
+      return leftOfficial ? -1 : 1;
+    }
+
+    const scenarioDelta = scenarioRank(left.scenario) - scenarioRank(right.scenario);
+    if (scenarioDelta !== 0) {
+      return scenarioDelta;
+    }
+
+    const leftStarted = Date.parse(left.started_at ?? "") || 0;
+    const rightStarted = Date.parse(right.started_at ?? "") || 0;
+    return rightStarted - leftStarted;
+  })[0];
+}
+
+function runScenarioRank(run: RunSummary): number {
+  switch ((run.scenario ?? "").trim().toLowerCase()) {
+    case "normal":
+      return 0;
+    case "hotspot":
+      return 1;
+    case "burst":
+      return 2;
+    case "diurnal":
+      return 3;
+    case "flash_crowd":
+      return 4;
+    case "custom":
+      return 5;
+    default:
+      return 6;
+  }
+}
+
+function runPriorityScore(run: RunSummary): number {
+  let score = 0;
+  if (run.tag === "official_acceptance_v1" || run.matrix_id === "official_acceptance_v1") {
+    score += 100;
+  }
+  if ((run.source ?? "").trim().toLowerCase() === "results") {
+    score += 10;
+  }
+  score -= runScenarioRank(run);
+  return score;
+}
+
+export function isCanonicalOfficialRun(run: RunSummary): boolean {
+  return run.tag === "official_acceptance_v1" || run.matrix_id === "official_acceptance_v1";
+}
+
+export function selectTopRuns(runs: RunSummary[], limit = 20): RunSummary[] {
+  const ranked = [...runs]
+    .sort((left, right) => {
+      const scoreDelta = runPriorityScore(right) - runPriorityScore(left);
+      if (scoreDelta !== 0) {
+        return scoreDelta;
+      }
+
+      const leftStarted = Date.parse(left.started_at ?? "") || 0;
+      const rightStarted = Date.parse(right.started_at ?? "") || 0;
+      return rightStarted - leftStarted;
+    });
+
+  const official = ranked.filter(isCanonicalOfficialRun);
+  const other = ranked.filter((run) => !isCanonicalOfficialRun(run));
+
+  if (official.length >= limit) {
+    return official.slice(0, limit);
+  }
+
+  const otherBudget = official.length > 0 ? Math.min(4, limit - official.length) : limit;
+  return [...official.slice(0, limit), ...other.slice(0, otherBudget)].slice(0, limit);
 }
 
 function radialLayout(nodeCount: number): Array<{ x: number; y: number }> {
@@ -476,26 +563,24 @@ export function formatPolicyLabel(policy: string): string {
 }
 
 export function formatRunOptionLabel(run: RunSummary): string {
-  const parts = [formatPolicyLabel(inferPolicy(run))];
+  const parts = [isCanonicalOfficialRun(run) ? "Official" : "Other", formatPolicyLabel(inferPolicy(run))];
   const scenario = typeof run.scenario === "string" ? run.scenario.trim().toLowerCase() : "";
   const seed = run.seed ?? run.topology_seed;
   const tag = typeof run.tag === "string" ? run.tag.trim() : "";
-  const source = typeof run.source === "string" ? run.source.trim().toLowerCase() : "";
+  const matrixId = typeof run.matrix_id === "string" ? run.matrix_id.trim() : "";
 
   if (scenario) {
-    parts.push(capitalize(scenario));
+    parts.push(formatScenarioLabel(scenario));
   }
   if (seed != null) {
     parts.push(`seed ${seed}`);
   }
-  if (tag) {
-    parts.push(`tag ${tag}`);
+  if (!isCanonicalOfficialRun(run) && tag && tag !== "dashboard") {
+    parts.push(tag);
   }
-  if (source) {
-    parts.push(source);
+  if (!isCanonicalOfficialRun(run) && matrixId && matrixId !== "official_acceptance_v1") {
+    parts.push(matrixId);
   }
-
-  parts.push(run.run_id);
   return parts.join(" | ");
 }
 

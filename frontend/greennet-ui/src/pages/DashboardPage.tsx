@@ -30,6 +30,7 @@ import {
   latestRunByPolicy,
   linkStateFromRatio,
   normalizePerStep,
+  selectTopRuns,
   selectQosAcceptanceMissing,
   selectQosAcceptanceStatus,
   selectStabilityMissing,
@@ -88,6 +89,7 @@ export default function DashboardPage() {
   const [seed, setSeed] = useState("");
   const [steps, setSteps] = useState("");
   const [topologyStepIndex, setTopologyStepIndex] = useState(0);
+  const visibleRuns = useMemo(() => selectTopRuns(runs, 20), [runs]);
 
   useEffect(() => {
     let alive = true;
@@ -106,11 +108,12 @@ export default function DashboardPage() {
         setRuns(catalog.runs);
         setRunCatalogSource(catalog.source);
         setSelectedRunId((currentRunId) => {
+          const preferredRun = latestRunByPolicy(catalog.runs, "ppo") ?? catalog.runs[0] ?? null;
           if (!currentRunId && catalog.runs.length > 0) {
-            return catalog.runs[0].run_id;
+            return preferredRun?.run_id ?? "";
           }
           if (currentRunId && !catalog.runs.find((run) => run.run_id === currentRunId)) {
-            return catalog.runs[0]?.run_id ?? "";
+            return preferredRun?.run_id ?? "";
           }
           return currentRunId;
         });
@@ -574,7 +577,7 @@ export default function DashboardPage() {
             backendOnline={backendOnline}
             backendMessage={backendMessage}
             runId={selectedRunId}
-            runs={runs}
+            runs={visibleRuns}
             onPolicyChange={setPolicy}
             onScenarioChange={setScenario}
             onSeedChange={setSeed}

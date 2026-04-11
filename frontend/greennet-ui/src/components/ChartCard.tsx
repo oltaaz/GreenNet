@@ -38,7 +38,7 @@ export default function ChartCard({
         <h3>{title}</h3>
       </div>
       <div className="chart-wrap">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="99%" height={210}>
           <LineChart data={data} margin={{ top: 10, right: 12, left: 6, bottom: 8 }}>
             <CartesianGrid stroke="rgba(169, 189, 222, 0.16)" vertical={false} />
             <XAxis dataKey="t" stroke="rgba(169,189,222,0.8)" fontSize={12} />

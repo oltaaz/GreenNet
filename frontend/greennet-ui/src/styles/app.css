@@ -789,6 +789,9 @@
 .chart-wrap {
   margin-top: 8px;
   height: 210px;
+  min-height: 210px;
+  min-width: 0;
+  width: 100%;
 }
 
 .control-card {
@@ -847,6 +850,12 @@ label {
   gap: 5px;
   color: var(--text);
   font-size: 0.84rem;
+}
+
+.input-help {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
 }
 
 select,
@@ -1313,5 +1322,4 @@ th {
     display: none;
   }
 }
-
 
