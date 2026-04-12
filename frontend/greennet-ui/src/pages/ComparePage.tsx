@@ -21,7 +21,7 @@ import {
   formatScenarioLabel,
   formatSignedValue,
   formatStatusLabel,
-  inferPolicy,
+  latestMatchingRunByPolicy,
   normalizePerStep,
   normalizePolicy,
   statusTone,
@@ -134,12 +134,18 @@ export default function ComparePage() {
 
   async function resolveRunId(policy: PolicyKey): Promise<string | null> {
     const canonicalPolicy = normalizePolicy(policy);
-    const existingRun = runs.find(
-      (run) =>
-        inferPolicy(run) === canonicalPolicy &&
-        (run.scenario ?? "").toLowerCase() === scenario.toLowerCase() &&
-        (run.seed ?? run.topology_seed) === seed,
-    );
+    const existingRun =
+      latestMatchingRunByPolicy(runs, canonicalPolicy, {
+        scenario,
+        seed,
+        max_steps: steps,
+        tag: "dashboard",
+      }) ||
+      latestMatchingRunByPolicy(runs, canonicalPolicy, {
+        scenario,
+        seed,
+        max_steps: steps,
+      });
 
     if (existingRun) {
       return existingRun.run_id;

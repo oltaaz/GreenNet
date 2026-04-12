@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 import networkx as nx
 
 from greennet.env import GreenNetEnv
+from greennet.evaluation.official_ppo import canonical_official_ppo_model_path
 from greennet.persistence import get_run_repository, infer_run_source
 from greennet.utils.config import load_env_config_from_run
 
@@ -35,6 +36,7 @@ if (REPO_ROOT / "runs").exists() is False and (REPO_ROOT / "results").exists() i
 RESULTS_DIR = REPO_ROOT / "results"
 RUNS_DIR = REPO_ROOT / "runs"
 LOCKED_ARTIFACTS_DIR = REPO_ROOT / "artifacts" / "locked"
+LOCAL_VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 
 BaseChoice = Literal["results", "runs", "both"]
 GROUP_BY_FIELDS = {"policy", "scenario", "tag", "topology_seed", "deterministic"}
@@ -1232,9 +1234,19 @@ def _scan_run_dirs(base: BaseChoice = "both") -> List[Tuple[str, Path]]:
 
 
 def _find_run_dir(run_id: str, base: BaseChoice = "both") -> Optional[Tuple[str, Path]]:
+    alias_matches: List[Tuple[str, Path]] = []
     for source, run_dir in _scan_run_dirs(base=base):
         if run_dir.name == run_id:
             return source, run_dir
+        meta = load_json(run_dir / "run_meta.json") or {}
+        meta_run_id = str(meta.get("run_id") or "").strip()
+        if meta_run_id == run_id:
+            alias_matches.append((source, run_dir))
+    if len(alias_matches) == 1:
+        return alias_matches[0]
+    if len(alias_matches) > 1:
+        alias_matches.sort(key=lambda item: item[1].name, reverse=True)
+        return alias_matches[0]
     return None
 
 
@@ -1529,12 +1541,14 @@ def run_per_step(
 @app.post("/api/runs/start")
 def start_run(payload: StartRunRequest) -> Dict[str, Any]:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    python_executable = str(LOCAL_VENV_PYTHON) if LOCAL_VENV_PYTHON.exists() else sys.executable
+    normalized_policy = payload.policy.strip().lower()
 
     cmd = [
-        sys.executable,
+        python_executable,
         str(REPO_ROOT / "run_experiment.py"),
         "--policy",
-        payload.policy.strip().lower(),
+        normalized_policy,
         "--scenario",
         payload.scenario.strip().lower(),
         "--seed",
@@ -1547,7 +1561,16 @@ def start_run(payload: StartRunRequest) -> Dict[str, Any]:
         str(RESULTS_DIR),
         "--tag",
         DASHBOARD_RUN_TAG,
+        "--topology-name",
+        "medium",
+        "--topology-seed",
+        str(int(payload.seed)),
     ]
+
+    if normalized_policy == "ppo":
+        fallback_model = canonical_official_ppo_model_path("medium")
+        if fallback_model.exists():
+            cmd.extend(["--model", str(fallback_model)])
 
     try:
         completed = subprocess.run(

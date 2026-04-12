@@ -1,0 +1,478 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - link "Go to GreenNet home" [ref=e6] [cursor=pointer]:
+          - /url: /
+          - img [ref=e8]
+          - generic [ref=e10]:
+            - strong [ref=e11]: GreenNet
+            - generic [ref=e12]: AI-Driven Sustainable Networking
+        - navigation "Primary" [ref=e13]:
+          - generic [ref=e14]: Backend connected
+          - link "Home" [ref=e15] [cursor=pointer]:
+            - /url: /
+          - link "Dashboard" [active] [ref=e16] [cursor=pointer]:
+            - /url: /dashboard
+          - link "Results" [ref=e17] [cursor=pointer]:
+            - /url: /results
+          - link "Simulator" [ref=e18] [cursor=pointer]:
+            - /url: /simulator
+          - link "About" [ref=e19] [cursor=pointer]:
+            - /url: /about
+    - main [ref=e20]:
+      - generic [ref=e417]:
+        - generic [ref=e418]:
+          - generic [ref=e419]:
+            - paragraph [ref=e420]: Current Run Overview
+            - heading "Inspect the selected run with the same energy, QoS, and activity labels used in reporting" [level=1] [ref=e421]
+          - generic [ref=e422]:
+            - generic [ref=e423]: Run
+            - strong [ref=e424]: 20260411_164638__policy-ppo__scenario-normal__seed-42__tag-dashboard
+            - generic [ref=e425]: PPO
+        - generic [ref=e426]:
+          - generic [ref=e427]:
+            - paragraph [ref=e428]: Current Run
+            - heading "Selection details" [level=3] [ref=e429]
+          - generic [ref=e430]:
+            - article [ref=e431]:
+              - generic [ref=e432]: Policy
+              - strong [ref=e433]: PPO
+            - article [ref=e434]:
+              - generic [ref=e435]: Scenario
+              - strong [ref=e436]: Normal
+            - article [ref=e437]:
+              - generic [ref=e438]: Seed
+              - strong [ref=e439]: "42"
+            - article [ref=e440]:
+              - generic [ref=e441]: Topology
+              - strong [ref=e442]: seeded-random
+            - article [ref=e443]:
+              - generic [ref=e444]: Steps
+              - strong [ref=e445]: "300"
+        - generic [ref=e446]:
+          - article [ref=e447]:
+            - paragraph [ref=e448]: Total Energy
+            - generic [ref=e449]:
+              - strong [ref=e450]: "0.015"
+              - generic [ref=e451]: kWh
+          - article [ref=e452]:
+            - paragraph [ref=e453]: Carbon Emissions
+            - generic [ref=e454]:
+              - strong [ref=e455]: "6.081"
+              - generic [ref=e456]: g CO2
+          - article [ref=e457]:
+            - paragraph [ref=e458]: Delivered Traffic
+            - generic [ref=e459]:
+              - strong [ref=e460]: "4337"
+              - generic [ref=e461]: pkts
+          - article [ref=e462]:
+            - paragraph [ref=e463]: Dropped Traffic
+            - generic [ref=e464]:
+              - strong [ref=e465]: "652"
+              - generic [ref=e466]: pkts
+          - article [ref=e467]:
+            - paragraph [ref=e468]: Drop Rate
+            - generic [ref=e469]:
+              - strong [ref=e470]: "13.1"
+              - generic [ref=e471]: "%"
+          - article [ref=e472]:
+            - paragraph [ref=e473]: Average Delay
+            - generic [ref=e474]:
+              - strong [ref=e475]: "1065.5"
+              - generic [ref=e476]: ms
+          - article [ref=e477]:
+            - paragraph [ref=e478]: Path Latency
+            - generic [ref=e479]:
+              - strong [ref=e480]: "9.78"
+              - generic [ref=e481]: ms
+          - article [ref=e482]:
+            - paragraph [ref=e483]: Avg Active Link Ratio
+            - generic [ref=e484]:
+              - strong [ref=e485]: "95.4"
+              - generic [ref=e486]: "%"
+        - generic [ref=e487]:
+          - generic [ref=e488]:
+            - paragraph [ref=e489]: Official Locked Results
+            - heading "Burst and hotspot acceptance bundles" [level=3] [ref=e490]
+          - generic [ref=e491]:
+            - article [ref=e492]:
+              - generic [ref=e493]:
+                - generic [ref=e494]:
+                  - paragraph [ref=e495]: Official Locked Result
+                  - heading "Burst" [level=3] [ref=e496]
+                - generic [ref=e498]: PASS
+              - paragraph [ref=e499]:
+                - text: Locked acceptance bundle
+                - strong [ref=e500]: 20260220_111755_100k_ctrl_cap16
+                - text: with controller-evaluated held-out traffic.
+              - generic [ref=e501]:
+                - generic [ref=e502]: OFF4
+                - generic [ref=e503]: 100 eps
+                - generic [ref=e504]: seeds 10-19
+                - generic [ref=e505]: cap 16
+              - generic [ref=e506]:
+                - generic [ref=e507]:
+                  - generic [ref=e508]: Delivered Traffic
+                  - strong [ref=e509]: "33939"
+                  - generic [ref=e510]: pkts
+                - generic [ref=e511]:
+                  - generic [ref=e512]: Dropped Traffic
+                  - strong [ref=e513]: "2377"
+                  - generic [ref=e514]: pkts
+                - generic [ref=e515]:
+                  - generic [ref=e516]: Drop Rate
+                  - strong [ref=e517]: "6.5"
+                  - generic [ref=e518]: "%"
+                - generic [ref=e519]:
+                  - generic [ref=e520]: Total Energy
+                  - strong [ref=e521]: "1.665"
+                  - generic [ref=e522]: kWh
+                - generic [ref=e523]:
+                  - generic [ref=e524]: Dropped vs All-On
+                  - strong [ref=e525]: "-269"
+                  - generic [ref=e526]: pkts
+                - generic [ref=e527]:
+                  - generic [ref=e528]: Energy vs All-On
+                  - strong [ref=e529]: "0.109"
+                  - generic [ref=e530]: kWh
+              - paragraph [ref=e531]: "pass: offstart(dropped+energy). Reward Delta vs All-On 311.13. Scenario: burst Model artifact: artifacts/locked/normal/20260220_111755_100k/model.zip Eval-time controller applied: --eval-max-on-edges 16 Seeds: 10..19 Episodes: 100 This lock contains eval logs for off0/off2/off4 and scenario CSV summary."
+            - article [ref=e532]:
+              - generic [ref=e533]:
+                - generic [ref=e534]:
+                  - paragraph [ref=e535]: Official Locked Result
+                  - heading "Hotspot" [level=3] [ref=e536]
+                - generic [ref=e538]: PASS
+              - paragraph [ref=e539]:
+                - text: Locked acceptance bundle
+                - strong [ref=e540]: 20260220_111755_100k_ctrl_cap16
+                - text: with controller-evaluated held-out traffic.
+              - generic [ref=e541]:
+                - generic [ref=e542]: OFF4
+                - generic [ref=e543]: 100 eps
+                - generic [ref=e544]: seeds 10-19
+                - generic [ref=e545]: cap 16
+              - generic [ref=e546]:
+                - generic [ref=e547]:
+                  - generic [ref=e548]: Delivered Traffic
+                  - strong [ref=e549]: "13496"
+                  - generic [ref=e550]: pkts
+                - generic [ref=e551]:
+                  - generic [ref=e552]: Dropped Traffic
+                  - strong [ref=e553]: "1076"
+                  - generic [ref=e554]: pkts
+                - generic [ref=e555]:
+                  - generic [ref=e556]: Drop Rate
+                  - strong [ref=e557]: "7.4"
+                  - generic [ref=e558]: "%"
+                - generic [ref=e559]:
+                  - generic [ref=e560]: Total Energy
+                  - strong [ref=e561]: "1.665"
+                  - generic [ref=e562]: kWh
+                - generic [ref=e563]:
+                  - generic [ref=e564]: Dropped vs All-On
+                  - strong [ref=e565]: "-20"
+                  - generic [ref=e566]: pkts
+                - generic [ref=e567]:
+                  - generic [ref=e568]: Energy vs All-On
+                  - strong [ref=e569]: "0.109"
+                  - generic [ref=e570]: kWh
+              - paragraph [ref=e571]: "pass: offstart(dropped+energy). Reward Delta vs All-On 13.26. Scenario: hotspot Model artifact: artifacts/locked/normal/20260220_111755_100k/model.zip Eval-time controller applied: --eval-max-on-edges 16 Seeds: 10..19 Episodes: 100 This lock contains eval logs for off0/off2/off4 and scenario CSV summary."
+        - generic [ref=e572]:
+          - generic [ref=e573]:
+            - generic [ref=e574]:
+              - generic [ref=e575]:
+                - paragraph [ref=e576]: kWh per step
+                - heading "Energy by Step" [level=3] [ref=e577]
+              - generic [ref=e580]:
+                - list [ref=e582]:
+                  - listitem [ref=e583]:
+                    - img "All-On (latest) legend icon" [ref=e584]
+                    - text: All-On (latest)
+                  - listitem [ref=e586]:
+                    - img "Heuristic (latest) legend icon" [ref=e587]
+                    - text: Heuristic (latest)
+                  - listitem [ref=e589]:
+                    - img "PPO (latest) legend icon" [ref=e590]
+                    - text: PPO (latest)
+                  - listitem [ref=e592]:
+                    - img "Selected Run legend icon" [ref=e593]
+                    - text: Selected Run
+                - application [ref=e595]:
+                  - generic [ref=e615]:
+                    - generic [ref=e616]:
+                      - generic [ref=e618]: "1"
+                      - generic [ref=e620]: "7"
+                      - generic [ref=e622]: "15"
+                      - generic [ref=e624]: "24"
+                      - generic [ref=e626]: "33"
+                      - generic [ref=e628]: "42"
+                      - generic [ref=e630]: "51"
+                      - generic [ref=e632]: "60"
+                      - generic [ref=e634]: "69"
+                      - generic [ref=e636]: "78"
+                      - generic [ref=e638]: "87"
+                      - generic [ref=e640]: "96"
+                      - generic [ref=e642]: "107"
+                      - generic [ref=e644]: "119"
+                      - generic [ref=e646]: "131"
+                      - generic [ref=e648]: "144"
+                      - generic [ref=e650]: "157"
+                      - generic [ref=e652]: "170"
+                      - generic [ref=e654]: "183"
+                      - generic [ref=e656]: "196"
+                      - generic [ref=e658]: "209"
+                      - generic [ref=e660]: "222"
+                      - generic [ref=e662]: "235"
+                      - generic [ref=e664]: "248"
+                      - generic [ref=e666]: "261"
+                      - generic [ref=e668]: "274"
+                      - generic [ref=e670]: "287"
+                      - generic [ref=e672]: "300"
+                    - generic [ref=e673]:
+                      - generic [ref=e675]: "0"
+                      - generic [ref=e677]: "0.000025"
+                      - generic [ref=e679]: "0.00005"
+                      - generic [ref=e681]: "0.000075"
+                      - generic [ref=e683]: "0.0001"
+            - generic [ref=e684]:
+              - generic [ref=e685]:
+                - paragraph [ref=e686]: routing latency in ms
+                - heading "Path Latency by Step" [level=3] [ref=e687]
+              - generic [ref=e690]:
+                - list [ref=e692]:
+                  - listitem [ref=e693]:
+                    - img "Path Latency legend icon" [ref=e694]
+                    - text: Path Latency
+                - application [ref=e696]:
+                  - generic [ref=e710]:
+                    - generic [ref=e711]:
+                      - generic [ref=e713]: "1"
+                      - generic [ref=e715]: "7"
+                      - generic [ref=e717]: "15"
+                      - generic [ref=e719]: "24"
+                      - generic [ref=e721]: "33"
+                      - generic [ref=e723]: "42"
+                      - generic [ref=e725]: "51"
+                      - generic [ref=e727]: "60"
+                      - generic [ref=e729]: "69"
+                      - generic [ref=e731]: "78"
+                      - generic [ref=e733]: "87"
+                      - generic [ref=e735]: "96"
+                      - generic [ref=e737]: "107"
+                      - generic [ref=e739]: "119"
+                      - generic [ref=e741]: "131"
+                      - generic [ref=e743]: "144"
+                      - generic [ref=e745]: "157"
+                      - generic [ref=e747]: "170"
+                      - generic [ref=e749]: "183"
+                      - generic [ref=e751]: "196"
+                      - generic [ref=e753]: "209"
+                      - generic [ref=e755]: "222"
+                      - generic [ref=e757]: "235"
+                      - generic [ref=e759]: "248"
+                      - generic [ref=e761]: "261"
+                      - generic [ref=e763]: "274"
+                      - generic [ref=e765]: "287"
+                      - generic [ref=e767]: "300"
+                    - generic [ref=e768]:
+                      - generic [ref=e770]: "0"
+                      - generic [ref=e772]: "7"
+                      - generic [ref=e774]: "14"
+                      - generic [ref=e776]: "21"
+                      - generic [ref=e778]: "28"
+            - generic [ref=e779]:
+              - generic [ref=e780]:
+                - paragraph [ref=e781]: packets per step
+                - heading "Dropped Traffic by Step" [level=3] [ref=e782]
+              - generic [ref=e785]:
+                - list [ref=e787]:
+                  - listitem [ref=e788]:
+                    - img "Dropped legend icon" [ref=e789]
+                    - text: Dropped
+                - application [ref=e791]:
+                  - generic [ref=e805]:
+                    - generic [ref=e806]:
+                      - generic [ref=e808]: "1"
+                      - generic [ref=e810]: "7"
+                      - generic [ref=e812]: "15"
+                      - generic [ref=e814]: "24"
+                      - generic [ref=e816]: "33"
+                      - generic [ref=e818]: "42"
+                      - generic [ref=e820]: "51"
+                      - generic [ref=e822]: "60"
+                      - generic [ref=e824]: "69"
+                      - generic [ref=e826]: "78"
+                      - generic [ref=e828]: "87"
+                      - generic [ref=e830]: "96"
+                      - generic [ref=e832]: "107"
+                      - generic [ref=e834]: "119"
+                      - generic [ref=e836]: "131"
+                      - generic [ref=e838]: "144"
+                      - generic [ref=e840]: "157"
+                      - generic [ref=e842]: "170"
+                      - generic [ref=e844]: "183"
+                      - generic [ref=e846]: "196"
+                      - generic [ref=e848]: "209"
+                      - generic [ref=e850]: "222"
+                      - generic [ref=e852]: "235"
+                      - generic [ref=e854]: "248"
+                      - generic [ref=e856]: "261"
+                      - generic [ref=e858]: "274"
+                      - generic [ref=e860]: "287"
+                      - generic [ref=e862]: "300"
+                    - generic [ref=e863]:
+                      - generic [ref=e865]: "0"
+                      - generic [ref=e867]: "9"
+                      - generic [ref=e869]: "18"
+                      - generic [ref=e871]: "27"
+                      - generic [ref=e873]: "36"
+            - generic [ref=e874]:
+              - generic [ref=e875]:
+                - paragraph [ref=e876]: average share of controllable links that are active
+                - heading "Active Link Ratio by Step" [level=3] [ref=e877]
+              - generic [ref=e880]:
+                - list [ref=e882]:
+                  - listitem [ref=e883]:
+                    - img "Active Link Ratio legend icon" [ref=e884]
+                    - text: Active Link Ratio
+                - application [ref=e886]:
+                  - generic [ref=e900]:
+                    - generic [ref=e901]:
+                      - generic [ref=e903]: "1"
+                      - generic [ref=e905]: "7"
+                      - generic [ref=e907]: "15"
+                      - generic [ref=e909]: "24"
+                      - generic [ref=e911]: "33"
+                      - generic [ref=e913]: "42"
+                      - generic [ref=e915]: "51"
+                      - generic [ref=e917]: "60"
+                      - generic [ref=e919]: "69"
+                      - generic [ref=e921]: "78"
+                      - generic [ref=e923]: "87"
+                      - generic [ref=e925]: "96"
+                      - generic [ref=e927]: "107"
+                      - generic [ref=e929]: "119"
+                      - generic [ref=e931]: "131"
+                      - generic [ref=e933]: "144"
+                      - generic [ref=e935]: "157"
+                      - generic [ref=e937]: "170"
+                      - generic [ref=e939]: "183"
+                      - generic [ref=e941]: "196"
+                      - generic [ref=e943]: "209"
+                      - generic [ref=e945]: "222"
+                      - generic [ref=e947]: "235"
+                      - generic [ref=e949]: "248"
+                      - generic [ref=e951]: "261"
+                      - generic [ref=e953]: "274"
+                      - generic [ref=e955]: "287"
+                      - generic [ref=e957]: "300"
+                    - generic [ref=e958]:
+                      - generic [ref=e960]: 0%
+                      - generic [ref=e962]: 25%
+                      - generic [ref=e964]: 50%
+                      - generic [ref=e966]: 75%
+                      - generic [ref=e968]: 100%
+          - complementary [ref=e969]:
+            - generic [ref=e970]:
+              - generic [ref=e971]:
+                - paragraph [ref=e972]: Run Controls
+                - heading "Configure Simulation" [level=3] [ref=e973]
+              - generic [ref=e974]:
+                - generic [ref=e975]:
+                  - text: Existing Run
+                  - combobox "Existing Run" [ref=e976]:
+                    - option "PPO | Normal | seed 42 | 300 steps | tag dashboard | results | 20260411_164638__policy-ppo__scenario-normal__seed-42__tag-dashboard" [selected]
+                    - option "PPO | Normal | seed 9 | 120 steps | tag dashboard | results | 20260411_164015__policy-ppo__scenario-normal__seed-9__tag-dashboard"
+                    - option "Heuristic | Normal | seed 9 | 120 steps | tag dashboard | results | 20260411_164013__policy-heuristic__scenario-normal__seed-9__tag-dashboard"
+                    - option "All-On | Normal | seed 9 | 120 steps | tag dashboard | results | 20260411_164012__policy-all_on__scenario-normal__seed-9__tag-dashboard"
+                    - option "PPO | Normal | seed 7 | 120 steps | tag dashboard | results | 20260411_163713__policy-ppo__scenario-normal__seed-7__tag-dashboard"
+                    - option "Heuristic | Normal | seed 7 | 120 steps | tag dashboard | results | 20260411_163711__policy-heuristic__scenario-normal__seed-7__tag-dashboard"
+                    - option "All-On | Normal | seed 7 | 120 steps | tag dashboard | results | 20260411_163710__policy-all_on__scenario-normal__seed-7__tag-dashboard"
+                    - option "Heuristic | Normal | seed 1 | 2000 steps | tag dashboard | results | 20260411_155328__policy-heuristic__scenario-normal__seed-1__tag-dashboard"
+                    - option "All-On | Normal | seed 1 | 2000 steps | tag dashboard | results | 20260411_155315__policy-all_on__scenario-normal__seed-1__tag-dashboard"
+                    - option "PPO | Normal | seed 1 | 2000 steps | tag dashboard | results | 20260411_153223__policy-ppo__scenario-normal__seed-1__tag-dashboard"
+                    - option "PPO | Burst | seed 2 | 2000 steps | tag dashboard | results | 20260411_153147__policy-ppo__scenario-burst__seed-2__tag-dashboard"
+                    - option "PPO | Normal | seed 2 | 2000 steps | tag dashboard | results | 20260411_153114__policy-ppo__scenario-normal__seed-2__tag-dashboard"
+                    - option "PPO | Normal | seed 2 | 2000 steps | tag dashboard | results | 20260411_153104__policy-ppo__scenario-normal__seed-2__tag-dashboard"
+                    - option "All-On | Normal | seed 2 | 2000 steps | tag dashboard | results | 20260411_153033__policy-all_on__scenario-normal__seed-2__tag-dashboard"
+                    - option "PPO | Normal | seed 2 | 2000 steps | tag dashboard | results | 20260411_153019__policy-ppo__scenario-normal__seed-2__tag-dashboard"
+                    - option "PPO | Normal | seed 5 | 2000 steps | tag dashboard | results | 20260411_152454__policy-ppo__scenario-normal__seed-5__tag-dashboard"
+                    - option "All-On | Normal | seed 5 | 2000 steps | tag dashboard | results | 20260411_152355__policy-all_on__scenario-normal__seed-5__tag-dashboard"
+                    - option "PPO | Normal | seed 5 | 2000 steps | tag dashboard | results | 20260411_152334__policy-ppo__scenario-normal__seed-5__tag-dashboard"
+                    - option "PPO | Normal | seed 2 | 1000 steps | tag dashboard | results | 20260411_152318__policy-ppo__scenario-normal__seed-2__tag-dashboard"
+                    - option "PPO | Normal | seed 2 | 1000 steps | tag dashboard | results | 20260411_152210__policy-ppo__scenario-normal__seed-2__tag-dashboard"
+                    - option "Heuristic | Normal | seed 42 | 300 steps | tag dashboard | results | 20260411_151909__policy-heuristic__scenario-normal__seed-42__tag-dashboard"
+                    - option "Heuristic | Normal | seed 42 | 300 steps | tag dashboard | results | 20260411_141828__policy-heuristic__scenario-normal__seed-42__tag-dashboard"
+                    - option "Heuristic | Normal | seed 42 | 300 steps | tag dashboard | results | 20260411_141529__policy-heuristic__scenario-normal__seed-42__tag-dashboard"
+                    - option "Heuristic | Burst | seed 10 | 300 steps | tag dashboard | results | 20260411_124913__policy-heuristic__scenario-burst__seed-10__tag-dashboard"
+                    - option "All-On | Burst | seed 10 | 300 steps | tag dashboard | results | 20260411_124913__policy-all_on__scenario-burst__seed-10__tag-dashboard"
+                    - option "All-On | Burst | seed 42 | 300 steps | tag dashboard | results | 20260411_124900__policy-all_on__scenario-burst__seed-42__tag-dashboard"
+                    - option "Heuristic | Burst | seed 42 | 300 steps | tag dashboard | results | 20260411_124900__policy-heuristic__scenario-burst__seed-42__tag-dashboard"
+                    - option "PPO | Normal | seed 42 | 300 steps | tag dashboard | results | 20260411_122745__policy-ppo__scenario-normal__seed-42__tag-dashboard"
+                    - option "Heuristic | Normal | seed 42 | 300 steps | tag dashboard | results | 20260411_111710__policy-heuristic__scenario-normal__seed-42__tag-dashboard"
+                    - option "All-On | Normal | seed 42 | 300 steps | tag dashboard | results | 20260411_111710__policy-all_on__scenario-normal__seed-42__tag-dashboard"
+                    - option "unknown | runs | 20260411_171802"
+                - generic [ref=e977]:
+                  - text: Policy
+                  - combobox "Policy" [ref=e978]:
+                    - option "All-On"
+                    - option "Heuristic"
+                    - option "PPO" [selected]
+                - generic [ref=e979]:
+                  - text: Traffic Scenario
+                  - combobox "Traffic Scenario" [ref=e980]:
+                    - option "Normal" [selected]
+                    - option "Burst"
+                    - option "Hotspot"
+                - generic [ref=e981]:
+                  - text: Seed
+                  - textbox "Seed" [ref=e982]: "42"
+                - generic [ref=e983]:
+                  - text: Steps
+                  - textbox "Steps" [ref=e984]: "300"
+              - generic [ref=e985]:
+                - button "Run Simulation" [ref=e986] [cursor=pointer]
+                - button "Reset" [ref=e987] [cursor=pointer]
+            - generic [ref=e988]:
+              - generic [ref=e989]:
+                - paragraph [ref=e990]: Topology Step
+                - heading "t = 300 | active 100.0%" [level=3] [ref=e991]
+              - slider [ref=e992]: "299"
+            - generic [ref=e993]:
+              - generic [ref=e994]:
+                - paragraph [ref=e995]: Topology
+                - heading "Network Topology" [level=3] [ref=e996]
+              - paragraph [ref=e997]: Simulated packet flow and real link-state playback. Switching links can trigger reroutes or drops.
+              - generic [ref=e998]:
+                - article [ref=e999]:
+                  - generic [ref=e1000]: ON Links
+                  - strong [ref=e1001]: "10"
+                - article [ref=e1002]:
+                  - generic [ref=e1003]: OFF Links
+                  - strong [ref=e1004]: "0"
+                - article [ref=e1005]:
+                  - generic [ref=e1006]: Switches
+                  - strong [ref=e1007]: "0"
+                - article [ref=e1008]:
+                  - generic [ref=e1009]: Step Energy
+                  - strong [ref=e1010]: 0.000 kWh
+                  - generic [ref=e1011]: "+0.000"
+                - article [ref=e1012]:
+                  - generic [ref=e1013]: Link Power (visual est.)
+                  - strong [ref=e1014]: 299.5 W
+              - img "Network topology graph" [ref=e1015]:
+                - generic [ref=e1041]: "0"
+                - generic [ref=e1045]: "1"
+                - generic [ref=e1049]: "2"
+                - generic [ref=e1053]: "3"
+                - generic [ref=e1057]: "4"
+                - generic [ref=e1061]: "5"
+                - generic [ref=e1065]: "6"
+                - generic [ref=e1069]: "7"
+              - generic [ref=e1070]:
+                - generic [ref=e1071]: ON link
+                - generic [ref=e1073]: OFF link
+                - generic [ref=e1075]: Rerouted packet
+                - generic [ref=e1077]: Dropped packet
+  - generic [ref=e1079]: 0%

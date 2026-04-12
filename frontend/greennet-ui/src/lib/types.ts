@@ -7,6 +7,12 @@ export type RunFileFlags = {
   env_config: boolean;
 };
 
+export type BackendHealth = {
+  status: string;
+  apiBaseUrl: string;
+  expectedBackendUrl: string;
+};
+
 export type RunSummary = {
   run_id: string;
   started_at?: string | null;
@@ -14,6 +20,7 @@ export type RunSummary = {
   scenario?: string | null;
   seed?: number | null;
   topology_seed?: number | null;
+  topology_name?: string | null;
   max_steps?: number | null;
   tag?: string | null;
   source?: string | null;

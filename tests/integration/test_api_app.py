@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -110,6 +111,71 @@ def test_missing_run_returns_404(api_client: TestClient) -> None:
     response = api_client.get("/api/runs/does-not-exist/summary", params={"base": "results"})
 
     assert response.status_code == 404
+
+
+def test_start_run_pins_dashboard_runs_to_medium_topology(
+    api_client: TestClient,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    run_dir = tmp_path / "results" / "fake-run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    def fake_run(cmd, cwd, capture_output, text, timeout):
+        captured["cmd"] = list(cmd)
+        captured["cwd"] = cwd
+        captured["timeout"] = timeout
+        return SimpleNamespace(returncode=0, stdout=f"[run_experiment] results saved to {run_dir}\n", stderr="")
+
+    monkeypatch.setattr(api_app.subprocess, "run", fake_run)
+
+    response = api_client.post(
+        "/api/runs/start",
+        json={"policy": "all_on", "scenario": "normal", "seed": 1, "steps": 2000},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["run_id"] == "fake-run"
+    cmd = captured["cmd"]
+    assert "--topology-name" in cmd
+    topology_idx = cmd.index("--topology-name")
+    assert cmd[topology_idx + 1] == "medium"
+    assert "--topology-seed" in cmd
+    topology_seed_idx = cmd.index("--topology-seed")
+    assert cmd[topology_seed_idx + 1] == "1"
+
+
+def test_start_run_pins_dashboard_ppo_runs_to_requested_topology_seed(
+    api_client: TestClient,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    run_dir = tmp_path / "results" / "fake-ppo-run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    def fake_run(cmd, cwd, capture_output, text, timeout):
+        captured["cmd"] = list(cmd)
+        captured["cwd"] = cwd
+        captured["timeout"] = timeout
+        return SimpleNamespace(returncode=0, stdout=f"[run_experiment] results saved to {run_dir}\n", stderr="")
+
+    monkeypatch.setattr(api_app.subprocess, "run", fake_run)
+
+    response = api_client.post(
+        "/api/runs/start",
+        json={"policy": "ppo", "scenario": "normal", "seed": 7, "steps": 120},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["run_id"] == "fake-ppo-run"
+    cmd = captured["cmd"]
+    assert "--topology-name" in cmd
+    assert cmd[cmd.index("--topology-name") + 1] == "medium"
+    assert "--topology-seed" in cmd
+    assert cmd[cmd.index("--topology-seed") + 1] == "7"
+    assert "--model" in cmd
 
 
 def test_final_evaluation_endpoint_returns_latest_valid_artifact(

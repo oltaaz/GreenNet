@@ -169,7 +169,7 @@ export function kpiFromOverall(summary: RunOverallSummary | null): KpiMetric[] {
       unit: "ms",
       digits: 2,
     },
-    { label: "Active Links", value: toNumber(summary.active_ratio_mean, 0) * 100, unit: "%", digits: 1 },
+    { label: "Avg Active Link Ratio", value: toNumber(summary.active_ratio_mean, 0) * 100, unit: "%", digits: 1 },
   ];
 }
 
@@ -227,6 +227,52 @@ export function latestRunByPolicy(runs: RunSummary[], policy: string): RunSummar
     return null;
   }
   return filtered[0];
+}
+
+type RunMatchCriteria = {
+  scenario?: string | null;
+  seed?: number | null;
+  max_steps?: number | null;
+  topology_name?: string | null;
+  topology_seed?: number | null;
+  tag?: string | null;
+};
+
+function normalizedText(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+export function latestMatchingRunByPolicy(
+  runs: RunSummary[],
+  policy: string,
+  criteria: RunMatchCriteria = {},
+): RunSummary | null {
+  const expectedPolicy = normalizePolicy(policy);
+  const filtered = runs.filter((run) => {
+    if (inferPolicy(run) !== expectedPolicy) {
+      return false;
+    }
+    if (criteria.scenario && normalizedText(run.scenario) !== normalizedText(criteria.scenario)) {
+      return false;
+    }
+    if (criteria.seed != null && (run.seed ?? null) !== criteria.seed) {
+      return false;
+    }
+    if (criteria.max_steps != null && (run.max_steps ?? null) !== criteria.max_steps) {
+      return false;
+    }
+    if (criteria.topology_name && normalizedText(run.topology_name) !== normalizedText(criteria.topology_name)) {
+      return false;
+    }
+    if (criteria.topology_seed != null && (run.topology_seed ?? null) !== criteria.topology_seed) {
+      return false;
+    }
+    if (criteria.tag && normalizedText(run.tag) !== normalizedText(criteria.tag)) {
+      return false;
+    }
+    return true;
+  });
+  return filtered[0] ?? null;
 }
 
 function radialLayout(nodeCount: number): Array<{ x: number; y: number }> {
@@ -398,6 +444,7 @@ export function formatRunOptionLabel(run: RunSummary): string {
   const parts = [formatPolicyLabel(inferPolicy(run))];
   const scenario = typeof run.scenario === "string" ? run.scenario.trim().toLowerCase() : "";
   const seed = run.seed ?? run.topology_seed;
+  const topologyName = typeof run.topology_name === "string" ? run.topology_name.trim() : "";
   const tag = typeof run.tag === "string" ? run.tag.trim() : "";
   const source = typeof run.source === "string" ? run.source.trim().toLowerCase() : "";
 
@@ -406,6 +453,12 @@ export function formatRunOptionLabel(run: RunSummary): string {
   }
   if (seed != null) {
     parts.push(`seed ${seed}`);
+  }
+  if (run.max_steps != null) {
+    parts.push(`${run.max_steps} steps`);
+  }
+  if (topologyName) {
+    parts.push(`topology ${topologyName}`);
   }
   if (tag) {
     parts.push(`tag ${tag}`);

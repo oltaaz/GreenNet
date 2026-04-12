@@ -18,6 +18,11 @@ else:
 # type annotations because Pylance flags it as an invalid type form.
 GraphT = Any
 NAMED_TOPOLOGY_DIR = Path(__file__).resolve().parent / "data" / "topologies"
+TOPOLOGY_NAME_ALIASES = {
+    "small": "regional_ring",
+    "medium": "metro_hub",
+    "large": "backbone_large",
+}
 
 
 class TopologyValidationError(ValueError):
@@ -86,6 +91,7 @@ def load_named_topology(name: str) -> GraphT:
     normalized = str(name or "").strip()
     if not normalized:
         raise TopologyValidationError("Topology name must be a non-empty string.")
+    normalized = TOPOLOGY_NAME_ALIASES.get(normalized, normalized)
 
     path = NAMED_TOPOLOGY_DIR / f"{normalized}.json"
     if not path.exists():

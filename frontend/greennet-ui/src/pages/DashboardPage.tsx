@@ -23,6 +23,7 @@ import {
   fmt,
   inferPolicy,
   kpiFromOverall,
+  latestMatchingRunByPolicy,
   latestRunByPolicy,
   linkStateFromRatio,
   normalizePerStep,
@@ -204,10 +205,21 @@ export default function DashboardPage() {
     async function loadPolicySeries() {
       const policies = ["all_on", "heuristic", "ppo"];
       const result: PolicySeries = {};
+      const selectedRun = runs.find((run) => run.run_id === selectedRunId) ?? null;
+      const criteria = selectedRun
+        ? {
+            scenario: selectedRun.scenario ?? null,
+            seed: selectedRun.seed ?? null,
+            max_steps: selectedRun.max_steps ?? null,
+            topology_name: selectedRun.topology_name ?? null,
+            topology_seed: selectedRun.topology_seed ?? null,
+            tag: selectedRun.tag ?? null,
+          }
+        : {};
 
       await Promise.all(
         policies.map(async (policyName) => {
-          const run = latestRunByPolicy(runs, policyName);
+          const run = selectedRun ? latestMatchingRunByPolicy(runs, policyName, criteria) : latestRunByPolicy(runs, policyName);
           if (!run) {
             return;
           }
@@ -235,7 +247,7 @@ export default function DashboardPage() {
     return () => {
       alive = false;
     };
-  }, [runs]);
+  }, [runs, selectedRunId]);
 
   useEffect(() => {
     if (!selectedRunId || rows.length === 0) {
@@ -435,6 +447,10 @@ export default function DashboardPage() {
               <strong>{selectedRun.seed ?? selectedRun.topology_seed ?? "-"}</strong>
             </article>
             <article className="report-stat">
+              <span>Topology</span>
+              <strong>{selectedRun.topology_name ?? "seeded-random"}</strong>
+            </article>
+            <article className="report-stat">
               <span>Steps</span>
               <strong>{selectedRun.max_steps ?? overallSummary?.steps_mean ?? "-"}</strong>
             </article>
@@ -494,10 +510,10 @@ export default function DashboardPage() {
           />
 
           <ChartCard
-            title="Active Links by Step"
-            subtitle="%"
+            title="Active Link Ratio by Step"
+            subtitle="average share of controllable links that are active"
             data={timeData}
-            lines={[{ dataKey: "active_ratio", label: "Active Links", color: "#50f7b7" }]}
+            lines={[{ dataKey: "active_ratio", label: "Active Link Ratio", color: "#50f7b7" }]}
             yAxisFormatter={(value) => `${fmt(value, 0)}%`}
           />
         </div>

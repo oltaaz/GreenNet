@@ -1,0 +1,46 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - link "Go to GreenNet home" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - img [ref=e8]
+        - generic [ref=e10]:
+          - strong [ref=e11]: GreenNet
+          - generic [ref=e12]: AI-Driven Sustainable Networking
+      - navigation "Primary" [ref=e13]:
+        - generic [ref=e14]: Backend connected
+        - link "Home" [ref=e15] [cursor=pointer]:
+          - /url: /
+        - link "Dashboard" [ref=e16] [cursor=pointer]:
+          - /url: /dashboard
+        - link "Results" [ref=e17] [cursor=pointer]:
+          - /url: /results
+        - link "Simulator" [ref=e18] [cursor=pointer]:
+          - /url: /simulator
+        - link "About" [ref=e19] [cursor=pointer]:
+          - /url: /about
+  - main [ref=e20]:
+    - generic [ref=e21]:
+      - generic [ref=e22]:
+        - paragraph [ref=e23]: GreenNet
+        - heading "GreenNet" [level=1] [ref=e24]
+        - heading "AI-Driven Sustainable Networking" [level=2] [ref=e25]
+        - paragraph [ref=e26]: Adaptive policies cut network energy while keeping service quality stable.
+        - generic [ref=e27]:
+          - link "Open Dashboard" [ref=e28] [cursor=pointer]:
+            - /url: /dashboard
+          - link "Open Results" [ref=e29] [cursor=pointer]:
+            - /url: /results
+      - generic [ref=e30]:
+        - article [ref=e31]:
+          - heading "Problem" [level=3] [ref=e32]
+          - paragraph [ref=e33]: Always-on links waste power at low traffic. Static rules miss changing network conditions.
+        - article [ref=e34]:
+          - heading "Our Solution" [level=3] [ref=e35]
+          - paragraph [ref=e36]: GreenNet learns when links should turn ON or OFF per step using QoS-aware rewards.
+        - article [ref=e37]:
+          - heading "Architecture" [level=3] [ref=e38]
+          - paragraph [ref=e39]: FastAPI provides run and step metrics. The official React frontend presents dashboards, comparison results, and simulator playback from the same backend data.
+        - article [ref=e40]:
+          - heading "Results Highlights" [level=3] [ref=e41]
+          - paragraph [ref=e42]: Track energy, carbon, delay, drops, and active ratio across policies in one workflow.
