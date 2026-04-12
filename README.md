@@ -1,5 +1,17 @@
 # GreenNet
 
+## Repository Layout
+
+The canonical structure is:
+
+- `greennet/` for importable backend code
+- `scripts/` for helper executables
+- `configs/` for supported tracked configs
+- `configs/archive/root_legacy/` for archived historical config snapshots
+- `experiments/`, `tests/`, `frontend/`, and `dashboard/` for workflows around the core package
+
+More detail is in [docs/project_structure.md](docs/project_structure.md).
+
 ## Frontend Strategy
 
 GreenNet now has one official frontend path:

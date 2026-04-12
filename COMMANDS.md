@@ -117,7 +117,7 @@ python3 experiments/run_matrix.py \
 
 Train PPO v2 (energy_weight=1800 only; everything else unchanged):
 
-python3 train.py --config train_normal_v2.json --timesteps 300000
+python3 train.py --config configs/archive/root_legacy/train_normal_v2.json --timesteps 300000
 
 Run the matrix using the exact PPO model you trained (pin model path):
 
@@ -136,7 +136,7 @@ python3 experiments/run_matrix.py \
 
 Train PPO v3 (energy_weight=1800, toggle penalties reduced only):
 
-python3 train.py --config train_normal_v3.json --timesteps 300000
+python3 train.py --config configs/archive/root_legacy/train_normal_v3.json --timesteps 300000
 
 Run the matrix using the exact PPO model you trained (pin model path):
 
@@ -157,7 +157,7 @@ Note: single knob change vs v2 = lower toggle_penalty (0.0005) and blocked_actio
 
 Train PPO v4 (keep v3 settings, reduce cooldowns only):
 
-python3 train.py --config train_normal_v4.json --timesteps 300000
+python3 train.py --config configs/archive/root_legacy/train_normal_v4.json --timesteps 300000
 
 Run the matrix using the exact PPO model you trained (pin model path):
 

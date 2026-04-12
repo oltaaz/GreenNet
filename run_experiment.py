@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Tuple
 
 import numpy as np
 
-from baselines import (
+from greennet.baselines import (
     action_sleep_if_idle,
     canonical_controller_policy_name,
     controller_policy_class,

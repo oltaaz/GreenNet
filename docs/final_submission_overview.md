@@ -149,7 +149,7 @@ The historical `experiments/official_matrix_v6/` bundle remains useful preserved
 - The energy model is explicit but simplified; it is designed for consistent comparison, not for claiming hardware-accurate wattage.
 - The final evidence supports a mixed outcome, not a headline of clear AI dominance.
 - `Impact Predictor` is exploratory unless its artifacts are bundled and explicitly verified.
-- Older command sheets and root-level config snapshots exist for compatibility, but they are not the canonical submission path.
+- Older command sheets and historical config snapshots now live under `configs/archive/root_legacy/`; they are not the canonical submission path.
 - The canonical rerun command still assumes the project dependencies are installed and that a PPO checkpoint is available in `runs/` or passed via `--ppo-model`.
 - The frontend has a public demo role, while the Streamlit dashboard is internal tooling.
 

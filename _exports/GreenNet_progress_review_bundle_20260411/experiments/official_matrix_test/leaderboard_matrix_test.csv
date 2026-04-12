@@ -1,2 +1,0 @@
-scenario,policy,energy_kwh_total_mean,dropped_total_mean,reward_total_mean,delta_energy_vs_heuristic,delta_dropped_vs_heuristic,delta_reward_vs_heuristic,delta_energy_vs_all_on,delta_dropped_vs_all_on,delta_reward_vs_all_on
-normal,all_on,0.0006666666666666,104.1985294117647,-38.821387115444494,,,,0.0,0.0,0.0

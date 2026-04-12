@@ -6,6 +6,8 @@ Use these tracked configs for scenario-specific training runs:
 - `configs/train_burst.json`
 - `configs/train_hotspot.json`
 
+Historical root-level config snapshots were moved into `configs/archive/root_legacy/`. Keep using the files in `configs/` for current workflows.
+
 Example:
 
 ```bash
