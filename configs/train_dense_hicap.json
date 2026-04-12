@@ -1,7 +1,7 @@
 {
   "train_seed": 42,
   "eval_seed": 123,
-  "topology_path": "/Users/enionismaili/Desktop/GreenNet/greennet/data/topologies/dense_mesh_10_hicap.json",
+  "topology_path": "/Users/oltazagraxha/Desktop/GreenNet/greennet/data/topologies/dense_mesh_10_hicap.json",
   "total_timesteps": 200000,
   "ppo": {
     "policy": "MultiInputPolicy",
