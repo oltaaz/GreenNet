@@ -160,7 +160,7 @@ If the canonical PPO family is missing, regenerate it with `experiments/regenera
 .venv/bin/python experiments/run_official_acceptance_matrix.py
 ```
 
-The authoritative definition lives in [official_acceptance_v1.json](/Users/enionismaili/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json).
+The authoritative definition lives in [official_acceptance_v1.json](/Users/oltazagraxha/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json).
 It includes:
 
 - policies: `all_on`, `heuristic`, `ppo`

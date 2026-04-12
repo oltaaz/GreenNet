@@ -4,10 +4,10 @@ This is the top-level submission guide for the repository.
 
 If you are reviewing GreenNet for the final Honors submission, use this path:
 
-1. Read [README.md](/Users/enionismaili/Desktop/GreenNet/README.md).
-2. Read [docs/final_submission_overview.md](/Users/enionismaili/Desktop/GreenNet/docs/final_submission_overview.md).
-3. Open [artifacts/final_pipeline/official_acceptance_v1/README.md](/Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/README.md).
-4. If you want the final report directly, open [artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation/final_evaluation_report.md](/Users/enionismaili/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation/final_evaluation_report.md).
+1. Read [README.md](/Users/oltazagraxha/Desktop/GreenNet/README.md).
+2. Read [docs/final_submission_overview.md](/Users/oltazagraxha/Desktop/GreenNet/docs/final_submission_overview.md).
+3. Open [artifacts/final_pipeline/official_acceptance_v1/README.md](/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/README.md).
+4. If you want the final report directly, open [artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation/final_evaluation_report.md](/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation/final_evaluation_report.md).
 
 Canonical reviewer-facing evidence:
 

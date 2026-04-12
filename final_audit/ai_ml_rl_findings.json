@@ -16,7 +16,7 @@
       "status": "verified",
       "summary": "The reviewer-facing `ppo` controller is a hybrid policy path, not raw PPO.",
       "evidence": [
-        "/Users/enionismaili/Desktop/GreenNet/run_experiment.py"
+        "/Users/oltazagraxha/Desktop/GreenNet/run_experiment.py"
       ],
       "details": {
         "control_mode": "ppo_safe_hybrid_calm_off",
@@ -33,17 +33,17 @@
       "status": "verified",
       "summary": "The canonical checked-in official PPO artifacts do not match the documented canonical training config/path.",
       "evidence": [
-        "/Users/enionismaili/Desktop/GreenNet/README.md",
-        "/Users/enionismaili/Desktop/GreenNet/configs/README.md",
-        "/Users/enionismaili/Desktop/GreenNet/configs/train_official_ppo.json",
-        "/Users/enionismaili/Desktop/GreenNet/artifacts/models/official_acceptance_v1/small/checkpoint_metadata.json",
-        "/Users/enionismaili/Desktop/GreenNet/artifacts/models/official_acceptance_v1/medium/checkpoint_metadata.json",
-        "/Users/enionismaili/Desktop/GreenNet/artifacts/models/official_acceptance_v1/large/checkpoint_metadata.json"
+        "/Users/oltazagraxha/Desktop/GreenNet/README.md",
+        "/Users/oltazagraxha/Desktop/GreenNet/configs/README.md",
+        "/Users/oltazagraxha/Desktop/GreenNet/configs/train_official_ppo.json",
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/models/official_acceptance_v1/small/checkpoint_metadata.json",
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/models/official_acceptance_v1/medium/checkpoint_metadata.json",
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/models/official_acceptance_v1/large/checkpoint_metadata.json"
       ],
       "details": {
-        "documented_config": "/Users/enionismaili/Desktop/GreenNet/configs/train_official_ppo.json",
+        "documented_config": "/Users/oltazagraxha/Desktop/GreenNet/configs/train_official_ppo.json",
         "documented_timesteps": 100000,
-        "actual_config": "/Users/enionismaili/Desktop/GreenNet/configs/train_normal.json",
+        "actual_config": "/Users/oltazagraxha/Desktop/GreenNet/configs/train_normal.json",
         "actual_timesteps": 25000
       }
     },
@@ -53,9 +53,9 @@
       "status": "verified",
       "summary": "Forecasting is implemented and used in the env, but there is no strong evidence it materially improves final results.",
       "evidence": [
-        "/Users/enionismaili/Desktop/GreenNet/greennet/forecasting.py",
-        "/Users/enionismaili/Desktop/GreenNet/greennet/env.py",
-        "/Users/enionismaili/Desktop/GreenNet/tests/unit/test_forecasting.py"
+        "/Users/oltazagraxha/Desktop/GreenNet/greennet/forecasting.py",
+        "/Users/oltazagraxha/Desktop/GreenNet/greennet/env.py",
+        "/Users/oltazagraxha/Desktop/GreenNet/tests/unit/test_forecasting.py"
       ]
     },
     {
@@ -64,10 +64,10 @@
       "status": "verified",
       "summary": "The impact predictor exists and is integrated, but the checked-in validation is weak.",
       "evidence": [
-        "/Users/enionismaili/Desktop/GreenNet/greennet/impact_predictor.py",
-        "/Users/enionismaili/Desktop/GreenNet/scripts/train_cost_estimator_torch.py",
-        "/Users/enionismaili/Desktop/GreenNet/models/impact_predictor/meta.json",
-        "/Users/enionismaili/Desktop/GreenNet/models/impact_predictor/report.json"
+        "/Users/oltazagraxha/Desktop/GreenNet/greennet/impact_predictor.py",
+        "/Users/oltazagraxha/Desktop/GreenNet/scripts/train_cost_estimator_torch.py",
+        "/Users/oltazagraxha/Desktop/GreenNet/models/impact_predictor/meta.json",
+        "/Users/oltazagraxha/Desktop/GreenNet/models/impact_predictor/report.json"
       ],
       "details": {
         "qos_auc": 0.5799078693430262,
@@ -81,8 +81,8 @@
       "status": "verified",
       "summary": "The learned controller optimizes link toggling under a fixed routing baseline; it does not learn path routing directly.",
       "evidence": [
-        "/Users/enionismaili/Desktop/GreenNet/greennet/env.py",
-        "/Users/enionismaili/Desktop/GreenNet/README.md"
+        "/Users/oltazagraxha/Desktop/GreenNet/greennet/env.py",
+        "/Users/oltazagraxha/Desktop/GreenNet/README.md"
       ]
     }
   ],

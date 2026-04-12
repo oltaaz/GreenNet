@@ -108,49 +108,49 @@ The backend is materially implemented, not just described. There is a real simul
 ### Critical before submission
 - [ ] Add one reviewer-facing backend architecture note that explicitly states the modeling level.
 Why it matters: reviewers need to know this is a capacity-and-toggle forwarding simulator, not a packet-level or protocol-control-plane simulator.
-Files/modules: [`/Users/enionismaili/Desktop/GreenNet/greennet/routing.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/routing.py) conceptually; canonical reviewer docs should point to it.
+Files/modules: [`/Users/oltazagraxha/Desktop/GreenNet/greennet/routing.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/routing.py) conceptually; canonical reviewer docs should point to it.
 Done looks like: a short “modeling assumptions” section naming static forwarding, simplified power model, and QoS/stability guards.
 
 - [ ] Clarify in submission materials that the evaluated PPO controller is hybrid and safety-constrained.
 Why it matters: otherwise the repo risks overstating what the learning component alone achieved.
-Files/modules: [`/Users/enionismaili/Desktop/GreenNet/run_experiment.py`](file:///Users/enionismaili/Desktop/GreenNet/run_experiment.py) around `load_policy()` and `_action_ppo_safe`.
+Files/modules: [`/Users/oltazagraxha/Desktop/GreenNet/run_experiment.py`](file:///Users/oltazagraxha/Desktop/GreenNet/run_experiment.py) around `load_policy()` and `_action_ppo_safe`.
 Done looks like: docs/report language changed to “PPO-based controller with rule-based QoS/stability safeguards,” not “pure RL optimizer.”
 
 - [ ] Declare one canonical official result path and demote legacy matrices to archive/history status.
 Why it matters: reviewer trust drops when multiple folders all look official.
-Files/modules: [`/Users/enionismaili/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json`](file:///Users/enionismaili/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json), [`/Users/enionismaili/Desktop/GreenNet/greennet/evaluation/reproduction.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/evaluation/reproduction.py), [`/Users/enionismaili/Desktop/GreenNet/experiments`](file:///Users/enionismaili/Desktop/GreenNet/experiments).
+Files/modules: [`/Users/oltazagraxha/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json`](file:///Users/oltazagraxha/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json), [`/Users/oltazagraxha/Desktop/GreenNet/greennet/evaluation/reproduction.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/evaluation/reproduction.py), [`/Users/oltazagraxha/Desktop/GreenNet/experiments`](file:///Users/oltazagraxha/Desktop/GreenNet/experiments).
 Done looks like: reviewers are told exactly which manifest, command, output folder, and report file matter.
 
 - [ ] Remove or clearly label stale export trees and historical bundle copies from the submission-facing repo.
 Why it matters: `_exports/` and overlapping historical bundles create the appearance of disorder and can send reviewers down the wrong path.
-Files/modules: [`/Users/enionismaili/Desktop/GreenNet/_exports`](file:///Users/enionismaili/Desktop/GreenNet/_exports).
+Files/modules: [`/Users/oltazagraxha/Desktop/GreenNet/_exports`](file:///Users/oltazagraxha/Desktop/GreenNet/_exports).
 Done looks like: archive paths are excluded from the final submitted repo or labeled as non-canonical.
 
 ### Important but not blocking
 - [ ] Add a backend evidence note for the optional impact predictor and forecasting components.
 Why it matters: both exist, but they are easy to overclaim.
-Files/modules: [`/Users/enionismaili/Desktop/GreenNet/greennet/impact_predictor.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/impact_predictor.py), [`/Users/enionismaili/Desktop/GreenNet/greennet/forecasting.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/forecasting.py), [`/Users/enionismaili/Desktop/GreenNet/greennet/env.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/env.py).
+Files/modules: [`/Users/oltazagraxha/Desktop/GreenNet/greennet/impact_predictor.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/impact_predictor.py), [`/Users/oltazagraxha/Desktop/GreenNet/greennet/forecasting.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/forecasting.py), [`/Users/oltazagraxha/Desktop/GreenNet/greennet/env.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/env.py).
 Done looks like: final materials explicitly say forecasting is online heuristic forecasting and impact prediction is an optional learned guard, not the main evaluation claim.
 
 - [ ] Tighten the narrative around baseline naming.
 Why it matters: `all_on` vs `noop`, and `heuristic` vs `baseline`, are canonically normalized in code, but a reviewer reading outputs may still think there are more distinct baselines than there are.
-Files/modules: [`/Users/enionismaili/Desktop/GreenNet/greennet/policy_taxonomy.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/policy_taxonomy.py), [`/Users/enionismaili/Desktop/GreenNet/tests/integration/test_run_experiment.py`](file:///Users/enionismaili/Desktop/GreenNet/tests/integration/test_run_experiment.py).
+Files/modules: [`/Users/oltazagraxha/Desktop/GreenNet/greennet/policy_taxonomy.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/policy_taxonomy.py), [`/Users/oltazagraxha/Desktop/GreenNet/tests/integration/test_run_experiment.py`](file:///Users/oltazagraxha/Desktop/GreenNet/tests/integration/test_run_experiment.py).
 Done looks like: one table in docs mapping requested names to canonical experimental roles.
 
 - [ ] Explain why SQLite is secondary and file artifacts remain authoritative.
 Why it matters: the code intentionally uses best-effort DB persistence, and reviewers may otherwise expect the DB to be the single source of truth.
-Files/modules: [`/Users/enionismaili/Desktop/GreenNet/run_experiment.py`](file:///Users/enionismaili/Desktop/GreenNet/run_experiment.py), [`/Users/enionismaili/Desktop/GreenNet/greennet/persistence/sqlite_store.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/persistence/sqlite_store.py).
+Files/modules: [`/Users/oltazagraxha/Desktop/GreenNet/run_experiment.py`](file:///Users/oltazagraxha/Desktop/GreenNet/run_experiment.py), [`/Users/oltazagraxha/Desktop/GreenNet/greennet/persistence/sqlite_store.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/persistence/sqlite_store.py).
 Done looks like: docs say file outputs are primary artifacts; SQLite is an index/query layer.
 
 ### Nice-to-have polish
 - [ ] Refactor oversized control logic out of `run_experiment.py` and `greennet/env.py` after submission.
 Why it matters: maintainability and oral-defense clarity.
-Files/modules: [`/Users/enionismaili/Desktop/GreenNet/run_experiment.py`](file:///Users/enionismaili/Desktop/GreenNet/run_experiment.py), [`/Users/enionismaili/Desktop/GreenNet/greennet/env.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/env.py).
+Files/modules: [`/Users/oltazagraxha/Desktop/GreenNet/run_experiment.py`](file:///Users/oltazagraxha/Desktop/GreenNet/run_experiment.py), [`/Users/oltazagraxha/Desktop/GreenNet/greennet/env.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/env.py).
 Done looks like: policy wrappers, safety controller logic, and metadata packaging live in smaller modules.
 
 - [ ] Expand invariant-level tests around final evaluation semantics, not just endpoint/file shapes.
 Why it matters: many integration tests validate successful wiring, but fewer validate scientific claims.
-Files/modules: [`/Users/enionismaili/Desktop/GreenNet/tests/integration`](file:///Users/enionismaili/Desktop/GreenNet/tests/integration).
+Files/modules: [`/Users/oltazagraxha/Desktop/GreenNet/tests/integration`](file:///Users/oltazagraxha/Desktop/GreenNet/tests/integration).
 Done looks like: tests assert policy-class labeling, canonical filtering, and hypothesis status logic against controlled fixtures.
 
 ## 8. Fastest path to submission
@@ -169,25 +169,25 @@ If you do only those four things, the backend will read as deliberate and defens
 - What raises oral-defense questions: why PPO needs hybrid safety logic, how realistic the routing/power model is, whether the impact predictor is central or optional, and which result folder is the true final one.
 
 ## 10. Appendix: evidence map
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/env.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/env.py): core environment, action masking, reward, QoS/stability integration, optional impact predictor and forecasting.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/simulator.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/simulator.py): actual delivery/drop/utilization/delay/energy simulation step.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/routing.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/routing.py): baseline routing taxonomy and honesty of forwarding-only modeling.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/topology.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/topology.py): packaged topology loading and validation.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/traffic.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/traffic.py): stochastic and replay traffic generation.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/power.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/power.py): explicit simplified energy model.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/qos.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/qos.py): runtime and acceptance QoS evaluation logic.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/stability.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/stability.py): stability policy metadata and post-run stability evaluation.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/forecasting.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/forecasting.py): online heuristic forecasting, not offline ML forecasting.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/impact_predictor.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/impact_predictor.py): optional learned guard model with ensemble uncertainty.
-- [`/Users/enionismaili/Desktop/GreenNet/run_experiment.py`](file:///Users/enionismaili/Desktop/GreenNet/run_experiment.py): main experiment runner, policy loading, PPO safety wrapper, summary generation, artifact writing, SQLite persistence.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/cli/train_cli.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/cli/train_cli.py): real training path behind thin `train.py`.
-- [`/Users/enionismaili/Desktop/GreenNet/experiments/run_matrix.py`](file:///Users/enionismaili/Desktop/GreenNet/experiments/run_matrix.py): matrix execution and result harvesting.
-- [`/Users/enionismaili/Desktop/GreenNet/experiments/run_official_acceptance_matrix.py`](file:///Users/enionismaili/Desktop/GreenNet/experiments/run_official_acceptance_matrix.py): official wrapper into reproduction flow.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/evaluation/reproduction.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/evaluation/reproduction.py): canonical one-command reproduction path.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/evaluation/final_pipeline.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/evaluation/final_pipeline.py): packaging and final-evaluation assembly.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/evaluation/acceptance_matrix.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/evaluation/acceptance_matrix.py): acceptance-manifest schema and validation.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/evaluation/official_ppo.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/evaluation/official_ppo.py): topology-specific official PPO checkpoint family logic.
-- [`/Users/enionismaili/Desktop/GreenNet/greennet/persistence/sqlite_store.py`](file:///Users/enionismaili/Desktop/GreenNet/greennet/persistence/sqlite_store.py): SQLite schema, run ingestion, final-evaluation persistence, snapshot queries.
-- [`/Users/enionismaili/Desktop/GreenNet/api_app.py`](file:///Users/enionismaili/Desktop/GreenNet/api_app.py): backend API and reviewer-facing aggregation endpoints.
-- [`/Users/enionismaili/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json`](file:///Users/enionismaili/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json): canonical final matrix definition.
-- [`/Users/enionismaili/Desktop/GreenNet/tests`](file:///Users/enionismaili/Desktop/GreenNet/tests): unit/integration evidence for simulator, routing, traffic, QoS, stability, API, and reproduction.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/env.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/env.py): core environment, action masking, reward, QoS/stability integration, optional impact predictor and forecasting.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/simulator.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/simulator.py): actual delivery/drop/utilization/delay/energy simulation step.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/routing.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/routing.py): baseline routing taxonomy and honesty of forwarding-only modeling.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/topology.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/topology.py): packaged topology loading and validation.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/traffic.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/traffic.py): stochastic and replay traffic generation.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/power.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/power.py): explicit simplified energy model.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/qos.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/qos.py): runtime and acceptance QoS evaluation logic.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/stability.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/stability.py): stability policy metadata and post-run stability evaluation.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/forecasting.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/forecasting.py): online heuristic forecasting, not offline ML forecasting.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/impact_predictor.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/impact_predictor.py): optional learned guard model with ensemble uncertainty.
+- [`/Users/oltazagraxha/Desktop/GreenNet/run_experiment.py`](file:///Users/oltazagraxha/Desktop/GreenNet/run_experiment.py): main experiment runner, policy loading, PPO safety wrapper, summary generation, artifact writing, SQLite persistence.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/cli/train_cli.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/cli/train_cli.py): real training path behind thin `train.py`.
+- [`/Users/oltazagraxha/Desktop/GreenNet/experiments/run_matrix.py`](file:///Users/oltazagraxha/Desktop/GreenNet/experiments/run_matrix.py): matrix execution and result harvesting.
+- [`/Users/oltazagraxha/Desktop/GreenNet/experiments/run_official_acceptance_matrix.py`](file:///Users/oltazagraxha/Desktop/GreenNet/experiments/run_official_acceptance_matrix.py): official wrapper into reproduction flow.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/evaluation/reproduction.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/evaluation/reproduction.py): canonical one-command reproduction path.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/evaluation/final_pipeline.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/evaluation/final_pipeline.py): packaging and final-evaluation assembly.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/evaluation/acceptance_matrix.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/evaluation/acceptance_matrix.py): acceptance-manifest schema and validation.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/evaluation/official_ppo.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/evaluation/official_ppo.py): topology-specific official PPO checkpoint family logic.
+- [`/Users/oltazagraxha/Desktop/GreenNet/greennet/persistence/sqlite_store.py`](file:///Users/oltazagraxha/Desktop/GreenNet/greennet/persistence/sqlite_store.py): SQLite schema, run ingestion, final-evaluation persistence, snapshot queries.
+- [`/Users/oltazagraxha/Desktop/GreenNet/api_app.py`](file:///Users/oltazagraxha/Desktop/GreenNet/api_app.py): backend API and reviewer-facing aggregation endpoints.
+- [`/Users/oltazagraxha/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json`](file:///Users/oltazagraxha/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json): canonical final matrix definition.
+- [`/Users/oltazagraxha/Desktop/GreenNet/tests`](file:///Users/oltazagraxha/Desktop/GreenNet/tests): unit/integration evidence for simulator, routing, traffic, QoS, stability, API, and reproduction.

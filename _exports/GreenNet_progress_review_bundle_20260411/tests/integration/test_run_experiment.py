@@ -66,7 +66,7 @@ def test_run_experiment_writes_expected_artifacts(tmp_path, run_experiment_cli) 
 
 def test_run_experiment_normalizes_learned_policy_eval_start_to_all_on(tmp_path, run_experiment_cli) -> None:
     model_path = Path(
-        "/Users/enionismaili/Desktop/GreenNet/artifacts/models/official_acceptance_v1/small/ppo_greennet.zip"
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/models/official_acceptance_v1/small/ppo_greennet.zip"
     )
     if not model_path.exists():
         pytest.skip("official small PPO checkpoint missing")

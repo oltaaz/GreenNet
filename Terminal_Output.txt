@@ -3547,29 +3547,29 @@ toggles applied mean=0.00 reverted mean=0.00
 Using mps device
 [device] training PPO on: mps:0
 Traceback (most recent call last):
-  File "/Users/enionismaili/Desktop/GreenNet/train.py", line 609, in <module>
+  File "/Users/oltazagraxha/Desktop/GreenNet/train.py", line 609, in <module>
     main()
-  File "/Users/enionismaili/Desktop/GreenNet/train.py", line 603, in main
+  File "/Users/oltazagraxha/Desktop/GreenNet/train.py", line 603, in main
     model.learn(total_timesteps=int(config["total_timesteps"]), callback=callback)
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/ppo/ppo.py", line 311, in learn
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/ppo/ppo.py", line 311, in learn
     return super().learn(
            ^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/common/on_policy_algorithm.py", line 324, in learn
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/common/on_policy_algorithm.py", line 324, in learn
     continue_training = self.collect_rollouts(self.env, callback, self.rollout_buffer, n_rollout_steps=self.n_steps)
                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/common/on_policy_algorithm.py", line 218, in collect_rollouts
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/common/on_policy_algorithm.py", line 218, in collect_rollouts
     new_obs, rewards, dones, infos = env.step(clipped_actions)
                                      ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/common/vec_env/base_vec_env.py", line 222, in step
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/common/vec_env/base_vec_env.py", line 222, in step
     return self.step_wait()
            ^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/common/vec_env/dummy_vec_env.py", line 59, in step_wait
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/common/vec_env/dummy_vec_env.py", line 59, in step_wait
     obs, self.buf_rews[env_idx], terminated, truncated, self.buf_infos[env_idx] = self.envs[env_idx].step(  # type: ignore[assignment]
                                                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/common/monitor.py", line 94, in step
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/common/monitor.py", line 94, in step
     observation, reward, terminated, truncated, info = self.env.step(action)
                                                        ^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/greennet/env.py", line 278, in step
+  File "/Users/oltazagraxha/Desktop/GreenNet/greennet/env.py", line 278, in step
     toggle_cost = float(toggle_cost) + float(self.config.blocked_action_penalty)
                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 TypeError: float() argument must be a string or a real number, not 'tuple'
@@ -3858,8 +3858,8 @@ ModuleNotFoundError: No module named 'sb3_contrib'
 python -c "import sys; print(sys.executable)"
 python -m pip -V
 Python 3.12.12
-/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/bin/python3
-pip 25.3 from /Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/pip (python 3.12)
+/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/bin/python3
+pip 25.3 from /Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/pip (python 3.12)
 (.venv) olta python -m pip install -U --force-reinstall sb3-contrib
 Collecting sb3-contrib
   Using cached sb3_contrib-2.7.1-py3-none-any.whl.metadata (4.1 kB)
@@ -16777,37 +16777,37 @@ Evaluating model: runs/20260122_074757/ppo_greennet
 [device] loaded MaskablePPO on: mps:0
 [env_cfg] drop_lambda=1.0 energy_w=200.0 toggle_pen=0.003 normalize_drop=True cooldown=5 util_block_thr=0.1 global_cd=20 traffic_model=stochastic
 ^CTraceback (most recent call last):
-  File "/Users/enionismaili/Desktop/GreenNet/train.py", line 612, in <module>
+  File "/Users/oltazagraxha/Desktop/GreenNet/train.py", line 612, in <module>
     main()
-  File "/Users/enionismaili/Desktop/GreenNet/train.py", line 439, in main
+  File "/Users/oltazagraxha/Desktop/GreenNet/train.py", line 439, in main
     trained_det = eval_policy(
                   ^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/train.py", line 245, in eval_policy
+  File "/Users/oltazagraxha/Desktop/GreenNet/train.py", line 245, in eval_policy
     action, _ = model.predict(obs, deterministic=deterministic)
                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/ppo_mask/ppo_mask.py", line 307, in predict
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/ppo_mask/ppo_mask.py", line 307, in predict
     return self.policy.predict(observation, state, episode_start, deterministic, action_masks=action_masks)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/common/maskable/policies.py", line 305, in predict
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/common/maskable/policies.py", line 305, in predict
     actions = self._predict(obs_tensor, deterministic=deterministic, action_masks=action_masks)
               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/common/maskable/policies.py", line 266, in _predict
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/common/maskable/policies.py", line 266, in _predict
     return self.get_distribution(observation, action_masks).get_actions(deterministic=deterministic)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/common/maskable/policies.py", line 364, in get_distribution
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/common/maskable/policies.py", line 364, in get_distribution
     distribution = self._get_action_dist_from_latent(latent_pi)
                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/common/maskable/policies.py", line 250, in _get_action_dist_from_latent
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/common/maskable/policies.py", line 250, in _get_action_dist_from_latent
     return self.action_dist.proba_distribution(action_logits=action_logits)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/common/maskable/distributions.py", line 136, in proba_distribution
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/common/maskable/distributions.py", line 136, in proba_distribution
     self.distribution = MaskableCategorical(logits=reshaped_logits)
                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/common/maskable/distributions.py", line 43, in __init__
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/sb3_contrib/common/maskable/distributions.py", line 43, in __init__
     super().__init__(probs, logits, validate_args)
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/torch/distributions/categorical.py", line 81, in __init__
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/torch/distributions/categorical.py", line 81, in __init__
     super().__init__(batch_shape, validate_args=validate_args)
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py", line 76, in __init__
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/torch/distributions/distribution.py", line 76, in __init__
     if not torch._is_all_true(valid):
            ^^^^^^^^^^^^^^^^^^^^^^^^^
 KeyboardInterrupt
@@ -28505,32 +28505,32 @@ python train.py --eval      --model runs/20260122_170754/ppo_greennet --episodes
 [env_config] Loaded from runs/20260122_170754/env_config.json (keys=['base_capacity', 'base_latency_ms', 'blocked_action_penalty', 'demand_max', 'demand_min', 'directed', 'drop_penalty_lambda', 'edge_prob', 'energy_weight', 'flows_per_step', 'global_toggle_cooldown_steps', 'max_steps', 'node_count', 'normalize_drop', 'qos_target_norm_drop', 'qos_violation_penalty_scale', 'revert_penalty_scale', 'saturation_util_threshold', 'toggle_cooldown_steps', 'toggle_penalty', 'top_k_edge_utils', 'topology_randomize', 'topology_seed', 'topology_seeds', 'traffic_avg_bursts_per_step', 'traffic_duration_range', 'traffic_elephant_size_range', 'traffic_hotspots', 'traffic_mice_size_range', 'traffic_model', 'traffic_p_elephant', 'traffic_seed', 'traffic_spike_duration_range', 'traffic_spike_multiplier_range', 'traffic_spike_prob', 'util_block_threshold'])
 [env_cfg] drop_lambda=3.0 energy_w=150.0 toggle_pen=0.003 normalize_drop=True cooldown=5 util_block_thr=0.1 global_cd=20 traffic_model=stochastic
 ^CTraceback (most recent call last):
-  File "/Users/enionismaili/Desktop/GreenNet/train.py", line 612, in <module>
+  File "/Users/oltazagraxha/Desktop/GreenNet/train.py", line 612, in <module>
     main()
-  File "/Users/enionismaili/Desktop/GreenNet/train.py", line 406, in main
+  File "/Users/oltazagraxha/Desktop/GreenNet/train.py", line 406, in main
     eval_policy(
-  File "/Users/enionismaili/Desktop/GreenNet/train.py", line 251, in eval_policy
+  File "/Users/oltazagraxha/Desktop/GreenNet/train.py", line 251, in eval_policy
     obs, r, terminated, truncated, info = env.step(action)
                                           ^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/common/monitor.py", line 94, in step
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/stable_baselines3/common/monitor.py", line 94, in step
     observation, reward, terminated, truncated, info = self.env.step(action)
                                                        ^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/gymnasium/core.py", line 327, in step
+  File "/Users/oltazagraxha/Desktop/GreenNet/ml-env/.venv/lib/python3.12/site-packages/gymnasium/core.py", line 327, in step
     return self.env.step(action)
            ^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/greennet/env.py", line 291, in step
+  File "/Users/oltazagraxha/Desktop/GreenNet/greennet/env.py", line 291, in step
     metrics = self.simulator.step(flows)
               ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/greennet/simulator.py", line 127, in step
+  File "/Users/oltazagraxha/Desktop/GreenNet/greennet/simulator.py", line 127, in step
     paths, weights = self._resolve_paths(flow.source, flow.destination, routing_graph)
                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/greennet/simulator.py", line 317, in _resolve_paths
+  File "/Users/oltazagraxha/Desktop/GreenNet/greennet/simulator.py", line 317, in _resolve_paths
     result = self.routing_policy(routing_graph, source, destination)
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/greennet/routing.py", line 194, in __call__
+  File "/Users/oltazagraxha/Desktop/GreenNet/greennet/routing.py", line 194, in __call__
     paths = k_shortest_paths(graph, source, target, k=1, weight=self.weight)
             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/enionismaili/Desktop/GreenNet/greennet/routing.py", line 134, in k_shortest_paths
+  File "/Users/oltazagraxha/Desktop/GreenNet/greennet/routing.py", line 134, in k_shortest_paths
     paths.append(list(path))
                  ^^^^^^^^^^
 KeyboardInterrupt
@@ -42015,7 +42015,7 @@ STRIP:
 DELETE:
   (none)
 Estimated space to reclaim: 14.96 MB
-Wrote log to /Users/enionismaili/Desktop/GreenNet/experiments/prune_log_20260124_234534.txt
+Wrote log to /Users/oltazagraxha/Desktop/GreenNet/experiments/prune_log_20260124_234534.txt
 (.venv) olta ls runs/20260123_125047
 config.json			requirements.txt		train_config.json
 env_config.json			robustness_energy_vs_drop.png
@@ -42153,7 +42153,7 @@ STRIP:
 DELETE:
   (none)
 Estimated space to reclaim: 0.00 MB
-Wrote log to /Users/enionismaili/Desktop/GreenNet/experiments/prune_log_20260124_235820.txt
+Wrote log to /Users/oltazagraxha/Desktop/GreenNet/experiments/prune_log_20260124_235820.txt
 (.venv) olta python experiments/prune_runs.py --keep 20260123_125047 --keep-latest 8 --keep-robustness --strip-only --strip-extras --apply
 KEEP:
   20260113_150900
@@ -42268,7 +42268,7 @@ STRIP:
 DELETE:
   (none)
 Estimated space to reclaim: 0.00 MB
-Wrote log to /Users/enionismaili/Desktop/GreenNet/experiments/prune_log_20260124_235825.txt
+Wrote log to /Users/oltazagraxha/Desktop/GreenNet/experiments/prune_log_20260124_235825.txt
 (.venv) olta python experiments/summarize_runs.py
 ls experiments/training_history.csv
 Total runs: 107
@@ -42401,7 +42401,7 @@ STRIP:
 DELETE:
   (none)
 Estimated space to reclaim: 0.00 MB
-Wrote log to /Users/enionismaili/Desktop/GreenNet/experiments/prune_log_20260124_235837.txt
+Wrote log to /Users/oltazagraxha/Desktop/GreenNet/experiments/prune_log_20260124_235837.txt
 (.venv) olta python experiments/prune_runs.py --keep 20260123_125047 --keep-latest 8 --keep-robustness --strip-only --strip-extras --apply
 KEEP:
   20260113_150900
@@ -42516,7 +42516,7 @@ STRIP:
 DELETE:
   (none)
 Estimated space to reclaim: 0.00 MB
-Wrote log to /Users/enionismaili/Desktop/GreenNet/experiments/prune_log_20260124_235848.txt
+Wrote log to /Users/oltazagraxha/Desktop/GreenNet/experiments/prune_log_20260124_235848.txt
 (.venv) olta find runs -maxdepth 2 -type f \( -name "ppo_greennet.zip" -o -name "ppo_greennet" \) -print
 runs/20260123_105855/ppo_greennet.zip
 runs/20260122_234613/ppo_greennet.zip
@@ -42685,7 +42685,7 @@ STRIP:
 DELETE:
   (none)
 Estimated space to reclaim: 0.42 MB
-Wrote log to /Users/enionismaili/Desktop/GreenNet/experiments/prune_log_20260125_000050.txt
+Wrote log to /Users/oltazagraxha/Desktop/GreenNet/experiments/prune_log_20260125_000050.txt
 (.venv) olta python experiments/prune_runs.py \
   --keep 20260123_125047 \
   --keep 20260123_121700 \
@@ -42808,7 +42808,7 @@ STRIP:
 DELETE:
   (none)
 Estimated space to reclaim: 0.00 MB
-Wrote log to /Users/enionismaili/Desktop/GreenNet/experiments/prune_log_20260125_000106.txt
+Wrote log to /Users/oltazagraxha/Desktop/GreenNet/experiments/prune_log_20260125_000106.txt
 (.venv) olta find runs -maxdepth 2 -type f -name "ppo_greennet.zip" -print
 runs/20260123_105855/ppo_greennet.zip
 runs/20260122_234613/ppo_greennet.zip

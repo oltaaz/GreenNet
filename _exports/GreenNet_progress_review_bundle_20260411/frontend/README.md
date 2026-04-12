@@ -5,7 +5,7 @@ This directory is the official entrypoint for the GreenNet UI.
 For the combined local demo flow, use the repo-root command instead:
 
 ```bash
-cd /Users/enionismaili/Desktop/GreenNet
+cd /Users/oltazagraxha/Desktop/GreenNet
 npm run dev
 ```
 

@@ -9,7 +9,7 @@ WHY
 This proves the dashboard is accurate and pulling the right data from the codebase.
 
 FILES TO EDIT
-- /Users/enionismaili/Desktop/GreenNet/dashboard/page_single.py
+- /Users/oltazagraxha/Desktop/GreenNet/dashboard/page_single.py
 
 IMPLEMENTATION DETAILS
 

@@ -1,0 +1,20 @@
+{
+  "env": {
+    "topology_path": "/Users/enionismaili/Desktop/GreenNet/greennet/data/topologies/dense_mesh_10_hicap.json",
+    "traffic_model": "stochastic",
+    "traffic_scenario_version": 2,
+    "routing_baseline": "k_shortest_softmin",
+    "routing_k_paths": 4,
+    "initial_off_edges": 0,
+    "toggle_cooldown_steps": 3,
+    "global_toggle_cooldown_steps": 3,
+    "decision_interval_steps": 3,
+    "max_off_toggles_per_episode": 20,
+    "max_total_toggles_per_episode": 40,
+    "off_calm_steps_required": 0,
+    "off_start_guard_decision_steps": 0,
+    "disable_all_on_calm_guard": true,
+    "util_block_threshold": 0.9,
+    "max_util_off_allow_threshold": 0.9
+  }
+}

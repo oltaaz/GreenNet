@@ -441,34 +441,20 @@ export function formatPolicyLabel(policy: string): string {
 }
 
 export function formatRunOptionLabel(run: RunSummary): string {
-  const parts = [formatPolicyLabel(inferPolicy(run))];
-  const scenario = typeof run.scenario === "string" ? run.scenario.trim().toLowerCase() : "";
-  const seed = run.seed ?? run.topology_seed;
-  const topologyName = typeof run.topology_name === "string" ? run.topology_name.trim() : "";
-  const tag = typeof run.tag === "string" ? run.tag.trim() : "";
-  const source = typeof run.source === "string" ? run.source.trim().toLowerCase() : "";
+  const policy = formatPolicyLabel(inferPolicy(run));
+  const scenario = typeof run.scenario === "string" ? capitalize(run.scenario.trim().toLowerCase()) : "";
 
+  // Short timestamp from run_id (first 13 chars: YYYYMMDD_HHMM)
+  const ts = run.run_id.match(/^(\d{8}_\d{4})/)?.[1] ?? "";
+  const timeLabel = ts ? ts.replace("_", " ") : "";
+
+  if (scenario && timeLabel) {
+    return `${policy} — ${scenario}  (${timeLabel})`;
+  }
   if (scenario) {
-    parts.push(capitalize(scenario));
+    return `${policy} — ${scenario}`;
   }
-  if (seed != null) {
-    parts.push(`seed ${seed}`);
-  }
-  if (run.max_steps != null) {
-    parts.push(`${run.max_steps} steps`);
-  }
-  if (topologyName) {
-    parts.push(`topology ${topologyName}`);
-  }
-  if (tag) {
-    parts.push(`tag ${tag}`);
-  }
-  if (source) {
-    parts.push(source);
-  }
-
-  parts.push(run.run_id);
-  return parts.join(" | ");
+  return policy || run.run_id;
 }
 
 const SCENARIO_SORT_ORDER = ["normal", "burst", "hotspot"];

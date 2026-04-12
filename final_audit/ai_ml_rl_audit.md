@@ -29,11 +29,11 @@ This audit focused on:
 ### 1. PPO integration is real
 
 Verified evidence:
-- Training entrypoint is real in [greennet/cli/train_cli.py](/Users/enionismaili/Desktop/GreenNet/greennet/cli/train_cli.py).
+- Training entrypoint is real in [greennet/cli/train_cli.py](/Users/oltazagraxha/Desktop/GreenNet/greennet/cli/train_cli.py).
 - It constructs `GreenNetEnv`, uses SB3 `PPO`, and supports `MaskablePPO` via `ActionMasker`.
-- The environment is a real Gymnasium env in [greennet/env.py](/Users/enionismaili/Desktop/GreenNet/greennet/env.py).
-- Official checkpoint-family packaging exists in [greennet/evaluation/official_ppo.py](/Users/enionismaili/Desktop/GreenNet/greennet/evaluation/official_ppo.py).
-- Canonical reviewer-facing PPO artifacts exist under [artifacts/models/official_acceptance_v1](/Users/enionismaili/Desktop/GreenNet/artifacts/models/official_acceptance_v1).
+- The environment is a real Gymnasium env in [greennet/env.py](/Users/oltazagraxha/Desktop/GreenNet/greennet/env.py).
+- Official checkpoint-family packaging exists in [greennet/evaluation/official_ppo.py](/Users/oltazagraxha/Desktop/GreenNet/greennet/evaluation/official_ppo.py).
+- Canonical reviewer-facing PPO artifacts exist under [artifacts/models/official_acceptance_v1](/Users/oltazagraxha/Desktop/GreenNet/artifacts/models/official_acceptance_v1).
 
 Assessment:
 - `AI-driven controller` claim: `REAL`
@@ -41,7 +41,7 @@ Assessment:
 
 ### 2. Observation / action / reward design is real and non-trivial
 
-Verified evidence from [greennet/env.py](/Users/enionismaili/Desktop/GreenNet/greennet/env.py):
+Verified evidence from [greennet/env.py](/Users/oltazagraxha/Desktop/GreenNet/greennet/env.py):
 - Action space is a discrete link-toggle controller over a stable edge universe.
 - Observation is a `spaces.Dict` with scalar network state plus per-edge activity/utilization.
 - Reward has explicit components for energy, drops, QoS violation, and toggling.
@@ -66,7 +66,7 @@ Claim status:
 This is the single biggest claim-risk issue.
 
 Verified evidence:
-- [run_experiment.py](/Users/enionismaili/Desktop/GreenNet/run_experiment.py) defines `_action_ppo_safe` and returns metadata with `control_mode = "ppo_safe_hybrid_calm_off"`.
+- [run_experiment.py](/Users/oltazagraxha/Desktop/GreenNet/run_experiment.py) defines `_action_ppo_safe` and returns metadata with `control_mode = "ppo_safe_hybrid_calm_off"`.
 - The wrapper applies:
   - PPO proposal
   - mask checks
@@ -90,11 +90,11 @@ Required wording fix:
 ### 2. Official PPO artifact lineage is inconsistent with the docs
 
 Verified evidence:
-- Docs claim the official regeneration path is `configs/train_official_ppo.json` at `100000` timesteps in [README.md](/Users/enionismaili/Desktop/GreenNet/README.md) and [configs/README.md](/Users/enionismaili/Desktop/GreenNet/configs/README.md).
-- Actual canonical checkpoint metadata in [artifacts/models/official_acceptance_v1/small/checkpoint_metadata.json](/Users/enionismaili/Desktop/GreenNet/artifacts/models/official_acceptance_v1/small/checkpoint_metadata.json) and its `medium`/`large` peers point to:
+- Docs claim the official regeneration path is `configs/train_official_ppo.json` at `100000` timesteps in [README.md](/Users/oltazagraxha/Desktop/GreenNet/README.md) and [configs/README.md](/Users/oltazagraxha/Desktop/GreenNet/configs/README.md).
+- Actual canonical checkpoint metadata in [artifacts/models/official_acceptance_v1/small/checkpoint_metadata.json](/Users/oltazagraxha/Desktop/GreenNet/artifacts/models/official_acceptance_v1/small/checkpoint_metadata.json) and its `medium`/`large` peers point to:
   - `config_path = configs/train_normal.json`
   - `total_timesteps = 25000`
-- The stored env configs for those artifacts use `forecast_model = "ema"`, not the `adaptive_ema` claimed in [configs/train_official_ppo.json](/Users/enionismaili/Desktop/GreenNet/configs/train_official_ppo.json).
+- The stored env configs for those artifacts use `forecast_model = "ema"`, not the `adaptive_ema` claimed in [configs/train_official_ppo.json](/Users/oltazagraxha/Desktop/GreenNet/configs/train_official_ppo.json).
 
 Why it matters:
 - This is a direct reproducibility and claim-honesty problem.
@@ -107,12 +107,12 @@ Assessment:
 ### 3. Forecasting is real, but it is lightweight and not a demonstrated ML contribution
 
 Verified evidence:
-- [greennet/forecasting.py](/Users/enionismaili/Desktop/GreenNet/greennet/forecasting.py) implements:
+- [greennet/forecasting.py](/Users/oltazagraxha/Desktop/GreenNet/greennet/forecasting.py) implements:
   - EMA
   - damped Holt trend
   - adaptive EMA ensemble
 - The env uses `demand_now` and `demand_forecast` in observations and mask gating.
-- Unit tests in [tests/unit/test_forecasting.py](/Users/enionismaili/Desktop/GreenNet/tests/unit/test_forecasting.py) verify mechanics and one synthetic regime-shift advantage.
+- Unit tests in [tests/unit/test_forecasting.py](/Users/oltazagraxha/Desktop/GreenNet/tests/unit/test_forecasting.py) verify mechanics and one synthetic regime-shift advantage.
 
 Limitations:
 - No offline training pipeline exists for forecasting because it is not a trained model family.
@@ -132,13 +132,13 @@ Recommended framing:
 ### 4. Impact predictor / cost modeling is exploratory and weakly validated
 
 Verified evidence:
-- Runtime model loader is real in [greennet/impact_predictor.py](/Users/enionismaili/Desktop/GreenNet/greennet/impact_predictor.py).
+- Runtime model loader is real in [greennet/impact_predictor.py](/Users/oltazagraxha/Desktop/GreenNet/greennet/impact_predictor.py).
 - Dataset generation exists in:
-  - [scripts/build_cost_dataset_graph.py](/Users/enionismaili/Desktop/GreenNet/scripts/build_cost_dataset_graph.py)
-  - [scripts/build_cost_dataset_sweep.py](/Users/enionismaili/Desktop/GreenNet/scripts/build_cost_dataset_sweep.py)
-- Training exists in [scripts/train_cost_estimator_torch.py](/Users/enionismaili/Desktop/GreenNet/scripts/train_cost_estimator_torch.py).
-- Comparison script exists in [scripts/eval_impact_predictor_compare.py](/Users/enionismaili/Desktop/GreenNet/scripts/eval_impact_predictor_compare.py).
-- Model artifacts exist in [models/impact_predictor](/Users/enionismaili/Desktop/GreenNet/models/impact_predictor).
+  - [scripts/build_cost_dataset_graph.py](/Users/oltazagraxha/Desktop/GreenNet/scripts/build_cost_dataset_graph.py)
+  - [scripts/build_cost_dataset_sweep.py](/Users/oltazagraxha/Desktop/GreenNet/scripts/build_cost_dataset_sweep.py)
+- Training exists in [scripts/train_cost_estimator_torch.py](/Users/oltazagraxha/Desktop/GreenNet/scripts/train_cost_estimator_torch.py).
+- Comparison script exists in [scripts/eval_impact_predictor_compare.py](/Users/oltazagraxha/Desktop/GreenNet/scripts/eval_impact_predictor_compare.py).
+- Model artifacts exist in [models/impact_predictor](/Users/oltazagraxha/Desktop/GreenNet/models/impact_predictor).
 
 But the validation quality is weak:
 - `models/impact_predictor/meta.json` reports `qos_auc = 0.5799`, which is only slightly above random.
@@ -161,7 +161,7 @@ Assessment:
 
 ### 5. The RL problem is valid, but heavily hand-shaped
 
-Verified evidence from [greennet/env.py](/Users/enionismaili/Desktop/GreenNet/greennet/env.py):
+Verified evidence from [greennet/env.py](/Users/oltazagraxha/Desktop/GreenNet/greennet/env.py):
 - Reward = energy penalty + drop penalty + QoS penalty + toggle penalties.
 - Multiple non-learning constraints shape behavior:
   - cooldowns

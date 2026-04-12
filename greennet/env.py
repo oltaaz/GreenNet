@@ -171,6 +171,7 @@ class EnvConfig:
     initial_off_edges: int = 3
     initial_off_seed: int | None = 123
     off_start_guard_decision_steps: int = 10  # block OFF actions for first N decision steps when starting all-on
+    disable_all_on_calm_guard: bool = False  # if True, skip the all-on+calm blocking guard (allows energy saving on healthy networks)
 
     # Optional OFF-action gating via Impact Predictor (ensemble + calibration).
     cost_estimator_enabled: bool = False
@@ -2266,7 +2267,7 @@ class GreenNetEnv(gym.Env):
                     < float(getattr(self.config, "util_block_threshold", 0.80))
                 )
             )
-            if episode_started_all_on and all_on_now and calm_now:
+            if episode_started_all_on and all_on_now and calm_now and not bool(getattr(self.config, "disable_all_on_calm_guard", False)):
                 toggle_blocked = True
                 toggle_cost = float(getattr(self.config, "toggle_attempt_penalty", 0.0))
                 internal_noop_reason_hint = "other"

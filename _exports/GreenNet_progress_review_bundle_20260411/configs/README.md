@@ -153,7 +153,7 @@ If omitted, GreenNet uses the lightweight defaults from `EnvConfig`. For the fin
 
 ## Official Acceptance Matrix
 
-The canonical final benchmark definition now lives in [official_acceptance_v1.json](/Users/enionismaili/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json).
+The canonical final benchmark definition now lives in [official_acceptance_v1.json](/Users/oltazagraxha/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json).
 
 It is the authoritative machine-readable source of truth for:
 

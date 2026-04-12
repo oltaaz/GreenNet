@@ -13,10 +13,10 @@
   "deterministic": true,
   "save_flows": false,
   "model_path": null,
-  "runs_dir": "/Users/enionismaili/Desktop/GreenNet/runs",
+  "runs_dir": "/Users/oltazagraxha/Desktop/GreenNet/runs",
   "timestamp_utc": "2026-04-10T04:23:49.042622+00:00",
   "created_at_utc": "2026-04-10T04:23:49.042622+00:00",
-  "command": "run_experiment.py --policy heuristic --scenario flash_crowd --seed 0 --episodes 20 --steps 300 --out-dir /Users/enionismaili/Desktop/GreenNet/results --runs-dir /Users/enionismaili/Desktop/GreenNet/runs --matrix-id official_acceptance_v1 --matrix-name GreenNet Official Acceptance Matrix v1 --matrix-manifest /Users/enionismaili/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json --matrix-case-id large_flash_crowd --matrix-case-label Large topology / flash crowd --topology-seed 0 --topology-name large --tag official_acceptance_v1 --routing-baseline min_hop_single_path --routing-link-cost-model unit",
+  "command": "run_experiment.py --policy heuristic --scenario flash_crowd --seed 0 --episodes 20 --steps 300 --out-dir /Users/oltazagraxha/Desktop/GreenNet/results --runs-dir /Users/oltazagraxha/Desktop/GreenNet/runs --matrix-id official_acceptance_v1 --matrix-name GreenNet Official Acceptance Matrix v1 --matrix-manifest /Users/oltazagraxha/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json --matrix-case-id large_flash_crowd --matrix-case-label Large topology / flash crowd --topology-seed 0 --topology-name large --tag official_acceptance_v1 --routing-baseline min_hop_single_path --routing-link-cost-model unit",
   "blocked_by_util_count": 0,
   "blocked_by_cooldown_count": 7,
   "allowed_toggle_count": 1,
@@ -118,7 +118,7 @@
   "tag": "official_acceptance_v1",
   "matrix_id": "official_acceptance_v1",
   "matrix_name": "GreenNet Official Acceptance Matrix v1",
-  "matrix_manifest": "/Users/enionismaili/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json",
+  "matrix_manifest": "/Users/oltazagraxha/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json",
   "matrix_case_id": "large_flash_crowd",
   "matrix_case_label": "Large topology / flash crowd"
 }

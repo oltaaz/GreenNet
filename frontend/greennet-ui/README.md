@@ -22,5 +22,5 @@ Reporting structure:
 - Hypothesis and QoS acceptance statuses are presented directly from the final evaluation artifact instead of being re-derived in the UI
 
 How to run:
-- preferred: run `npm run dev` from `/Users/enionismaili/Desktop/GreenNet/frontend`
-- direct package path: run `npm run dev` from `/Users/enionismaili/Desktop/GreenNet/frontend/greennet-ui`
+- preferred: run `npm run dev` from `/Users/oltazagraxha/Desktop/GreenNet/frontend`
+- direct package path: run `npm run dev` from `/Users/oltazagraxha/Desktop/GreenNet/frontend/greennet-ui`
