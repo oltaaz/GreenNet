@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "matrix_id": "official_acceptance_v1",
+  "matrix_name": "GreenNet Official Acceptance Matrix v1",
+  "tag": "official_acceptance_v1",
+  "description": "Canonical final GreenNet evaluation across official baseline taxonomy, reusable topologies, realistic traffic, centralized QoS, explicit energy model, and switching stability controls.",
+  "policies": [
+    "all_on",
+    "heuristic",
+    "ppo"
+  ],
+  "baseline_policies": [
+    "all_on",
+    "heuristic"
+  ],
+  "ai_policies": [
+    "ppo"
+  ],
+  "primary_baseline_policy": "all_on",
+  "routing_baseline": "min_hop_single_path",
+  "routing_link_cost_model": "unit",
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "episodes": 20,
+  "steps": 300,
+  "deterministic": true,
+  "cases": [
+    {
+      "id": "small_normal",
+      "label": "Small topology / normal traffic",
+      "scenario": "normal",
+      "topology_name": "small",
+      "notes": "Baseline steady-state small-network case."
+    },
+    {
+      "id": "small_commuter_replay",
+      "label": "Small topology / commuter replay",
+      "scenario": "custom",
+      "topology_name": "small",
+      "traffic_name": "regional_ring_commuter_matrices",
+      "notes": "Reusable replay-backed commuter traffic on the packaged small topology."
+    },
+    {
+      "id": "medium_diurnal",
+      "label": "Medium topology / diurnal traffic",
+      "scenario": "diurnal",
+      "topology_name": "medium",
+      "notes": "Regular daily load variation on the packaged medium topology."
+    },
+    {
+      "id": "medium_hotspot",
+      "label": "Medium topology / hotspot traffic",
+      "scenario": "hotspot",
+      "topology_name": "medium",
+      "notes": "Localized concentration stress case on the packaged medium topology."
+    },
+    {
+      "id": "large_flash_crowd",
+      "label": "Large topology / flash crowd",
+      "scenario": "flash_crowd",
+      "topology_name": "large",
+      "notes": "Large-network abrupt demand surge using the stochastic traffic model."
+    },
+    {
+      "id": "large_flash_replay",
+      "label": "Large topology / replay flash bursts",
+      "scenario": "custom",
+      "topology_name": "large",
+      "traffic_name": "backbone_large_flash_crowd_bursts",
+      "notes": "Reusable burst replay on the packaged large topology."
+    }
+  ]
+}

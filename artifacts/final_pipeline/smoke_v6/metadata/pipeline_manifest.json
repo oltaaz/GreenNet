@@ -1,0 +1,151 @@
+{
+  "generated_at_utc": "2026-03-21T23:59:09.066430+00:00",
+  "repo_root": "/Users/oltazagraxha/Desktop/GreenNet",
+  "git_head": "bcd9498f393a235f9f1ccfdd17177753be6bbdc9",
+  "python_executable": "/Users/oltazagraxha/Desktop/GreenNet/.venv/bin/python",
+  "python_version": "3.14.2 (main, Dec  5 2025, 16:49:16) [Clang 17.0.0 (clang-1700.4.4.1)]",
+  "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+  "config": {
+    "generated_at_utc": "2026-03-21T23:59:09.066430+00:00",
+    "repo_root": "/Users/oltazagraxha/Desktop/GreenNet",
+    "results_dir": "/Users/oltazagraxha/Desktop/GreenNet/results",
+    "runs_dir": "/Users/oltazagraxha/Desktop/GreenNet/runs",
+    "output_dir": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6",
+    "summary_csv": "/Users/oltazagraxha/Desktop/GreenNet/experiments/official_matrix_v6/results_summary_matrix_v6.csv",
+    "tag": "matrix_v6",
+    "skip_eval": true,
+    "seeds": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9"
+    ],
+    "scenarios": [
+      "burst",
+      "hotspot",
+      "normal"
+    ],
+    "policies": [
+      "all_on",
+      "heuristic",
+      "ppo"
+    ],
+    "episodes": 50,
+    "steps": 300,
+    "ppo_model": null,
+    "topology_seed": null,
+    "deterministic": true,
+    "baseline_policies": [
+      "heuristic",
+      "baseline",
+      "all_on",
+      "noop"
+    ],
+    "ai_policies": [
+      "ppo"
+    ],
+    "primary_baseline_policy": "heuristic",
+    "thresholds": {
+      "energy_target_pct": 15.0,
+      "max_qos_violation_rate_increase_abs": 0.02,
+      "max_delivered_loss_pct": 2.0,
+      "max_dropped_increase_pct": 5.0,
+      "max_delay_increase_pct": 10.0,
+      "max_path_latency_increase_pct": 10.0
+    },
+    "skip_plots": false
+  },
+  "outputs": {
+    "summary_csv": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/results_summary_matrix_v6.csv",
+    "summary_by_seed_csv": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/results_summary_by_seed_matrix_v6.csv",
+    "leaderboard_csv": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/leaderboard_matrix_v6.csv",
+    "leaderboard_source_csv": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/leaderboard_source_matrix_v6.csv",
+    "final_evaluation_csv": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/final_evaluation/final_evaluation_summary.csv",
+    "final_evaluation_json": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/final_evaluation/final_evaluation_summary.json",
+    "final_evaluation_report": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/final_evaluation/final_evaluation_report.md",
+    "research_question_summary_csv": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/research_question_summary.csv",
+    "concise_report": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/report/concise_report.md",
+    "plots_dir": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/plots"
+  },
+  "steps": [
+    {
+      "name": "filter_summary",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/logs/03_filter_summary.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/results_summary_matrix_v6.csv"
+      ],
+      "command": "Filter authoritative results_summary.csv to the requested seeds/scenarios/policies.",
+      "details": null
+    },
+    {
+      "name": "write_by_seed_summary",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/logs/04_write_by_seed_summary.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/results_summary_by_seed_matrix_v6.csv"
+      ],
+      "command": "_write_by_seed(/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/results_summary_matrix_v6.csv, /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/results_summary_by_seed_matrix_v6.csv)",
+      "details": null
+    },
+    {
+      "name": "make_leaderboard",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/logs/05_make_leaderboard.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/leaderboard_matrix_v6.csv",
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/leaderboard_source_matrix_v6.csv"
+      ],
+      "command": "/Users/oltazagraxha/Desktop/GreenNet/.venv/bin/python /Users/oltazagraxha/Desktop/GreenNet/experiments/make_leaderboard.py --summary /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/results_summary_matrix_v6.csv --output /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/leaderboard_matrix_v6.csv --output-source /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/leaderboard_source_matrix_v6.csv",
+      "details": null
+    },
+    {
+      "name": "final_evaluation",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/logs/06_final_evaluation.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/final_evaluation/final_evaluation_summary.csv",
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/final_evaluation/final_evaluation_summary.json",
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/final_evaluation/final_evaluation_report.md"
+      ],
+      "command": "/Users/oltazagraxha/Desktop/GreenNet/.venv/bin/python /Users/oltazagraxha/Desktop/GreenNet/experiments/final_evaluation.py --summary-csv /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/results_summary_matrix_v6.csv --baseline-policies heuristic,baseline,all_on,noop --ai-policies ppo --primary-baseline-policy heuristic --energy-target-pct 15.0 --max-qos-violation-rate-increase 0.02 --max-delivered-loss-pct 2.0 --max-dropped-increase-pct 5.0 --max-delay-increase-pct 10.0 --max-path-latency-increase-pct 10.0 --output-dir /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/final_evaluation",
+      "details": null
+    },
+    {
+      "name": "write_research_question_summary",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/logs/07_research_question_summary.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/research_question_summary.csv"
+      ],
+      "command": "Write /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/summary/research_question_summary.csv",
+      "details": null
+    },
+    {
+      "name": "export_plots",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/logs/08_export_plots.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/plots"
+      ],
+      "command": "Export plot-ready CSV files and optional PNG plots.",
+      "details": null
+    },
+    {
+      "name": "write_concise_report",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/logs/09_write_concise_report.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/report/concise_report.md"
+      ],
+      "command": "Write /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/smoke_v6/report/concise_report.md",
+      "details": null
+    }
+  ]
+}

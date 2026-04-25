@@ -1,0 +1,9 @@
+$ /Users/oltazagraxha/Desktop/GreenNet/.venv/bin/python /Users/oltazagraxha/Desktop/GreenNet/experiments/aggregate_results.py --out-dir /Users/oltazagraxha/Desktop/GreenNet/results --output /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_official_acceptance_v1_raw.csv --tag official_acceptance_v1
+
+[stdout]
+[aggregate] results_summary.csv saved to /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_official_acceptance_v1_raw.csv
+
+[stderr]
+
+
+[returncode] 0

@@ -1,0 +1,167 @@
+{
+  "generated_at_utc": "2026-04-10T15:32:08.338615+00:00",
+  "repo_root": "/Users/oltazagraxha/Desktop/GreenNet",
+  "results_dir": "/Users/oltazagraxha/Desktop/GreenNet/results",
+  "runs_dir": "/Users/oltazagraxha/Desktop/GreenNet/runs",
+  "output_dir": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1",
+  "summary_csv": null,
+  "tag": "official_acceptance_v1",
+  "skip_eval": false,
+  "seeds": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4"
+  ],
+  "scenarios": [
+    "custom",
+    "diurnal",
+    "flash_crowd",
+    "hotspot",
+    "normal"
+  ],
+  "policies": [
+    "all_on",
+    "heuristic",
+    "ppo"
+  ],
+  "episodes": 20,
+  "steps": 300,
+  "ppo_model": null,
+  "topology_seed": null,
+  "topology_name": null,
+  "topology_path": null,
+  "traffic_seed": null,
+  "traffic_model": null,
+  "traffic_name": null,
+  "traffic_path": null,
+  "traffic_scenario": null,
+  "traffic_scenario_version": null,
+  "traffic_scenario_intensity": null,
+  "traffic_scenario_duration": null,
+  "traffic_scenario_frequency": null,
+  "stability_reversal_window_steps": null,
+  "stability_reversal_penalty": null,
+  "stability_min_steps_for_assessment": null,
+  "stability_max_transition_rate": null,
+  "stability_max_flap_rate": null,
+  "stability_max_flap_count": null,
+  "power_utilization_sensitive": null,
+  "power_transition_on_joules": null,
+  "power_transition_off_joules": null,
+  "deterministic": true,
+  "baseline_policies": [
+    "all_on",
+    "heuristic"
+  ],
+  "ai_policies": [
+    "ppo"
+  ],
+  "primary_baseline_policy": "all_on",
+  "thresholds": {
+    "energy_target_pct": 15.0,
+    "max_qos_violation_rate_increase_abs": 0.02,
+    "max_delivered_loss_pct": 2.0,
+    "max_dropped_increase_pct": 5.0,
+    "max_delay_increase_pct": 10.0,
+    "max_path_latency_increase_pct": 10.0
+  },
+  "qos_thresholds": {
+    "max_qos_violation_rate_increase_abs": 0.02,
+    "max_delivered_loss_pct": 2.0,
+    "max_dropped_increase_pct": 5.0,
+    "max_delay_increase_pct": 10.0,
+    "max_path_latency_increase_pct": 10.0
+  },
+  "skip_plots": true,
+  "acceptance_matrix": {
+    "matrix_id": "official_acceptance_v1",
+    "matrix_name": "GreenNet Official Acceptance Matrix v1",
+    "matrix_manifest": "/Users/oltazagraxha/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json",
+    "matrix_tag": "official_acceptance_v1",
+    "matrix_policies": [
+      "all_on",
+      "heuristic",
+      "ppo"
+    ],
+    "matrix_seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "matrix_episodes": 20,
+    "matrix_steps": 300,
+    "matrix_case_count": 6,
+    "matrix_cases": [
+      {
+        "id": "small_normal",
+        "label": "Small topology / normal traffic",
+        "scenario": "normal",
+        "topology_name": "small",
+        "topology_path": null,
+        "traffic_name": null,
+        "traffic_path": null,
+        "traffic_model": null,
+        "traffic_scenario": null
+      },
+      {
+        "id": "small_commuter_replay",
+        "label": "Small topology / commuter replay",
+        "scenario": "custom",
+        "topology_name": "small",
+        "topology_path": null,
+        "traffic_name": "regional_ring_commuter_matrices",
+        "traffic_path": null,
+        "traffic_model": null,
+        "traffic_scenario": null
+      },
+      {
+        "id": "medium_diurnal",
+        "label": "Medium topology / diurnal traffic",
+        "scenario": "diurnal",
+        "topology_name": "medium",
+        "topology_path": null,
+        "traffic_name": null,
+        "traffic_path": null,
+        "traffic_model": null,
+        "traffic_scenario": null
+      },
+      {
+        "id": "medium_hotspot",
+        "label": "Medium topology / hotspot traffic",
+        "scenario": "hotspot",
+        "topology_name": "medium",
+        "topology_path": null,
+        "traffic_name": null,
+        "traffic_path": null,
+        "traffic_model": null,
+        "traffic_scenario": null
+      },
+      {
+        "id": "large_flash_crowd",
+        "label": "Large topology / flash crowd",
+        "scenario": "flash_crowd",
+        "topology_name": "large",
+        "topology_path": null,
+        "traffic_name": null,
+        "traffic_path": null,
+        "traffic_model": null,
+        "traffic_scenario": null
+      },
+      {
+        "id": "large_flash_replay",
+        "label": "Large topology / replay flash bursts",
+        "scenario": "custom",
+        "topology_name": "large",
+        "topology_path": null,
+        "traffic_name": "backbone_large_flash_crowd_bursts",
+        "traffic_path": null,
+        "traffic_model": null,
+        "traffic_scenario": null
+      }
+    ]
+  }
+}

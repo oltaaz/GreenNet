@@ -10,21 +10,7 @@ runs/
 results/
 
 
-artifacts/**
 
-!artifacts/locked/
-!artifacts/locked/**
-
-!artifacts/traffic_verify/
-!artifacts/traffic_verify/**
-
-!artifacts/final_pretraffic/
-!artifacts/final_pretraffic/**
-
-!artifacts/sweeps/
-!artifacts/sweeps/**
-
-artifacts/locked/_runs_backup/
 
 
 

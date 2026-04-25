@@ -1,0 +1,282 @@
+{
+  "generated_at_utc": "2026-04-10T15:32:08.338615+00:00",
+  "repo_root": "/Users/oltazagraxha/Desktop/GreenNet",
+  "git_head": "d108e9f55186e748fda7a124547ab73c64fa4285",
+  "python_executable": "/Users/oltazagraxha/Desktop/GreenNet/.venv/bin/python",
+  "python_version": "3.12.12 (main, Oct  9 2025, 11:07:00) [Clang 17.0.0 (clang-1700.4.4.1)]",
+  "platform": "macOS-26.4.1-arm64-arm-64bit",
+  "config": {
+    "generated_at_utc": "2026-04-10T15:32:08.338615+00:00",
+    "repo_root": "/Users/oltazagraxha/Desktop/GreenNet",
+    "results_dir": "/Users/oltazagraxha/Desktop/GreenNet/results",
+    "runs_dir": "/Users/oltazagraxha/Desktop/GreenNet/runs",
+    "output_dir": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1",
+    "summary_csv": null,
+    "tag": "official_acceptance_v1",
+    "skip_eval": false,
+    "seeds": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+    ],
+    "scenarios": [
+      "custom",
+      "diurnal",
+      "flash_crowd",
+      "hotspot",
+      "normal"
+    ],
+    "policies": [
+      "all_on",
+      "heuristic",
+      "ppo"
+    ],
+    "episodes": 20,
+    "steps": 300,
+    "ppo_model": null,
+    "topology_seed": null,
+    "topology_name": null,
+    "topology_path": null,
+    "traffic_seed": null,
+    "traffic_model": null,
+    "traffic_name": null,
+    "traffic_path": null,
+    "traffic_scenario": null,
+    "traffic_scenario_version": null,
+    "traffic_scenario_intensity": null,
+    "traffic_scenario_duration": null,
+    "traffic_scenario_frequency": null,
+    "stability_reversal_window_steps": null,
+    "stability_reversal_penalty": null,
+    "stability_min_steps_for_assessment": null,
+    "stability_max_transition_rate": null,
+    "stability_max_flap_rate": null,
+    "stability_max_flap_count": null,
+    "power_utilization_sensitive": null,
+    "power_transition_on_joules": null,
+    "power_transition_off_joules": null,
+    "deterministic": true,
+    "baseline_policies": [
+      "all_on",
+      "heuristic"
+    ],
+    "ai_policies": [
+      "ppo"
+    ],
+    "primary_baseline_policy": "all_on",
+    "thresholds": {
+      "energy_target_pct": 15.0,
+      "max_qos_violation_rate_increase_abs": 0.02,
+      "max_delivered_loss_pct": 2.0,
+      "max_dropped_increase_pct": 5.0,
+      "max_delay_increase_pct": 10.0,
+      "max_path_latency_increase_pct": 10.0
+    },
+    "qos_thresholds": {
+      "max_qos_violation_rate_increase_abs": 0.02,
+      "max_delivered_loss_pct": 2.0,
+      "max_dropped_increase_pct": 5.0,
+      "max_delay_increase_pct": 10.0,
+      "max_path_latency_increase_pct": 10.0
+    },
+    "skip_plots": true,
+    "acceptance_matrix": {
+      "matrix_id": "official_acceptance_v1",
+      "matrix_name": "GreenNet Official Acceptance Matrix v1",
+      "matrix_manifest": "/Users/oltazagraxha/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json",
+      "matrix_tag": "official_acceptance_v1",
+      "matrix_policies": [
+        "all_on",
+        "heuristic",
+        "ppo"
+      ],
+      "matrix_seeds": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "matrix_episodes": 20,
+      "matrix_steps": 300,
+      "matrix_case_count": 6,
+      "matrix_cases": [
+        {
+          "id": "small_normal",
+          "label": "Small topology / normal traffic",
+          "scenario": "normal",
+          "topology_name": "small",
+          "topology_path": null,
+          "traffic_name": null,
+          "traffic_path": null,
+          "traffic_model": null,
+          "traffic_scenario": null
+        },
+        {
+          "id": "small_commuter_replay",
+          "label": "Small topology / commuter replay",
+          "scenario": "custom",
+          "topology_name": "small",
+          "topology_path": null,
+          "traffic_name": "regional_ring_commuter_matrices",
+          "traffic_path": null,
+          "traffic_model": null,
+          "traffic_scenario": null
+        },
+        {
+          "id": "medium_diurnal",
+          "label": "Medium topology / diurnal traffic",
+          "scenario": "diurnal",
+          "topology_name": "medium",
+          "topology_path": null,
+          "traffic_name": null,
+          "traffic_path": null,
+          "traffic_model": null,
+          "traffic_scenario": null
+        },
+        {
+          "id": "medium_hotspot",
+          "label": "Medium topology / hotspot traffic",
+          "scenario": "hotspot",
+          "topology_name": "medium",
+          "topology_path": null,
+          "traffic_name": null,
+          "traffic_path": null,
+          "traffic_model": null,
+          "traffic_scenario": null
+        },
+        {
+          "id": "large_flash_crowd",
+          "label": "Large topology / flash crowd",
+          "scenario": "flash_crowd",
+          "topology_name": "large",
+          "topology_path": null,
+          "traffic_name": null,
+          "traffic_path": null,
+          "traffic_model": null,
+          "traffic_scenario": null
+        },
+        {
+          "id": "large_flash_replay",
+          "label": "Large topology / replay flash bursts",
+          "scenario": "custom",
+          "topology_name": "large",
+          "topology_path": null,
+          "traffic_name": "backbone_large_flash_crowd_bursts",
+          "traffic_path": null,
+          "traffic_model": null,
+          "traffic_scenario": null
+        }
+      ]
+    }
+  },
+  "outputs": {
+    "summary_csv": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_official_acceptance_v1.csv",
+    "summary_by_seed_csv": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_by_seed_official_acceptance_v1.csv",
+    "leaderboard_csv": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/leaderboard_official_acceptance_v1.csv",
+    "leaderboard_source_csv": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/leaderboard_source_official_acceptance_v1.csv",
+    "final_evaluation_csv": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation/final_evaluation_summary.csv",
+    "final_evaluation_json": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation/final_evaluation_summary.json",
+    "final_evaluation_report": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation/final_evaluation_report.md",
+    "research_question_summary_csv": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/research_question_summary.csv",
+    "concise_report": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/report/concise_report.md",
+    "plots_dir": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/plots"
+  },
+  "steps": [
+    {
+      "name": "run_matrix",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/logs/01_run_matrix.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/results"
+      ],
+      "command": "/Users/oltazagraxha/Desktop/GreenNet/.venv/bin/python /Users/oltazagraxha/Desktop/GreenNet/experiments/run_matrix.py --seeds 0,1,2,3,4 --scenarios custom,diurnal,flash_crowd,hotspot,normal --policies all_on,heuristic,ppo --episodes 20 --steps 300 --out-dir /Users/oltazagraxha/Desktop/GreenNet/results --runs-dir /Users/oltazagraxha/Desktop/GreenNet/runs --tag official_acceptance_v1 --matrix-manifest /Users/oltazagraxha/Desktop/GreenNet/configs/acceptance_matrices/official_acceptance_v1.json --deterministic --routing-baseline min_hop_single_path --routing-link-cost-model unit",
+      "details": null
+    },
+    {
+      "name": "aggregate_results",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/logs/02_aggregate_results.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_official_acceptance_v1_raw.csv"
+      ],
+      "command": "/Users/oltazagraxha/Desktop/GreenNet/.venv/bin/python /Users/oltazagraxha/Desktop/GreenNet/experiments/aggregate_results.py --out-dir /Users/oltazagraxha/Desktop/GreenNet/results --output /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_official_acceptance_v1_raw.csv --tag official_acceptance_v1",
+      "details": null
+    },
+    {
+      "name": "filter_summary",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/logs/03_filter_summary.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_official_acceptance_v1.csv"
+      ],
+      "command": "Filter authoritative results_summary.csv to the requested seeds/scenarios/policies.",
+      "details": null
+    },
+    {
+      "name": "write_by_seed_summary",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/logs/04_write_by_seed_summary.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_by_seed_official_acceptance_v1.csv"
+      ],
+      "command": "_write_by_seed(/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_official_acceptance_v1.csv, /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_by_seed_official_acceptance_v1.csv)",
+      "details": null
+    },
+    {
+      "name": "make_leaderboard",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/logs/05_make_leaderboard.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/leaderboard_official_acceptance_v1.csv",
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/leaderboard_source_official_acceptance_v1.csv"
+      ],
+      "command": "/Users/oltazagraxha/Desktop/GreenNet/.venv/bin/python /Users/oltazagraxha/Desktop/GreenNet/experiments/make_leaderboard.py --summary /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_official_acceptance_v1.csv --output /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/leaderboard_official_acceptance_v1.csv --output-source /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/leaderboard_source_official_acceptance_v1.csv",
+      "details": null
+    },
+    {
+      "name": "final_evaluation",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/logs/06_final_evaluation.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation/final_evaluation_summary.csv",
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation/final_evaluation_summary.json",
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation/final_evaluation_report.md"
+      ],
+      "command": "/Users/oltazagraxha/Desktop/GreenNet/.venv/bin/python /Users/oltazagraxha/Desktop/GreenNet/experiments/final_evaluation.py --summary-csv /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_official_acceptance_v1.csv --baseline-policies all_on,heuristic --ai-policies ppo --primary-baseline-policy all_on --energy-target-pct 15.0 --max-qos-violation-rate-increase 0.02 --max-delivered-loss-pct 2.0 --max-dropped-increase-pct 5.0 --max-delay-increase-pct 10.0 --max-path-latency-increase-pct 10.0 --output-dir /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/final_evaluation",
+      "details": null
+    },
+    {
+      "name": "write_research_question_summary",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/logs/07_research_question_summary.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/research_question_summary.csv"
+      ],
+      "command": "Write /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/research_question_summary.csv",
+      "details": null
+    },
+    {
+      "name": "export_plots",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/logs/08_export_plots.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/plots"
+      ],
+      "command": "Export plot-ready CSV files and optional PNG plots.",
+      "details": null
+    },
+    {
+      "name": "write_concise_report",
+      "status": "ok",
+      "log_path": "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/logs/09_write_concise_report.log",
+      "outputs": [
+        "/Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/report/concise_report.md"
+      ],
+      "command": "Write /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/report/concise_report.md",
+      "details": null
+    }
+  ]
+}

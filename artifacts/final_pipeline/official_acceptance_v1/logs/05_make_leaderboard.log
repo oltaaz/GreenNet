@@ -1,0 +1,10 @@
+$ /Users/oltazagraxha/Desktop/GreenNet/.venv/bin/python /Users/oltazagraxha/Desktop/GreenNet/experiments/make_leaderboard.py --summary /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/results_summary_official_acceptance_v1.csv --output /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/leaderboard_official_acceptance_v1.csv --output-source /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/leaderboard_source_official_acceptance_v1.csv
+
+[stdout]
+[leaderboard] wrote: /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/leaderboard_official_acceptance_v1.csv (rows=15)
+[leaderboard] wrote source: /Users/oltazagraxha/Desktop/GreenNet/artifacts/final_pipeline/official_acceptance_v1/summary/leaderboard_source_official_acceptance_v1.csv (rows=90)
+
+[stderr]
+
+
+[returncode] 0

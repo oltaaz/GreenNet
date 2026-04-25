@@ -1,0 +1,7 @@
+{
+  "rows_written": 90,
+  "non_ok_rows": [],
+  "expected_combinations": 90
+}
+[status] ok
+Filter authoritative results_summary.csv to the requested seeds/scenarios/policies.
